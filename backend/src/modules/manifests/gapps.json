@@ -1,0 +1,18 @@
+{
+  "id": "gapps",
+  "nombre": "Google Apps (GApps)",
+  "esTerceroNoLibre": true,
+  "licencia": "Propietaria (Google)",
+  "origen": "https://opengapps.org",
+  "descripcion": "Instala servicios de Google Play (Play Store, Play Services) en la instancia.",
+  "queToca": [
+    "modifica /system dentro del contenedor",
+    "descarga un paquete de un servidor externo (no controlado por este proyecto)",
+    "registra un Android ID (GSF) que hay que dar de alta a mano en https://www.google.com/android/uncertified dentro de las 48hs del primer boot, o Google bloquea el acceso a GApps en esa instancia"
+  ],
+  "compatibleCon": {
+    "androidVersion": [11, 15],
+    "gpuMode": ["host", "guest"]
+  },
+  "version": 1
+}
