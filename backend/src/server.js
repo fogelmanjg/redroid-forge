@@ -8,6 +8,7 @@ app.use(express.static(path.join(__dirname, '..', '..', 'frontend')));
 app.use('/api/instances', require('./routes/instances'));
 app.use('/api/doctor', require('./routes/doctor'));
 app.use('/api/images', require('./routes/images'));
+app.use('/api/modules', require('./routes/modules'));
 
 const PORT = process.env.PORT || 8080;
 app.listen(PORT, () => {
