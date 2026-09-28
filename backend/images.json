@@ -7,6 +7,7 @@
     "gpuMode": "host",
     "needsHwsimWifi": false,
     "hasGapps": true,
+    "hwEncCapable": false,
     "soporte": "comunidad",
     "notaSoporte": "Arranca y corre instancias basicas. No probado con hwenc, nvidia ni wifi falso."
   },
@@ -18,8 +19,9 @@
     "gpuMode": "host",
     "needsHwsimWifi": false,
     "hasGapps": true,
+    "hwEncCapable": false,
     "soporte": "oficial",
-    "notaSoporte": "Version con soporte oficial: hwenc, nvidia, wifi falso y device profile validados."
+    "notaSoporte": "Wifi falso y device profile validados. hwenc/nvidia (redroid-hwenc/redroid-nvidia) NO estan en esta imagen -- son trabajo posterior a esta build (jul/2026), falta un rebuild de AOSP+Docker con el componente Codec2 real para tenerlo."
   },
   {
     "id": "android-15-jg-wifi-v3",
@@ -29,7 +31,8 @@
     "gpuMode": "host",
     "needsHwsimWifi": true,
     "hasGapps": true,
+    "hwEncCapable": false,
     "soporte": "oficial",
-    "notaSoporte": "Version con soporte oficial: hwenc, nvidia, wifi falso y device profile validados."
+    "notaSoporte": "Wifi falso y device profile validados. hwenc/nvidia (redroid-hwenc/redroid-nvidia) NO estan en esta imagen -- son trabajo posterior a esta build (jul/2026), falta un rebuild de AOSP+Docker con el componente Codec2 real para tenerlo."
   }
 ]

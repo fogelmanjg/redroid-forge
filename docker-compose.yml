@@ -13,5 +13,6 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       - /lib/modules:/lib/modules:ro
       - /dev/binderfs:/dev/binderfs
+      - /dev/vaapi-helper:/dev/vaapi-helper
       - ./backend/data:/app/backend/data
     restart: unless-stopped

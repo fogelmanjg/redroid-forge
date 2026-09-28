@@ -1,3 +1,5 @@
 node_modules/
 backend/data/*.json
 !backend/data/.gitkeep
+.claude/
+backend/native/vaapi-daemon/daemon

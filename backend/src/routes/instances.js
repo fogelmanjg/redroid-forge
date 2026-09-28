@@ -2,6 +2,7 @@ const express = require('express');
 const runtime = require('../lib/dockerRuntime');
 const binder = require('../lib/binder');
 const hwsimWifi = require('../lib/hwsimWifi');
+const hwAccel = require('../lib/hwAccel');
 const androidIdentity = require('../lib/androidIdentity');
 const store = require('../lib/store');
 const portAllocator = require('../lib/portAllocator');
@@ -27,6 +28,14 @@ function scheduleWifiFixes(instance) {
   hwsimWifi.scheduleHwsimWifiFix(instance.id, instance.containerId);
   hwsimWifi.scheduleWifiConnectedFix(instance.id, instance.containerId);
   hwsimWifi.scheduleEth0RoutingFix(instance.id, instance.containerId);
+}
+
+// A diferencia de scheduleWifiFixes (fire-and-forget, corre despues del
+// start), esto tiene que resolver ANTES del start: el bind del socket ya
+// tiene que existir en el HostConfig del contenedor al crearlo/arrancarlo.
+async function ensureHwAccelIfNeeded(instance) {
+  if (!instance.hwEncCapable) return;
+  await hwAccel.ensureDaemonRunning();
 }
 
 async function withRuntimeStatus(instance) {
@@ -56,6 +65,7 @@ router.post('/', async (req, res) => {
     const slot = binder.nextFreeSlot();
     const volumeName = `redroid-forge-${name}`;
     const binds = [...binder.binderBinds(slot), `${volumeName}:/data`];
+    if (img.hwEncCapable) binds.push(hwAccel.daemonBind());
 
     const cmd = [
       `androidboot.redroid_width=${width || 720}`,
@@ -84,12 +94,14 @@ router.post('/', async (req, res) => {
       volumeName,
       needsHwsimWifi: !!img.needsHwsimWifi,
       hasGapps: !!img.hasGapps,
+      hwEncCapable: !!img.hwEncCapable,
       androidId: null,
       androidIdRegisteredAt: null,
       createdAt: new Date().toISOString(),
     };
     store.upsert(instance);
 
+    await ensureHwAccelIfNeeded(instance);
     await runtime.start(containerId);
     scheduleWifiFixes(instance);
     if (instance.hasGapps) androidIdentity.scheduleFetch(instance.id);
@@ -105,6 +117,7 @@ router.post('/:id/start', async (req, res) => {
   const instance = store.get(req.params.id);
   if (!instance) return res.status(404).json({ error: 'Instancia no encontrada' });
   try {
+    await ensureHwAccelIfNeeded(instance);
     await runtime.start(instance.containerId);
     scheduleWifiFixes(instance);
     res.json(await withRuntimeStatus(instance));
@@ -128,6 +141,7 @@ router.post('/:id/restart', async (req, res) => {
   const instance = store.get(req.params.id);
   if (!instance) return res.status(404).json({ error: 'Instancia no encontrada' });
   try {
+    await ensureHwAccelIfNeeded(instance);
     await runtime.restart(instance.containerId);
     scheduleWifiFixes(instance);
     res.json(await withRuntimeStatus(instance));

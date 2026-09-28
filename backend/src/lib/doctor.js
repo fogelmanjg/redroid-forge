@@ -3,6 +3,7 @@ const { execFile } = require('child_process');
 const { promisify } = require('util');
 const runtime = require('./dockerRuntime');
 const store = require('./store');
+const hwAccel = require('./hwAccel');
 const images = require('../../images.json');
 
 const ANDROID_ID_DEADLINE_HOURS = 48;
@@ -151,6 +152,32 @@ function checkGpu() {
   };
 }
 
+async function checkHwAccel() {
+  const anyNeedsHwEnc = images.some((i) => i.hwEncCapable);
+  const vendor = await hwAccel.detectGpuVendor();
+
+  if (!hwAccel.encodeSupported(vendor)) {
+    return {
+      status: anyNeedsHwEnc ? 'warn' : 'ok',
+      detail: `GPU detectada: ${vendor}. El daemon VA-API de hwenc (encode) solo soporta AMD/Intel -- en NVIDIA hace falta el componente separado redroid-nvidia (Fase 2 paso 2 del roadmap), todavia no portado. Las instancias con imagenes de gpuMode=soft o sin hwEncCapable no se ven afectadas.`,
+    };
+  }
+
+  try {
+    await hwAccel.ensureDaemonRunning();
+    return {
+      status: 'ok',
+      detail: `GPU ${vendor} detectada, daemon VA-API (hwenc) corriendo en ${hwAccel.SOCKET_PATH}.`,
+    };
+  } catch (e) {
+    return {
+      status: 'fail',
+      detail: `GPU ${vendor} detectada pero el daemon VA-API no pudo iniciar: ${e.message}`,
+      fix: 'Confirmar que el binario esta compilado (backend/native/vaapi-daemon/daemon, ver su Makefile) y que /dev/dri es accesible desde el contenedor del backend.',
+    };
+  }
+}
+
 async function checkImagesPresent() {
   const localTags = await runtime.listLocalImageTags();
   return images.map((img) => {
@@ -219,10 +246,11 @@ function checkAndroidIdRegistration() {
 }
 
 async function runAll() {
-  const [dockerSocket, hwsim, imagePresence] = await Promise.all([
+  const [dockerSocket, hwsim, imagePresence, hwAccelCheck] = await Promise.all([
     checkDockerSocket(),
     checkHwsim(),
     checkImagesPresent(),
+    checkHwAccel(),
   ]);
 
   const checks = [
@@ -233,6 +261,7 @@ async function runAll() {
     { id: 'data-fs', label: 'Filesystem de /app/data', ...checkDataVolumeFilesystem() },
     { id: 'hwsim', label: 'mac80211_hwsim (WiFi falso)', ...hwsim },
     { id: 'gpu', label: 'GPU / /dev/dri', ...checkGpu() },
+    { id: 'hw-accel', label: 'Aceleracion HW (hwenc, VA-API)', ...hwAccelCheck },
     ...imagePresence,
     ...checkAndroidIdRegistration(),
   ];
