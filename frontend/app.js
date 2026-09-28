@@ -5,6 +5,7 @@ function switchTab(name) {
   $$('.tab-btn').forEach((b) => b.classList.toggle('active', b.dataset.tab === name));
   $$('.tab').forEach((t) => t.classList.toggle('active', t.id === `tab-${name}`));
   if (name === 'instances') loadInstances();
+  if (name === 'modules') loadModules();
   if (name === 'doctor') loadDoctor();
 }
 
@@ -17,7 +18,13 @@ async function api(path, opts) {
   });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
-    throw new Error(body.error || `HTTP ${res.status}`);
+    // status + modules (manifests pendientes de aceptar, ver moduleGate.js
+    // en el backend) van en el error para que el llamador pueda mostrar el
+    // modal de contrato sin pedirlo de nuevo.
+    throw Object.assign(new Error(body.error || `HTTP ${res.status}`), {
+      status: res.status,
+      modules: body.modules,
+    });
   }
   if (res.status === 204) return null;
   return res.json();
@@ -122,6 +129,35 @@ async function loadInstances() {
   }
 }
 
+function moduleStatusBadge(m) {
+  if (m.accepted) return `<span class="status-dot ok"></span> Aceptado (v${m.acceptedVersion})`;
+  if (m.acceptedVersion) return `<span class="status-dot warn"></span> Version vieja aceptada (v${m.acceptedVersion}), actual es v${m.version}`;
+  return '<span class="status-dot warn"></span> Pendiente de aceptar';
+}
+
+async function loadModules() {
+  const list = $('#modules-list');
+  list.innerHTML = '<li>Cargando...</li>';
+  try {
+    const modules = await api('/modules');
+    list.innerHTML = '';
+    for (const m of modules) {
+      const li = document.createElement('li');
+      li.className = 'doctor-item';
+      const tipo = m.esTerceroNoLibre ? 'Tercero no libre' : 'Propio del proyecto';
+      li.innerHTML = `
+        <div class="label">${moduleStatusBadge(m)} — <strong>${m.nombre}</strong> <span class="muted">(${tipo}, v${m.version})</span></div>
+        <p class="detail">${m.descripcion}</p>
+        <p class="detail muted">Compatible con: Android ${m.compatibleCon.androidVersion.join('/')} · GPU ${m.compatibleCon.gpuMode.join('/')}</p>
+        <ul>${m.queToca.map((item) => `<li>${item}</li>`).join('')}</ul>
+      `;
+      list.appendChild(li);
+    }
+  } catch (e) {
+    list.innerHTML = `<li>Error: ${e.message}</li>`;
+  }
+}
+
 async function loadDoctor() {
   const list = $('#doctor-list');
   list.innerHTML = '<li>Corriendo diagnostico...</li>';
@@ -144,6 +180,7 @@ async function loadDoctor() {
 }
 
 $('#btn-refresh-instances').addEventListener('click', loadInstances);
+$('#btn-refresh-modules').addEventListener('click', loadModules);
 $('#btn-run-doctor').addEventListener('click', loadDoctor);
 
 const dialog = $('#new-instance-dialog');
@@ -166,19 +203,33 @@ $('#btn-new-instance').addEventListener('click', async () => {
 });
 $('#btn-cancel-new-instance').addEventListener('click', () => dialog.close());
 
-$('#new-instance-form').addEventListener('submit', async (e) => {
-  e.preventDefault();
-  const form = e.target;
-  const name = form.name.value.trim();
-  const imageId = form.imageId.value;
+// Gate de la Fase 4: si el backend responde 428 con los manifests pendientes
+// (ver moduleGate.js), muestra el/los modal(es) de contrato genérico antes de
+// reintentar -- el backend nunca crea la instancia sin esa aceptación.
+async function createInstance(name, imageId, form) {
   try {
     await api('/instances', { method: 'POST', body: JSON.stringify({ name, imageId }) });
     dialog.close();
     form.reset();
     await loadInstances();
   } catch (err) {
+    if (err.status === 428 && err.modules) {
+      const allAccepted = await Contracts.ensureAccepted(err.modules);
+      if (allAccepted) {
+        await createInstance(name, imageId, form);
+      }
+      return;
+    }
     alert(err.message);
   }
+}
+
+$('#new-instance-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const form = e.target;
+  const name = form.name.value.trim();
+  const imageId = form.imageId.value;
+  await createInstance(name, imageId, form);
 });
 
 loadInstances();
