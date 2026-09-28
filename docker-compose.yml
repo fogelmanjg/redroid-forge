@@ -6,9 +6,9 @@ services:
     pid: host
     network_mode: host
     environment:
-      - PORT=8080
-      - ADB_PORT_START=5555
-      - ADB_PORT_END=5595
+      - PORT=${PORT:-8080}
+      - ADB_PORT_START=${ADB_PORT_START:-5555}
+      - ADB_PORT_END=${ADB_PORT_END:-5595}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - /lib/modules:/lib/modules:ro

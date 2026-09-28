@@ -23,20 +23,26 @@
 **Gate:** `docker compose up` en el repo nuevo da el mismo comportamiento
 que `redroid-manager` hoy, corriendo desde la nueva ubicación.
 
-## Fase 1 — Redroid 15 como único objetivo
+## Fase 1 — Redroid 15 como tier oficial + tiers de soporte
 
-**Dificultad: Baja** — es restringir opciones y sumar checks ya
-documentados, no descubrir nada nuevo.
+**Dificultad: Baja** — es sumar un campo de metadata y checks ya
+documentados, no descubrir nada nuevo. Ya no es "restringir", es declarar.
 
 **Pasos:**
-1. Restringir la creación de instancias a Redroid 15 únicamente.
-2. Portar el checklist de prerrequisitos de host (binder legacy/binderfs,
+1. Agregar el campo `soporte` (`oficial`/`comunidad`) a cada entrada de
+   `backend/images.json`.
+2. Agregar `compatibleCon` (versión de Android, modo GPU) al schema del
+   manifest de módulo (sección 5 de `REQUIREMENTS.md`).
+3. Portar el checklist de prerrequisitos de host (binder legacy/binderfs,
    `loop`, `ext4`) como checks nuevos del Doctor.
-3. Validar el ciclo de vida completo de una instancia Redroid 15 con la
+4. Mostrar el tier de la imagen elegida en la UI (badge oficial/comunidad).
+5. Validar el ciclo de vida completo de una instancia Redroid 15 con la
    app nueva sola.
 
-**Gate:** ciclo de vida completo de una instancia Redroid 15 funcionando de
-punta a punta solo con la nueva app.
+**Gate:** ciclo de vida completo de una instancia Redroid 15 (tier oficial)
+funcionando de punta a punta solo con la nueva app; una instancia de
+Redroid 11/13 (tier comunidad) se puede seguir creando sin bloqueo, con el
+tier visible en la UI.
 
 ## Fase 2 — Aceleración por hardware (hwenc + nvidia)
 

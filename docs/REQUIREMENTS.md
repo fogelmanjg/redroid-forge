@@ -23,8 +23,10 @@ tablero de control.
 
 ## 2. Alcance v1
 
-- **Solo Redroid 15.** No se mantiene soporte para Android 11 ni versiones
-  anteriores en esta primera versión.
+- **Redroid 15 es la única versión con soporte oficial** (todos los módulos
+  validados: hwenc, nvidia, wifi falso, device profile). No es una
+  restricción dura de código — otras versiones no quedan bloqueadas, quedan
+  marcadas como **comunidad** (ver "Tiers de soporte por imagen" más abajo).
 - Se porta **todo lo ya probado y funcionando**, no se rehace desde cero:
   - Encode por hardware VA-API (AMD/Intel) + decode NVDEC — de `redroid-hwenc`.
   - Aceleración 3D (Venus-proxy) + encode NVENC para NVIDIA — de `redroid-nvidia`.
@@ -36,6 +38,28 @@ tablero de control.
     `ext4`) documentado para Debian/btrfs.
   - Todo lo reutilizable del módulo redroid de `plenum-redroid` (misma lógica
     de reuso que con `jg-dashboard`, ver sección 4).
+
+### Tiers de soporte por imagen (no una restricción dura)
+
+Redroid 11 y 13 andan para algunas cosas (11 arranca y corre instancias
+básicas; 13 se probó y funciona en `gpuMode: guest`), pero sin el resto de
+los módulos (hwenc, nvidia, wifi falso) validados sobre esas versiones —
+nunca se probaron ahí. En vez de bloquear su uso, el catálogo y los módulos
+declaran esto como metadata, no como código especial por versión:
+
+- Cada imagen en el catálogo (`backend/images.json`, ya tiene
+  `androidVersion`/`gpuMode` por entrada) suma un campo **`soporte`**:
+  `"oficial"` (solo Redroid 15) o `"comunidad"` (11, 13, cualquier otra que
+  se agregue), con una nota corta de qué se sabe que anda (ej. "13: solo
+  `gpuMode: guest`, sin hwenc ni wifi falso probados").
+- Cada módulo (manifest de la sección 5) declara **con qué es
+  compatible** (versión de Android, modo GPU). Si la imagen elegida no
+  cumple, el módulo simplemente no se ofrece para esa instancia — nunca se
+  rompe en silencio, se explica por qué no está disponible.
+- La UI/Doctor muestra el tier de la imagen elegida de forma visible (ej.
+  "✅ Oficial" vs "⚠️ Comunidad, sin soporte completo") — mismo criterio de
+  transparencia que rige el resto del proyecto: nunca ocultar limitaciones.
+
 - **CIFI (watchdog de reapertura automática) migra de Redroid 11 a Redroid
   15.** Se había dejado en 11 por menor consumo de recursos frente al encoder
   por software que exigía 15 en ese momento — pero con aceleración 3D +
@@ -135,12 +159,18 @@ descripcion: "Instala servicios de Google Play en la instancia."
 queToca:
   - "modifica /system dentro del contenedor"
   - "descarga un paquete de un servidor externo (no controlado por este proyecto)"
+compatibleCon:
+  androidVersion: [15]
+  gpuMode: ["host", "guest"]
 version: 1
 ```
 
 El backend solo ejecuta la integración del módulo si existe un registro de
 "usuario aceptó manifest versión N"; si el manifest sube de versión (cambia
-el disclaimer o lo que toca), se pide aceptación de nuevo.
+el disclaimer o lo que toca), se pide aceptación de nuevo. `compatibleCon`
+es lo que decide si el módulo se ofrece o no para la imagen elegida (ver
+"Tiers de soporte por imagen" en la sección 2) — si la imagen no cumple, el
+módulo no aparece como opción, con una explicación de por qué.
 
 ### Extensibilidad: módulos definidos por el usuario
 
@@ -236,7 +266,7 @@ para v1.
 | Nombre | `redroid-forge` (verificado libre en GitHub, npm y Docker Hub — se descartó `jg-redroid-manager` por demasiado personal, y `redroid-manager` a secas por estar tomado y ser un espacio ya poblado) |
 | Ubicación | Repo nuevo standalone en GitHub (no dentro de Plenum) |
 | Visibilidad | **Público** (implicado por el objetivo de popularidad — ver sección 8) |
-| Versión de Android objetivo | Solo Redroid 15 en v1 |
+| Versión de Android objetivo | Redroid 15 = tier "oficial"; 11/13 = tier "comunidad", no bloqueadas (sección 2) |
 | `jg-dashboard` | Deja de tener redroid integrado, pasa a consumir `redroid-forge`; código viejo convive hasta que el nuevo esté completo |
 | `plenum-redroid` | Misma política que `jg-dashboard` |
 | `jg-escritorio` | Fuera de alcance, no relevante para este proyecto |
