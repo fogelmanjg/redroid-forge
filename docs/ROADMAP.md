@@ -30,14 +30,17 @@ documentados, no descubrir nada nuevo. Ya no es "restringir", es declarar.
 
 **Pasos:**
 1. Agregar el campo `soporte` (`oficial`/`comunidad`) a cada entrada de
-   `backend/images.json`.
-2. Agregar `compatibleCon` (versión de Android, modo GPU) al schema del
-   manifest de módulo (sección 5 de `REQUIREMENTS.md`).
-3. Portar el checklist de prerrequisitos de host (binder legacy/binderfs,
-   `loop`, `ext4`) como checks nuevos del Doctor.
-4. Mostrar el tier de la imagen elegida en la UI (badge oficial/comunidad).
-5. Validar el ciclo de vida completo de una instancia Redroid 15 con la
-   app nueva sola.
+   `backend/images.json`. ✅ hecho.
+2. Portar el checklist de prerrequisitos de host (binder legacy/binderfs,
+   `loop`, `ext4`) como checks nuevos del Doctor. ✅ hecho (ext4 nuevo; el
+   fix de binderfs ahora también documenta el fallback de binder legacy).
+3. Mostrar el tier de la imagen elegida en la UI (badge oficial/comunidad).
+   ✅ hecho, en el selector de creación de instancia.
+4. Validar que el catálogo y el Doctor devuelven el tier correcto contra
+   Docker real, y que ninguna imagen queda bloqueada por versión. ✅ hecho.
+5. `compatibleCon` en el manifest de módulo (versión de Android, modo GPU)
+   **se difiere a la Fase 4** — no tiene sentido construirlo antes de que
+   exista el propio sistema de manifest/contrato que va a leerlo.
 
 **Gate:** ciclo de vida completo de una instancia Redroid 15 (tier oficial)
 funcionando de punta a punta solo con la nueva app; una instancia de
@@ -91,6 +94,9 @@ alcance, solo hay que construirlo.
    bloqueo de ejecución sin aceptación vigente.
 4. Retrofit: pasar GApps, Magisk, WiFi falso, device profile, modo GPU,
    CPU/RAM a este contrato genérico en vez de toggles ad hoc.
+5. Implementar `compatibleCon` (diferido de la Fase 1): el manifest declara
+   versión de Android/modo GPU compatible, y el backend no ofrece el módulo
+   si la imagen elegida no cumple.
 
 **Gate:** activar GApps (caso de referencia no libre) exige leer y aceptar
 un contrato generado desde manifest antes de que el backend ejecute nada.

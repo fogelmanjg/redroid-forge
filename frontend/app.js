@@ -153,7 +153,11 @@ $('#btn-new-instance').addEventListener('click', async () => {
   try {
     const images = await api('/images');
     select.innerHTML = images
-      .map((img) => `<option value="${img.id}" ${img.present ? '' : 'disabled'}>${img.label}${img.present ? '' : ' (no presente localmente)'}</option>`)
+      .map((img) => {
+        const tier = img.soporte === 'oficial' ? '✅ oficial' : '⚠️ comunidad';
+        const notPresent = img.present ? '' : ' (no presente localmente)';
+        return `<option value="${img.id}" ${img.present ? '' : 'disabled'} title="${img.notaSoporte || ''}">${img.label} — ${tier}${notPresent}</option>`;
+      })
       .join('');
   } catch (e) {
     select.innerHTML = `<option>Error: ${e.message}</option>`;

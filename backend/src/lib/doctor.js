@@ -36,8 +36,46 @@ function checkBinderfs() {
       '  sudo mount -t binder binder /dev/binderfs',
       'Para que sobreviva un reboot, agregar a /etc/fstab:',
       '  binder /dev/binderfs binder nofail 0 0',
+      '',
+      'Si esto falla o el kernel no tiene CONFIG_ANDROID_BINDERFS (chequear con',
+      '"grep BINDERFS /boot/config-$(uname -r)" en el HOST — kernels Debian trixie',
+      'no lo tienen), hace falta el modulo binder_linux legacy en su lugar:',
+      '  # /etc/modprobe.d/binder-redroid.conf',
+      '  options binder_linux devices=binder,hwbinder,vndbinder,binder1,hwbinder1,vndbinder1',
+      '  # /etc/modules-load.d/binder-redroid.conf',
+      '  binder_linux',
+      'Requiere reboot si el modulo ya estaba cargado con otra config (rmmod suele',
+      'fallar con "Device or resource busy").',
     ].join('\n'),
   };
+}
+
+function checkExt4Module() {
+  // Las APEX de Android son imagenes ext4 montadas por loop device. En un host
+  // 100% btrfs el kernel puede no tener ext4 cargado nunca (no aparece ni en
+  // /proc/filesystems) -> mount() falla con ENODEV y el sintoma real se ve
+  // como fallos en cascada de vold/apexd-bootstrap con mensajes enganosos tipo
+  // "cannot execv(...): No such file or directory".
+  try {
+    const filesystems = fs.readFileSync('/proc/filesystems', 'utf-8');
+    if (/\bext4\b/.test(filesystems)) {
+      return { status: 'ok', detail: 'Modulo ext4 disponible (listado en /proc/filesystems).' };
+    }
+    return {
+      status: 'fail',
+      detail: 'ext4 no aparece en /proc/filesystems del host — las APEX de Android (montadas por loop) van a fallar con ENODEV.',
+      fix: [
+        'Ejecutar en el HOST:',
+        '  sudo modprobe ext4',
+        '  echo ext4 | sudo tee /etc/modules-load.d/ext4-redroid.conf',
+        'Sintoma tipico si esto falta: el boot de Android muere en segundos con',
+        'errores de "cannot execv" en vold/apexd-bootstrap que parecen binarios',
+        'faltantes pero en realidad es la particion APEX que nunca se monto.',
+      ].join('\n'),
+    };
+  } catch (e) {
+    return { status: 'warn', detail: `No se pudo leer /proc/filesystems: ${e.message}` };
+  }
 }
 
 function checkLoopDevices() {
@@ -117,13 +155,15 @@ async function checkImagesPresent() {
   const localTags = await runtime.listLocalImageTags();
   return images.map((img) => {
     const present = localTags.has(img.dockerImage);
+    const soporte = img.soporte === 'oficial' ? '✅ oficial' : '⚠️ comunidad';
+    const notaSoporte = img.notaSoporte ? ` ${img.notaSoporte}` : '';
     return {
       id: `image-${img.id}`,
       label: `Imagen presente: ${img.label}`,
       status: present ? 'ok' : 'fail',
       detail: present
-        ? `${img.dockerImage} ya esta en el Docker local.`
-        : `${img.dockerImage} no esta en el Docker local.`,
+        ? `${img.dockerImage} ya esta en el Docker local. Soporte: ${soporte}.${notaSoporte}`
+        : `${img.dockerImage} no esta en el Docker local. Soporte: ${soporte}.${notaSoporte}`,
       fix: present ? undefined : [
         'Si la imagen fue exportada en otra PC:',
         `  docker save ${img.dockerImage} | gzip > ${img.id}.tar.gz`,
@@ -189,6 +229,7 @@ async function runAll() {
     { id: 'docker-socket', label: 'Socket de Docker', ...dockerSocket },
     { id: 'binderfs', label: 'binderfs montado', ...checkBinderfs() },
     { id: 'loop-devices', label: 'Loop devices', ...checkLoopDevices() },
+    { id: 'ext4-module', label: 'Modulo ext4 (montaje de APEX por loop)', ...checkExt4Module() },
     { id: 'data-fs', label: 'Filesystem de /app/data', ...checkDataVolumeFilesystem() },
     { id: 'hwsim', label: 'mac80211_hwsim (WiFi falso)', ...hwsim },
     { id: 'gpu', label: 'GPU / /dev/dri', ...checkGpu() },
