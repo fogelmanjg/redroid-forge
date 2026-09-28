@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>redroid-forge</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header>
+    <h1>redroid-forge</h1>
+    <nav>
+      <button class="tab-btn active" data-tab="instances">Instancias</button>
+      <button class="tab-btn" data-tab="doctor">Doctor</button>
+      <button class="tab-btn" data-tab="help">Ayuda</button>
+    </nav>
+  </header>
+
+  <main>
+    <section id="tab-instances" class="tab active">
+      <div class="toolbar">
+        <button id="btn-new-instance">+ Nueva instancia</button>
+        <button id="btn-refresh-instances">Actualizar</button>
+      </div>
+      <table id="instances-table">
+        <thead>
+          <tr>
+            <th>Nombre</th><th>Imagen</th><th>Estado</th><th>ADB</th><th>Android ID (GApps)</th><th>Acciones</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </section>
+
+    <section id="tab-doctor" class="tab">
+      <div class="toolbar">
+        <button id="btn-run-doctor">Correr diagnostico</button>
+      </div>
+      <ul id="doctor-list" class="doctor-list"></ul>
+    </section>
+
+    <section id="tab-help" class="tab">
+      <h2>Como llevar la imagen a esta PC</h2>
+      <p>Si la imagen redroid se armo en otra maquina:</p>
+      <pre>docker save &lt;imagen&gt; | gzip &gt; imagen.tar.gz
+# copiar el archivo a esta PC, despues:
+gunzip -c imagen.tar.gz | docker load</pre>
+      <p>Si esta pusheada a un registry propio: <code>docker pull &lt;tu-registry&gt;/&lt;imagen&gt;</code></p>
+
+      <h2>Requisitos de host</h2>
+      <ul>
+        <li>Docker instalado y corriendo.</li>
+        <li>binderfs montado en <code>/dev/binderfs</code> (ver tab Doctor para el comando exacto).</li>
+        <li><code>mac80211_hwsim</code> disponible si vas a usar imagenes con WiFi falso.</li>
+        <li>GPU + drivers si queres aceleracion (<code>gpuMode=host</code>).</li>
+      </ul>
+
+      <h2>Levantar este manager</h2>
+      <pre>docker compose up -d --build</pre>
+      <p>La tab Doctor va a decirte exactamente que falta configurar en este host, con el comando para arreglarlo.</p>
+    </section>
+  </main>
+
+  <dialog id="new-instance-dialog">
+    <form id="new-instance-form" method="dialog">
+      <h2>Nueva instancia</h2>
+      <label>Nombre <input name="name" required pattern="[a-z0-9-]+" placeholder="mi-instancia" /></label>
+      <label>Imagen
+        <select name="imageId" id="image-select"></select>
+      </label>
+      <div class="dialog-actions">
+        <button type="button" id="btn-cancel-new-instance">Cancelar</button>
+        <button type="submit">Crear</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script src="app.js"></script>
+</body>
+</html>
