@@ -7,7 +7,9 @@ sin depender de ninguna otra infraestructura.
 > Proyecto en construcción — consolida en un solo lugar varios proyectos separados
 > (`redroid-manager`, `redroid-hwenc`, `redroid-nvidia`, y lo que hoy vive repartido en
 > `jg-dashboard`/`plenum-redroid`). Ver [`docs/REQUIREMENTS.md`](docs/REQUIREMENTS.md) (qué y por
-> qué) y [`docs/ROADMAP.md`](docs/ROADMAP.md) (en qué orden) para el panorama completo. Lo que
+> qué), [`docs/ARQUITECTURA.md`](docs/ARQUITECTURA.md) (cómo encajan las piezas — imagen base,
+> módulos, y en qué momento del ciclo de vida de una instancia se toca cada uno) y
+> [`docs/ROADMAP.md`](docs/ROADMAP.md) (en qué orden) para el panorama completo. Lo que
 > hay hoy corresponde a la **Fase 0** del roadmap: el port íntegro de `redroid-manager`.
 
 Resuelve dos cosas:
@@ -112,7 +114,8 @@ backend/src/routes/      instances, doctor, images
 backend/images.json      catálogo de imágenes redroid disponibles
 backend/data/            estado persistente (instances.json)
 frontend/                frontend vanilla (sin build step)
-docs/                     REQUIREMENTS.md (qué y por qué) y ROADMAP.md (en qué orden)
+docs/                     REQUIREMENTS.md (qué y por qué), ARQUITECTURA.md (cómo encajan
+                          las piezas) y ROADMAP.md (en qué orden)
 ```
 
 ## Créditos y atribución

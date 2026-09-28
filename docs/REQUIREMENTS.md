@@ -219,6 +219,15 @@ para v1.
 - Ningún atajo legal por comodidad: si un módulo no es libre, pasa por el
   flujo de contrato + consentimiento sin excepción, sin importar cuánto
   complique la UX.
+- **La regla es sobre el origen del binario, no sobre el empaquetado.** No
+  alcanza con "no lo metemos en una imagen Docker" si el binario de todas
+  formas sale de algo que aloja `redroid-forge` (un tarball propio, una
+  imagen derivada, o — el caso real encontrado el 28/09 — el propio árbol
+  fuente de AOSP que compilamos). El componente no libre siempre tiene que
+  descargarse de su fuente oficial real, en el momento en que el usuario lo
+  pide. Ver `ARQUITECTURA.md` para el modelo completo (las 6 etapas del
+  ciclo de vida de una instancia) y el caso concreto de `vendor/gapps`
+  mezclado en el source de AOSP que motivó esta aclaración.
 
 ## 7. Autenticación e integración con Plenum / jg-dashboard
 

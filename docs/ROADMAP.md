@@ -77,9 +77,19 @@ AMD/Intel y uno NVIDIA reales.
    (`redroid.service.ts`) al nuevo backend.
 2. Confirmar que el WiFi falso portado en la Fase 0 sigue íntegro.
 3. Validar aplicar/revertir un perfil (ej. `samsung`) desde la UI nueva.
+4. **Arreglar la race condition conocida de `ensureHwsimWifi`** (confirmada
+   en `jg-dashboard/redroid.service.ts`, ver contexto abajo): al portar la
+   lógica no alcanza con copiar el archivo tal cual, hay que agregar un
+   lock/mutex propio alrededor de la asignación de phys (o encolar
+   `scheduleHwsimWifiFix` dentro de la cola de arranque en vez de dispararlo
+   fire-and-forget), para que dos instancias nunca lean `iw dev` en
+   simultáneo sin haber reclamado antes los pares que van a usar. Sin esto
+   el bug original (reinicios simultáneos dejan una instancia sin radios
+   hwsim) se vuelve a portar junto con el resto del código.
 
 **Gate:** el spoof de perfil se puede aplicar/revertir desde la UI nueva,
-con los archivos de `build.prop` correctos según la imagen.
+con los archivos de `build.prop` correctos según la imagen, y reiniciar dos
+o más instancias con WiFi falso al mismo tiempo no deja ninguna sin radios.
 
 ## Fase 4 — Sistema de contrato de módulo (genérico)
 
@@ -117,6 +127,12 @@ de `adb` tras reboot) que hay que no reintroducir al migrarlo.
 3. Portar el watchdog de CIFI sobre Redroid 15 usando esta convención, en
    reemplazo del script de cron + `flock` actual.
 4. Validar en vivo varios días sin reaparición del bug de lock heredado.
+5. Segundo piloto, mismo mecanismo: el watchdog persistente de reconexión
+   de WiFi falso (hoy vive hardcodeado en `jg-dashboard`, ver
+   `claimHwsimPhyPair`/`wifiWatchdogs` en `redroid.service.ts`) migra a
+   módulo-script en vez de portarse tal cual. Sirve además como el primer
+   caso donde un comportamiento (mantener la conexión o no) queda como
+   configuración del módulo por instancia, no un switch global de código.
 
 **Gate:** CIFI corre como módulo dentro de `redroid-forge` (pause/
 resume/status desde la app, no edición manual de cron), validado en vivo
