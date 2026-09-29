@@ -1,30 +1,14 @@
-const fs = require('fs');
 const path = require('path');
+const { readJsonArray, writeJsonArray } = require('./jsonFileStore');
 
-const DATA_DIR = path.join(__dirname, '..', '..', 'data');
-const STORE_FILE = path.join(DATA_DIR, 'instances.json');
-
-function ensureDataDir() {
-  if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
-}
+const STORE_FILE = path.join(__dirname, '..', '..', 'data', 'instances.json');
 
 function readAll() {
-  ensureDataDir();
-  if (!fs.existsSync(STORE_FILE)) return [];
-  try {
-    return JSON.parse(fs.readFileSync(STORE_FILE, 'utf-8'));
-  } catch {
-    return [];
-  }
+  return readJsonArray(STORE_FILE);
 }
 
-// Escritura atómica (tmp + rename) para no dejar el archivo corrupto si el
-// proceso muere a mitad de un write.
 function writeAll(instances) {
-  ensureDataDir();
-  const tmp = `${STORE_FILE}.tmp`;
-  fs.writeFileSync(tmp, JSON.stringify(instances, null, 2));
-  fs.renameSync(tmp, STORE_FILE);
+  writeJsonArray(STORE_FILE, instances);
 }
 
 function upsert(instance) {

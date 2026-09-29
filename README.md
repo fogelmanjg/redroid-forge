@@ -8,7 +8,8 @@ sin depender de ninguna otra infraestructura.
 > (`redroid-manager`, `redroid-hwenc`, `redroid-nvidia`, y lo que hoy vive repartido en
 > `jg-dashboard`/`plenum-redroid`). Ver [`docs/REQUIREMENTS.md`](docs/REQUIREMENTS.md) (qué y por
 > qué) y [`docs/ROADMAP.md`](docs/ROADMAP.md) (en qué orden) para el panorama completo. Lo que
-> hay hoy corresponde a la **Fase 0** del roadmap: el port íntegro de `redroid-manager`.
+> hay hoy corresponde a las **Fases 0, 1 y 4** del roadmap: el port íntegro de
+> `redroid-manager`, tiers de soporte por imagen, y el sistema de contrato de módulo genérico.
 
 Resuelve dos cosas:
 
@@ -32,6 +33,18 @@ La app ayuda a que no se pase por alto:
   para registrarlo y un botón "Ya lo registré" una vez hecho.
 - La tab **Doctor** lista como pendiente (⚠️, y ❌ si ya venció el plazo) cualquier instancia con
   GApps sin registrar.
+
+## Módulos de terceros / no libres: contrato antes de activarlos
+
+Todo lo que no es 100% software libre (GApps, Magisk) o depende de una elección del host
+(WiFi falso, y a futuro device profile/modo GPU/CPU-RAM) se declara con un **manifest**
+versionado (`backend/src/modules/manifests/*.json`) en vez de tener su propia lógica de
+habilitación. El backend nunca crea ni arranca una instancia que requiera un módulo sin una
+aceptación vigente de su manifest — si falta, responde `428` con el contrato pendiente, el
+frontend lo muestra (mismo diálogo genérico para todos, `frontend/contracts.js`), y solo tras
+aceptarlo se reintenta. Ver la tab **Módulos** en la UI y la sección 5 de
+[`docs/REQUIREMENTS.md`](docs/REQUIREMENTS.md) para el detalle completo (incluye
+`compatibleCon`: un módulo no se ofrece si la imagen elegida no lo soporta).
 
 ## Requisitos del host
 
@@ -106,12 +119,15 @@ sin necesitar una PC de por medio.
 ## Estructura
 
 ```
-backend/src/server.js   Express, sirve /api/* y el frontend estático
-backend/src/lib/         dockerRuntime, binder, hwsimWifi, androidIdentity, doctor, store, portAllocator
-backend/src/routes/      instances, doctor, images
-backend/images.json      catálogo de imágenes redroid disponibles
-backend/data/            estado persistente (instances.json)
-frontend/                frontend vanilla (sin build step)
+backend/src/server.js    Express, sirve /api/* y el frontend estático
+backend/src/lib/          dockerRuntime, binder, hwsimWifi, androidIdentity, doctor, store,
+                           portAllocator, moduleManifests, moduleAcceptance, moduleGate
+backend/src/routes/       instances, doctor, images, modules
+backend/src/modules/      manifests/*.json — manifest de cada módulo (sección 5 de REQUIREMENTS.md)
+backend/images.json       catálogo de imágenes redroid disponibles
+backend/data/             estado persistente (instances.json, module-acceptances.json)
+backend/test/             tests del sistema de contrato de módulo (node --test, sin deps nuevas)
+frontend/                 frontend vanilla (sin build step); contracts.js = modal de contrato genérico
 docs/                     REQUIREMENTS.md (qué y por qué) y ROADMAP.md (en qué orden)
 ```
 

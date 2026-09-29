@@ -88,15 +88,35 @@ un modal genérico, y un registro de versión aceptada. No hay ambigüedad de
 alcance, solo hay que construirlo.
 
 **Pasos:**
-1. Definir el schema del manifest (sección 5 de `REQUIREMENTS.md`).
-2. Construir el modal de contrato genérico que lo renderiza (frontend).
+1. Definir el schema del manifest (sección 5 de `REQUIREMENTS.md`). ✅ hecho
+   — validador a mano (sin sumar dependencia de JSON Schema) en
+   `backend/src/lib/moduleManifests.js`, un manifest JSON por módulo en
+   `backend/src/modules/manifests/`.
+2. Construir el modal de contrato genérico que lo renderiza (frontend). ✅
+   hecho — `frontend/contracts.js`, un solo diálogo para los 6 módulos.
 3. Implementar el registro de aceptación por versión en el backend, y el
-   bloqueo de ejecución sin aceptación vigente.
+   bloqueo de ejecución sin aceptación vigente. ✅ hecho —
+   `backend/src/lib/moduleAcceptance.js` (registro) +
+   `backend/src/lib/moduleGate.js` (bloqueo), enganchado en
+   create/start/restart de `routes/instances.js`. Sin auth todavía (Fase 6),
+   la aceptación vale para toda la instalación, no por usuario.
 4. Retrofit: pasar GApps, Magisk, WiFi falso, device profile, modo GPU,
-   CPU/RAM a este contrato genérico en vez de toggles ad hoc.
+   CPU/RAM a este contrato genérico en vez de toggles ad hoc. ⚠️ parcial —
+   GApps y WiFi falso (que sí tenían lógica de habilitación ad hoc atada a
+   flags de imagen) están retrofiteados y gateados; Magisk suma su flag
+   (`hasMagisk`) y pasa por el mismo gate por primera vez. Device profile,
+   modo GPU y CPU/RAM **no tenían ninguna lógica de ejecución portada
+   todavía** (siguen pendientes de las Fases 2/3) — tienen su manifest y ya
+   son consultables via `GET /api/modules` (incluyendo `compatibleCon`),
+   listos para engancharse a `moduleGate` en cuanto exista su ejecución real.
 5. Implementar `compatibleCon` (diferido de la Fase 1): el manifest declara
    versión de Android/modo GPU compatible, y el backend no ofrece el módulo
-   si la imagen elegida no cumple.
+   si la imagen elegida no cumple. ✅ hecho —
+   `moduleManifests.isCompatible`/`incompatibilityReason`, reutilizando los
+   campos `androidVersion`/`gpuMode` que el catálogo ya tiene desde la Fase
+   1 (sin duplicar esa metadata). `moduleGate.check` lo aplica antes de
+   crear/arrancar; `GET /api/modules?imageId=` lo expone para que un futuro
+   selector de módulos opcionales lo consulte.
 
 **Gate:** activar GApps (caso de referencia no libre) exige leer y aceptar
 un contrato generado desde manifest antes de que el backend ejecute nada.

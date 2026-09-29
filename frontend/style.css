@@ -121,3 +121,20 @@ dialog {
 
 dialog form { display: flex; flex-direction: column; gap: 0.8rem; min-width: 280px; }
 .dialog-actions { display: flex; justify-content: flex-end; gap: 0.5rem; }
+
+#contract-dialog { max-width: 480px; }
+#contract-dialog h2 { margin: 0; }
+#contract-dialog h3 { margin: 0.2rem 0 0; font-size: 0.9rem; }
+#contract-dialog ul { margin: 0; padding-left: 1.2rem; font-size: 0.9rem; }
+.contract-disclaimer {
+  background: rgba(184, 134, 11, 0.15);
+  border: 1px solid var(--warn);
+  border-radius: 6px;
+  padding: 0.5rem 0.7rem;
+  font-size: 0.85rem;
+  margin: 0;
+}
+.contract-meta { margin: 0; font-size: 0.85rem; opacity: 0.85; }
+.contract-checkbox { display: flex; align-items: flex-start; gap: 0.5rem; font-size: 0.9rem; }
+
+.tab-intro { font-size: 0.9rem; opacity: 0.85; max-width: 60ch; }

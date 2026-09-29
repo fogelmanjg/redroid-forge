@@ -1,0 +1,15 @@
+{
+  "id": "gpu-mode",
+  "nombre": "Modo GPU (host / guest)",
+  "esTerceroNoLibre": false,
+  "descripcion": "Elige si la instancia usa aceleracion 3D real del host (host, requiere drivers de GPU compatibles y expone /dev/dri al contenedor) o renderizado por software dentro del contenedor (guest, mas compatible pero mas lento).",
+  "queToca": [
+    "en modo host, da acceso a los dispositivos de GPU del host al contenedor (Privileged:true)",
+    "el modo elegido queda fijo para la instancia — cambiarlo requiere recrearla"
+  ],
+  "compatibleCon": {
+    "androidVersion": [11, 13, 15],
+    "gpuMode": ["host", "guest"]
+  },
+  "version": 1
+}

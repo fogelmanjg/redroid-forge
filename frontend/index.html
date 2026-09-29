@@ -11,6 +11,7 @@
     <h1>redroid-forge</h1>
     <nav>
       <button class="tab-btn active" data-tab="instances">Instancias</button>
+      <button class="tab-btn" data-tab="modules">Módulos</button>
       <button class="tab-btn" data-tab="doctor">Doctor</button>
       <button class="tab-btn" data-tab="help">Ayuda</button>
     </nav>
@@ -30,6 +31,19 @@
         </thead>
         <tbody></tbody>
       </table>
+    </section>
+
+    <section id="tab-modules" class="tab">
+      <p class="tab-intro">
+        Catálogo de módulos declarados por manifest (sección 5 de
+        <code>docs/REQUIREMENTS.md</code>). Los que no son 100% software
+        libre necesitan aceptar su contrato antes de que el backend los
+        active — ver la columna Estado.
+      </p>
+      <div class="toolbar">
+        <button id="btn-refresh-modules">Actualizar</button>
+      </div>
+      <ul id="modules-list" class="doctor-list"></ul>
     </section>
 
     <section id="tab-doctor" class="tab">
@@ -75,6 +89,28 @@ gunzip -c imagen.tar.gz | docker load</pre>
     </form>
   </dialog>
 
+  <dialog id="contract-dialog">
+    <form id="contract-form" method="dialog">
+      <h2 id="contract-title"></h2>
+      <p id="contract-disclaimer" class="contract-disclaimer" hidden></p>
+      <p id="contract-descripcion"></p>
+      <p id="contract-licencia" class="contract-meta" hidden></p>
+      <p id="contract-origen" class="contract-meta" hidden></p>
+      <p id="contract-compatible" class="contract-meta" hidden></p>
+      <h3>Qué toca / permisos que declara</h3>
+      <ul id="contract-quetoca"></ul>
+      <label class="contract-checkbox">
+        <input type="checkbox" id="contract-checkbox" required />
+        Leí y entiendo lo anterior, y acepto activar este módulo.
+      </label>
+      <div class="dialog-actions">
+        <button type="button" id="btn-cancel-contract">Cancelar</button>
+        <button type="submit" id="btn-accept-contract">Aceptar</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script src="contracts.js"></script>
   <script src="app.js"></script>
 </body>
 </html>
