@@ -3,13 +3,22 @@ const acceptance = require('./moduleAcceptance');
 
 // Que modulos exige una imagen del catalogo, a partir de las mismas flags
 // que ya tiene backend/images.json (hasGapps/needsHwsimWifi) mas hasMagisk
-// (sumada en esta fase). No hay lista separada de "modulos por imagen": se
-// deriva de la metadata que el catalogo ya declara.
+// (sumada en Fase 4) y hwEncCapable (sumada en Fase 5, ver moduleRunner.js).
+// No hay lista separada de "modulos por imagen": se deriva de la metadata
+// que el catalogo ya declara.
+//
+// hwEncCapable sigue el mismo criterio "requerido si la imagen lo declara"
+// que hasGapps/hasMagisk/needsHwsimWifi, no opt-in aparte: si la imagen dice
+// que trae el componente de hwenc, el usuario tiene que ver y aceptar su
+// contrato (aunque sea "propio", ver seccion 5 de REQUIREMENTS.md) antes de
+// que el backend lo integre -- ninguna imagen del catalogo hoy pone esta
+// flag en true, asi que en la practica esto todavia no bloquea nada real.
 function requiredModuleIdsForImage(img) {
   const ids = [];
   if (img.hasGapps) ids.push('gapps');
   if (img.hasMagisk) ids.push('magisk');
   if (img.needsHwsimWifi) ids.push('wifi-falso');
+  if (img.hwEncCapable) ids.push('hwenc');
   return ids;
 }
 

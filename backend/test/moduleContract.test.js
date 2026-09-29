@@ -30,10 +30,30 @@ const imgOficialConGappsYMagisk = { id: 'fixture-15-full', androidVersion: 15, g
 const imgSinModulos = { id: 'fixture-15-plain', androidVersion: 15, gpuMode: 'host', hasGapps: false, hasMagisk: false, needsHwsimWifi: false };
 const imgGappsAndroid11 = { id: 'fixture-11-gapps', androidVersion: 11, gpuMode: 'host', hasGapps: true, hasMagisk: false, needsHwsimWifi: false };
 const imgGappsGuestNoSoportado = { id: 'fixture-99-gapps-guest', androidVersion: 99, gpuMode: 'guest', hasGapps: true, hasMagisk: false, needsHwsimWifi: false };
+const imgHwEncCapable = {
+  id: 'fixture-15-hwenc', androidVersion: 15, gpuMode: 'host', hasGapps: false, hasMagisk: false, needsHwsimWifi: false, hwEncCapable: true,
+};
 
-test('moduleManifests: el catalogo tiene los 6 modulos de la seccion 5 de REQUIREMENTS.md', () => {
+test('moduleManifests: el catalogo tiene los 6 modulos de la seccion 5 de REQUIREMENTS.md + hwenc', () => {
+  // hwenc (Fase 5) vive en su propia carpeta (backend/src/modules/hwenc/
+  // manifest.json), no en backend/src/modules/manifests/ como los otros
+  // seis -- este test tambien cubre que moduleManifests.loadAll() descubre
+  // las dos fuentes (ver comentario ahi).
   const ids = manifests.list().map((m) => m.id).sort();
-  assert.deepEqual(ids, ['cpu-ram', 'device-profile', 'gapps', 'gpu-mode', 'magisk', 'wifi-falso']);
+  assert.deepEqual(ids, ['cpu-ram', 'device-profile', 'gapps', 'gpu-mode', 'hwenc', 'magisk', 'wifi-falso']);
+});
+
+test('moduleManifests: hwenc se descubre desde su propia carpeta, con etapa/entry', () => {
+  const hwenc = manifests.get('hwenc');
+  assert.ok(hwenc, 'el manifest de hwenc tendria que existir');
+  assert.deepEqual(hwenc.etapa, [3, 4, 5, 6]);
+  assert.equal(hwenc.entry, './integrate.js');
+});
+
+test('moduleManifests.moduleDir: resuelve la carpeta de un modulo plano y de uno con carpeta propia', () => {
+  assert.match(manifests.moduleDir('gapps'), /modules[/\\]manifests$/);
+  assert.match(manifests.moduleDir('hwenc'), /modules[/\\]hwenc$/);
+  assert.equal(manifests.moduleDir('no-existe'), null);
 });
 
 test('moduleManifests: rechaza un manifest sin los campos requeridos', () => {
@@ -131,5 +151,26 @@ test('gate de la Fase 4: GApps queda bloqueado hasta aceptar su manifest, despue
   acceptance.record({ moduleId: 'gapps', version: antesDeAceptar.modules[0].version, instanceName: 'mi-instancia-gapps' });
 
   const despuesDeAceptar = moduleGate.check(imgGappsAndroid11);
+  assert.equal(despuesDeAceptar.ok, true);
+}));
+
+// Fase 5: hwenc pasa a requerirse igual que gapps/magisk/wifi-falso cuando la
+// imagen declara hwEncCapable=true (ver moduleGate.requiredModuleIdsForImage)
+// -- mismo flujo de consentimiento generico, aunque hwenc sea un modulo
+// propio (esTerceroNoLibre=false) y no de terceros.
+test('moduleGate.requiredModuleIdsForImage: suma "hwenc" cuando la imagen declara hwEncCapable', () => {
+  assert.deepEqual(moduleGate.requiredModuleIdsForImage(imgHwEncCapable), ['hwenc']);
+  assert.deepEqual(moduleGate.requiredModuleIdsForImage(imgSinModulos), []);
+});
+
+test('moduleGate.check: hwenc queda bloqueado hasta aceptar su manifest, igual que gapps/magisk', () => withTempAcceptanceStore(() => {
+  const antesDeAceptar = moduleGate.check(imgHwEncCapable);
+  assert.equal(antesDeAceptar.ok, false);
+  assert.equal(antesDeAceptar.httpStatus, 428);
+  assert.equal(antesDeAceptar.modules[0].id, 'hwenc');
+
+  acceptance.record({ moduleId: 'hwenc', version: antesDeAceptar.modules[0].version });
+
+  const despuesDeAceptar = moduleGate.check(imgHwEncCapable);
   assert.equal(despuesDeAceptar.ok, true);
 }));
