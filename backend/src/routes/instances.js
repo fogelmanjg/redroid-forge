@@ -29,17 +29,17 @@ function findImage(imageId) {
 // aceptacion vigente de su manifest, o no es compatible con la imagen
 // elegida (compatibleCon). Se llama antes de tocar Docker para nada: "el
 // backend ejecuta el script/integra el componente" solo despues de esto.
-function assertModulesReady(img) {
-  const result = moduleGate.check(img);
+async function assertModulesReady(img) {
+  const result = await moduleGate.check(img);
   if (!result.ok) {
     throw Object.assign(new Error(result.error), { httpStatus: result.httpStatus, modules: result.modules });
   }
 }
 
 // Uso estricto (create): la imagen tiene que existir en el catalogo.
-function resolveImageAndGate(imageId) {
+async function resolveImageAndGate(imageId) {
   const img = findImage(imageId);
-  assertModulesReady(img);
+  await assertModulesReady(img);
   return img;
 }
 
@@ -47,13 +47,13 @@ function resolveImageAndGate(imageId) {
 // imagen ya no esta en el catalogo (se pudo editar images.json despues de
 // crear la instancia), no bloquea el arranque -- antes de este gate,
 // start/restart nunca dependian del catalogo.
-function revalidateModulesIfImageKnown(instance) {
+async function revalidateModulesIfImageKnown(instance) {
   const img = catalog.find((i) => i.id === instance.imageId);
   if (!img) {
     console.warn(`[instances] "${instance.imageId}" ya no esta en el catalogo -- se omite la revalidacion de modulos para ${instance.id}`);
     return;
   }
-  assertModulesReady(img);
+  await assertModulesReady(img);
 }
 
 // requiredModuleIds se calcula una vez al crear (a partir de la imagen que
@@ -62,8 +62,17 @@ function revalidateModulesIfImageKnown(instance) {
 // (moduleRunner.js) sin depender de que la imagen siga en el catalogo mas
 // adelante, mismo criterio que ya usaba el campo `hwEncCapable` guardado por
 // instancia antes de esta fase.
+//
+// Fallback para instancias creadas ANTES de esta fase (no tienen
+// requiredModuleIds persistido): en vez de asumir "ningun modulo requerido"
+// (que saltearia ensureHostInfraReady/scheduleRuntimeFixups en silencio para
+// una instancia que si los necesita, ej. hwEncCapable=true), se recalcula
+// desde el catalogo con el mismo criterio que revalidateModulesIfImageKnown
+// -- solo si la imagen ya no esta en el catalogo se resigna a [].
 function requiredModuleIdsFor(instance) {
-  return instance.requiredModuleIds || [];
+  if (instance.requiredModuleIds) return instance.requiredModuleIds;
+  const img = catalog.find((i) => i.id === instance.imageId);
+  return img ? moduleGate.requiredModuleIdsForImage(img) : [];
 }
 
 // e.modules (lista de manifests pendientes de aceptar, ver moduleGate.js) se
@@ -103,7 +112,7 @@ router.post('/', async (req, res) => {
       throw httpError(`Ya existe una instancia llamada "${name}"`, 409);
     }
 
-    const img = resolveImageAndGate(imageId);
+    const img = await resolveImageAndGate(imageId);
     // Que modulos requiere esta imagen (moduleGate.js) -- se persiste en la
     // instancia (ver requiredModuleIdsFor()) para que start/restart no
     // dependan de que la imagen siga en el catalogo despues.
@@ -140,9 +149,17 @@ router.post('/', async (req, res) => {
 
     // Etapa 4: entre create() y start() -- unica ventana en la que /vendor es
     // escribible (ver docs/ARQUITECTURA.md). Si un modulo falla aca, no se
-    // sigue a start(): mejor un contenedor creado a medio inyectar y visible
-    // en el error que arrancar con la mitad de los modulos sin aplicarse.
-    await moduleRunner.integrate(requiredModuleIds, containerId);
+    // sigue a start(): mejor limpiar el contenedor recien creado que dejarlo
+    // huerfano -- todavia no se llego a store.upsert(), asi que sin este
+    // cleanup quedaria invisible para el DELETE de la API (habria que
+    // borrarlo a mano con `docker rm`).
+    try {
+      await moduleRunner.integrate(requiredModuleIds, containerId);
+    } catch (e) {
+      await runtime.remove(containerId, { force: true }).catch(() => {});
+      await runtime.removeVolume(volumeName).catch(() => {});
+      throw e;
+    }
 
     const instance = {
       id: containerId,
@@ -186,7 +203,7 @@ router.post('/:id/start', async (req, res) => {
     // Revalida el contrato en cada arranque, no solo al crear: si el
     // manifest de un modulo que esta instancia usa subio de version desde
     // que se creo, el proximo arranque queda bloqueado hasta reaceptar.
-    revalidateModulesIfImageKnown(instance);
+    await revalidateModulesIfImageKnown(instance);
     const requiredModuleIds = requiredModuleIdsFor(instance);
     await moduleRunner.ensureHostInfraReady(requiredModuleIds);
     await runtime.start(instance.containerId);
@@ -213,7 +230,7 @@ router.post('/:id/restart', async (req, res) => {
   const instance = store.get(req.params.id);
   if (!instance) return res.status(404).json({ error: 'Instancia no encontrada' });
   try {
-    revalidateModulesIfImageKnown(instance);
+    await revalidateModulesIfImageKnown(instance);
     const requiredModuleIds = requiredModuleIdsFor(instance);
     await moduleRunner.ensureHostInfraReady(requiredModuleIds);
     await runtime.restart(instance.containerId);
