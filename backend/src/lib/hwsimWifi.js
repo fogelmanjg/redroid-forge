@@ -54,11 +54,41 @@ function parsePhyIfacePairs(iwDevOutput) {
 // lecturas de 'iw dev' en vuelo al mismo tiempo.
 let hwsimClaimTail = Promise.resolve();
 
+// Techo de cada intento en la cola: sin esto, un solo comando de host
+// colgado dentro de la seccion critica (ej. un `iw phy ... set netns` que
+// nunca vuelve por una llamada netlink trabada) deja `hwsimClaimTail` sin
+// avanzar nunca, y CUALQUIER instancia futura que necesite wifi falso en
+// este host queda esperando para siempre -- un solo comando colgado pasaba
+// de "esa instancia se jode este boot" a "el host entero deja de poder
+// arrancar wifi falso hasta reiniciar el backend" (hallazgo real de code
+// review, PR #3). El intento abandonado puede seguir corriendo en el fondo
+// (no hay forma generica de matar lo que `fn` haya lanzado por dentro,
+// incluye tanto execFileAsync como runtime.exec via dockerode) -- riesgo
+// residual aceptado: un reclamo tardio corriendo en paralelo con el
+// siguiente, mucho mas acotado que el deadlock total que reemplaza.
+const HWSIM_CLAIM_TIMEOUT_MS = Number(process.env.HWSIM_CLAIM_TIMEOUT_MS) || 30000;
+
 function runHwsimClaim(fn) {
-  const attempt = hwsimClaimTail.then(fn);
-  // El tail sigue avanzando aunque este intento haya fallado -- un reclamo
-  // rechazado nunca debe trabar a los que vienen atras en la cola. `attempt`
-  // (lo que se devuelve al llamador) si conserva el resultado/error real.
+  const attempt = hwsimClaimTail.then(() => new Promise((resolve, reject) => {
+    let settled = false;
+    // Si fn() gana la carrera (el caso normal, casi siempre) el timer tiene
+    // que cancelarse -- sin esto queda un setTimeout de 30s vivo por cada
+    // reclamo exitoso, sosteniendo el event loop y, si nadie mas lo referencia,
+    // terminando en un reject() sin handler mas tarde (unhandled rejection).
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      reject(new Error(`runHwsimClaim: intento colgado mas de ${HWSIM_CLAIM_TIMEOUT_MS}ms, se abandona para no trabar la cola`));
+    }, HWSIM_CLAIM_TIMEOUT_MS);
+    fn().then(
+      (value) => { if (settled) return; settled = true; clearTimeout(timer); resolve(value); },
+      (err) => { if (settled) return; settled = true; clearTimeout(timer); reject(err); },
+    );
+  }));
+  // El tail sigue avanzando aunque este intento haya fallado o se haya
+  // abandonado por timeout -- un reclamo rechazado nunca debe trabar a los
+  // que vienen atras en la cola. `attempt` (lo que se devuelve al llamador)
+  // si conserva el resultado/error real.
   hwsimClaimTail = attempt.then(() => {}, () => {});
   return attempt;
 }
@@ -70,19 +100,40 @@ function _resetHwsimClaimTailForTests() {
   hwsimClaimTail = Promise.resolve();
 }
 
+// Instancias que efectivamente tienen phys de hwsim asignados en este
+// momento -- no alcanza con "el contenedor esta corriendo" (ver mas abajo).
+// Se agrega cuando claimAndAssignHwsimPair() mueve al menos un phy al netns
+// de esa instancia; una entrada vieja de un contenedor que ya murio se
+// descarta sola la proxima vez que se la consulta (containerId nunca se
+// reusa entre instancias, asi que no hay riesgo de falso positivo mientras
+// tanto).
+const instancesHoldingHwsim = new Set();
+
 // Para decidir si es seguro recargar mac80211_hwsim cuando 'iw dev' no
 // muestra ningun phy libre: si de verdad todos estan en uso por otra
 // instancia que sigue corriendo, recargar el modulo se los robaria (ver la
 // nuance portada de jg-dashboard/redroid.service.ts). Solo se recarga si
-// NINGUNA otra instancia con wifi falso esta corriendo ahora mismo.
+// NINGUNA otra instancia con wifi falso esta usando hwsim ahora mismo.
+//
+// OJO: "usando hwsim" es instancesHoldingHwsim, no "el contenedor esta
+// corriendo" (info.State.Running) -- dos instancias A y B pueden arrancar
+// casi juntas, ambas con su contenedor ya "Running" en Docker antes de que
+// ninguna haya reclamado nada (el reclamo esta serializado por
+// runHwsimClaim). Si A revisa esto mientras el reclamo de B TODAVIA esta en
+// cola detras del de A, contar a B como "corriendo" alcanzaba para que A
+// concluyera mal "alguien mas esta usando hwsim" y se salteara un reload que
+// podria haber liberado radios para las dos (hallazgo real de code review,
+// PR #3).
 async function anyOtherInstanceUsingHwsim(excludeContainerId) {
   const others = store.readAll().filter((i) => i.needsHwsimWifi && i.containerId && i.containerId !== excludeContainerId);
   for (const other of others) {
+    if (!instancesHoldingHwsim.has(other.containerId)) continue;
     try {
       const info = await runtime.inspect(other.containerId);
       if (info.State.Running) return true;
+      instancesHoldingHwsim.delete(other.containerId); // murio, ya no tiene nada asignado
     } catch {
-      // el contenedor ya no existe -- no cuenta como "en uso"
+      instancesHoldingHwsim.delete(other.containerId); // el contenedor ya no existe
     }
   }
   return false;
@@ -139,6 +190,12 @@ async function claimAndAssignHwsimPair(instanceId, containerId, pid) {
   for (const [i, pair] of [a, b].entries()) {
     try {
       await execFileAsync('iw', ['phy', pair.phy, 'set', 'netns', pid]);
+      // A partir de aca el phy ya esta fisicamente en el netns de esta
+      // instancia (independiente de si el renombrado de la interfaz debajo
+      // sale bien) -- se marca ya mismo, no solo si renamedOk termina en
+      // true, porque instancesHoldingHwsim existe para "no le robes este
+      // phy a esta instancia", no para "el renombrado le salio perfecto".
+      instancesHoldingHwsim.add(containerId);
       if (pair.iface !== targetNames[i]) {
         let ok = false;
         for (let attempt = 0; attempt < 5 && !ok; attempt++) {

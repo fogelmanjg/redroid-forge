@@ -19,7 +19,7 @@ test('DEVICE_PROFILES: incluye "samsung" con los 5 campos que building el finger
 
 test('buildDeviceProfileScript: perfil nombrado genera "mount -o remount,rw" y un sed por archivo de build.prop', () => {
   const script = deviceProfile.buildDeviceProfileScript(deviceProfile.DEVICE_PROFILES.samsung, 15);
-  assert.match(script, /^mount -o remount,rw \//);
+  assert.match(script, /^ok=1\nmount -o remount,rw \/ \|\| ok=0/);
   for (const file of deviceProfile.BUILD_PROP_FILES) {
     assert.match(script, new RegExp(`\\[ -f '${file.replace(/\//g, '\\/')}' \\]`));
   }
@@ -33,16 +33,30 @@ test('buildDeviceProfileScript: perfil nombrado genera "mount -o remount,rw" y u
 
 test('buildDeviceProfileScript: perfil null (revert) solo restaura desde el backup, no muta build.prop', () => {
   const script = deviceProfile.buildDeviceProfileScript(null, 15);
-  assert.match(script, /^mount -o remount,rw \//);
+  assert.match(script, /^ok=1\nmount -o remount,rw \/ \|\| ok=0/);
   assert.doesNotMatch(script, /sed -i/);
   for (const file of deviceProfile.BUILD_PROP_FILES) {
     assert.match(script, new RegExp(`cp '${file.replace(/\//g, '\\/')}\\.rf-pre-spoof\\.bak' '${file.replace(/\//g, '\\/')}'`));
   }
 });
 
-test('buildDeviceProfileScript: termina en "true" para no romper si a la imagen le falta alguna particion', () => {
+// Regresion del hallazgo real de code review (PR #3): antes, cada linea del
+// script terminaba en "; true" sin condicion, asi que un sed que fallara de
+// verdad (ej. porque el remount de arriba ya habia fallado) quedaba
+// indistinguible de un archivo simplemente ausente -- el script SIEMPRE
+// salia con exit 0 y applyDeviceProfile() nunca se enteraba de una falla
+// real. Ahora el exit code final depende de la variable de shell `ok`, que
+// solo una falla real (remount, backup o sed/cp) puede bajar a 0 -- un
+// archivo ausente nunca la toca.
+test('buildDeviceProfileScript: el exit code final depende de "ok", nunca de un ";true" incondicional', () => {
   const script = deviceProfile.buildDeviceProfileScript(deviceProfile.DEVICE_PROFILES.samsung, 15);
-  assert.ok(script.trim().endsWith('true'));
+  assert.doesNotMatch(script, /; true$/m);
+  assert.ok(script.trim().endsWith('[ "$ok" = "1" ]'));
+  assert.match(script, /mount -o remount,rw \/ \|\| ok=0/);
+  for (const file of deviceProfile.BUILD_PROP_FILES) {
+    const esc = file.replace(/[/.]/g, '\\$&');
+    assert.match(script, new RegExp(`\\[ -f '${esc}' \\] && \\{.*\\|\\| ok=0; \\}`));
+  }
 });
 
 test('applyDeviceProfile: perfil desconocido rechaza sin llegar a tocar el contenedor', async (t) => {

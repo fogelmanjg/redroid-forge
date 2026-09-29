@@ -257,17 +257,28 @@ router.post('/:id/device-profile', async (req, res) => {
     }
 
     const appliedKey = await deviceProfile.applyDeviceProfile(instance.containerId, img.androidVersion, profile);
+    // El store se actualiza ACA, apenas el spoof en si (la unica mutacion
+    // real sobre el contenedor) tuvo exito -- no despues del restart de
+    // abajo. Si el restart llega a fallar, el filesystem del contenedor YA
+    // tiene el perfil nuevo aplicado; dejar el store desactualizado hasta
+    // que el restart termine significaria reportar el perfil viejo mientras
+    // el archivo real ya cambio (hallazgo real de code review, PR #3).
+    const updated = store.upsert({ ...instance, deviceProfile: appliedKey === deviceProfile.DEFAULT_PROFILE ? null : appliedKey });
+
     // "mount -o remount,rw /" deja el filesystem escribible en caliente, pero
     // varias props de build.prop quedan cacheadas por el runtime de Android
     // hasta el proximo boot completo -- sin este restart, el spoof queda a
-    // medio aplicar (ver ROADMAP.md Fase 3, nota de jg-dashboard).
+    // medio aplicar (ver ROADMAP.md Fase 3, nota de jg-dashboard). Mismo
+    // guard que /start y /restart: si esta instancia es hwEncCapable, el
+    // daemon VA-API tiene que estar arriba antes de reiniciarla (antes esta
+    // ruta no lo chequeaba, a diferencia de sus hermanas).
+    await ensureHwAccelIfNeeded(updated);
     await runtime.restart(instance.containerId);
     // El restart recrea el netns del contenedor -- sin volver a correr esto,
     // una instancia con wifi falso queda sin radios hasta el proximo
     // start/restart manual.
-    scheduleWifiFixes(instance);
+    scheduleWifiFixes(updated);
 
-    const updated = store.upsert({ ...instance, deviceProfile: appliedKey === deviceProfile.DEFAULT_PROFILE ? null : appliedKey });
     res.json(await withRuntimeStatus(updated));
   } catch (e) {
     sendError(res, e);

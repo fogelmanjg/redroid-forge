@@ -49,8 +49,21 @@ function androidFingerprint(profile, androidVersion) {
 // a <archivo>.rf-pre-spoof.bak dentro del propio contenedor -- asi revertir
 // al perfil 'redroid' restaura el original real en vez de reconstruir
 // valores por defecto (que varian por imagen/arquitectura).
+//
+// El exit code final tiene que reflejar si de verdad se pudo escribir algo,
+// no solo "el script no crasheo" -- runtime.exec() ya rechaza si el exit
+// code es != 0 (ver dockerRuntime.js), asi que de esto depende que
+// applyDeviceProfile() tire error quiere de verdad. La version anterior
+// terminaba cada linea en "; true" para que un archivo AUSENTE (legitimo,
+// no toda imagen tiene todas las particiones) no tumbara el script -- pero
+// eso de paso neutralizaba tambien un `sed` que fallara de verdad (ej. el
+// remount de arriba fallo y el filesystem sigue de solo lectura): el script
+// terminaba en exit 0 igual, y el caller lo reportaba como aplicado con
+// exito sin haber tocado nada (hallazgo real de code review, PR #3). Ahora
+// se acumula el resultado real en la variable de shell `ok`, y solo el
+// "archivo ausente" se tolera sin tocarla.
 function buildDeviceProfileScript(profile, androidVersion) {
-  const lines = ['mount -o remount,rw /'];
+  const lines = ['ok=1', 'mount -o remount,rw / || ok=0'];
   for (const file of BUILD_PROP_FILES) {
     const backup = `${file}${BACKUP_SUFFIX}`;
     if (profile) {
@@ -64,16 +77,20 @@ function buildDeviceProfileScript(profile, androidVersion) {
         // delimitador # (no /): el fingerprint trae barras sin escapar
         `-e 's#^(ro\\.[a-zA-Z0-9_.]*\\.fingerprint)=.*#\\1=${fingerprint}#'`,
       ].join(' ');
-      lines.push(`[ -f '${file}' ] && { [ -f '${backup}' ] || cp '${file}' '${backup}'; sed -i -E ${subs} '${file}'; }; true`);
+      // Si el archivo no existe: se saltea sin tocar `ok` (legitimo). Si
+      // existe: el backup y el sed tienen que salir bien los dos, sino
+      // `ok=0` -- una falla real ya no queda escondida detras de un ";true".
+      lines.push(`[ -f '${file}' ] && { { [ -f '${backup}' ] || cp '${file}' '${backup}'; } && sed -i -E ${subs} '${file}' || ok=0; }`);
     } else {
-      lines.push(`[ -f '${backup}' ] && cp '${backup}' '${file}'; true`);
+      // Sin backup no hay nada que revertir para este archivo -- no es una
+      // falla (puede que esa particion nunca haya tenido spoof aplicado).
+      lines.push(`[ -f '${backup}' ] && { cp '${backup}' '${file}' || ok=0; }`);
     }
   }
-  // "true" final: no todas las particiones existen en todas las imagenes
-  // (algunas no tienen system_ext/odm_dlkm) -- sin esto el exit status de la
-  // ultima linea faltante tiraba abajo todo el script aunque el resto se
-  // haya aplicado bien.
-  lines.push('true');
+  // Exit code final = si `ok` sigue en 1 -- lo unico que puede haberlo
+  // bajado a 0 es un remount/cp/sed que de verdad fallo con el archivo
+  // presente, nunca un archivo ausente.
+  lines.push('[ "$ok" = "1" ]');
   return lines.join('\n');
 }
 
