@@ -74,22 +74,50 @@ AMD/Intel y uno NVIDIA reales.
 
 **Pasos:**
 1. Portar `DEVICE_PROFILES`/`buildDeviceProfileScript` de `jg-dashboard`
-   (`redroid.service.ts`) al nuevo backend.
-2. Confirmar que el WiFi falso portado en la Fase 0 sigue íntegro.
+   (`redroid.service.ts`) al nuevo backend. ✅ hecho —
+   `backend/src/lib/deviceProfile.js` (perfil `samsung`, revert a `redroid`
+   restaurando desde backup), cableado en
+   `POST /instances/:id/device-profile` (gateado por su manifest, ver
+   `assertDeviceProfileReady` en `routes/instances.js` — es opt-in por
+   request, no un modulo requerido por ninguna imagen, así que no pasa por
+   `moduleGate.check` sino por `moduleAcceptance.isAccepted` directo).
+   Cobertura en `backend/test/deviceProfile.test.js`.
+2. Confirmar que el WiFi falso portado en la Fase 0 sigue íntegro. ✅ hecho —
+   mismo comportamiento y mensajes de log que antes, cubierto por los tests
+   existentes de `hwsimWifi.js` más los nuevos de concurrencia (paso 4).
 3. Validar aplicar/revertir un perfil (ej. `samsung`) desde la UI nueva.
-4. **Arreglar la race condition conocida de `ensureHwsimWifi`** (confirmada
-   en `jg-dashboard/redroid.service.ts`, ver contexto abajo): al portar la
-   lógica no alcanza con copiar el archivo tal cual, hay que agregar un
-   lock/mutex propio alrededor de la asignación de phys (o encolar
-   `scheduleHwsimWifiFix` dentro de la cola de arranque en vez de dispararlo
-   fire-and-forget), para que dos instancias nunca lean `iw dev` en
-   simultáneo sin haber reclamado antes los pares que van a usar. Sin esto
-   el bug original (reinicios simultáneos dejan una instancia sin radios
-   hwsim) se vuelve a portar junto con el resto del código.
+   **[PENDIENTE]** — no se sumó UI todavía (esta ronda de trabajo se limitó
+   al endpoint HTTP), y de cualquier forma esto necesita un host con Docker
+   real para validarse, no disponible en el entorno donde se hizo este
+   port.
+4. **Arreglar la race condition conocida de `ensureHwsimWifi`**. ✅ hecho en
+   código — `hwsimWifi.js` ahora serializa cada reclamo de par phy/iface a
+   través de una cola de promesas a nivel de módulo (`hwsimClaimTail`/
+   `runHwsimClaim`), con la misma nuance de "no recargar `mac80211_hwsim` si
+   otra instancia todavía tiene phys en uso". **Corrección sobre esta misma
+   entrada:** al escribir el código se buscó el método de referencia
+   `claimHwsimPhyPair`/`hwsimClaimTail` que esta entrada decía que ya existía
+   en `jg-dashboard/redroid.service.ts` — **no existe ahí** (se clonó el repo
+   y se revisó el archivo completo). Lo que sí existe en ese archivo es la
+   nuance de "0 phys libres, ¿alguna otra instancia los está usando?" dentro
+   de `ensureHwsimWifi` (sin cola/serialización — ese archivo tiene la misma
+   race hoy) y el patrón general de cola-de-promesas a nivel de servicio
+   (`bootQueueTail`, usado para otra cosa, el orden de arranque). El fix acá
+   se diseñó aplicando ese mismo patrón al problema de hwsim, no copiando un
+   método que no existe. **Validado solo con test unitario mockeado**
+   (`backend/test/hwsimWifiConcurrency.test.js` — mockea
+   `child_process.execFile`/`dockerRuntime`, simula 2 llamadas concurrentes
+   contra un estado de host compartido y verifica reclamos disjuntos);
+   **todavía no probado contra una race real de arranque dual de instancias
+   en hardware**, eso queda pendiente antes de confiar en esto en producción.
 
 **Gate:** el spoof de perfil se puede aplicar/revertir desde la UI nueva,
 con los archivos de `build.prop` correctos según la imagen, y reiniciar dos
 o más instancias con WiFi falso al mismo tiempo no deja ninguna sin radios.
+**Parcial:** el fix de concurrencia y el spoof de perfil (vía API) están
+hechos y con test unitario; falta la UI (paso 3) y la validación en
+hardware real con dos instancias arrancando/reiniciando a la vez para poder
+cerrar el gate por completo.
 
 ## Fase 4 — Sistema de contrato de módulo (genérico)
 

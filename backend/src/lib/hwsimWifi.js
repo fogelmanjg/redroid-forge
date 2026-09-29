@@ -1,8 +1,23 @@
-const { execFile } = require('child_process');
-const { promisify } = require('util');
+const cp = require('child_process');
 const runtime = require('./dockerRuntime');
+const store = require('./store');
 
-const execFileAsync = promisify(execFile);
+// A proposito NO es `promisify(execFile)` (como antes, ni resuelto una sola
+// vez al importar ni por-llamada): `child_process.execFile` trae su propio
+// simbolo `util.promisify.custom`, que sobrevive a `t.mock.method` -- asi que
+// `promisify(cp.execFile)` en un test mockeado igual termina llamando a la
+// implementacion real de Node por dentro, ignorando el mock (confirmado a
+// mano). Envolver el callback de `cp.execFile` a mano evita ese atajo y hace
+// que los tests puedan mockear `child_process.execFile` de verdad.
+function execFileAsync(file, args) {
+  return new Promise((resolve, reject) => {
+    cp.execFile(file, args, (err, stdout, stderr) => {
+      if (err) return reject(err);
+      resolve({ stdout, stderr });
+    });
+  });
+}
+
 const HWSIM_RADIO_COUNT = process.env.HWSIM_RADIO_COUNT || '6'; // 2 radios/instancia
 
 function log(msg) { console.log(`[hwsimWifi] ${msg}`); }
@@ -27,23 +42,57 @@ function parsePhyIfacePairs(iwDevOutput) {
   return pairs;
 }
 
-// Corre en cada start (Docker recrea el netns cada vez). Los phys de una
-// instancia vuelven solos al netns del host cuando su contenedor muere.
-async function ensureHwsimWifi(instanceId, containerId) {
-  try {
-    await execFileAsync('modprobe', ['mac80211_hwsim', `radios=${HWSIM_RADIO_COUNT}`]);
-  } catch (e) {
-    warn(`modprobe fallo para ${instanceId}: ${e}`);
-  }
+// Cola de serializacion para el reclamo de pares phy/iface de hwsim (bug
+// conocido, ver docs/ROADMAP.md Fase 3 paso 4): sin esto, dos instancias que
+// arrancan/reinician casi al mismo tiempo pueden llamar a ensureHwsimWifi en
+// paralelo, las dos leer 'iw dev' antes de que ninguna haya reclamado nada,
+// ver los mismos pares "libres", y las dos intentar moverlos -- una de las
+// dos termina sin radios wifi ese boot. Encadenando cada intento a esta
+// unica promesa a nivel de modulo (mismo patron que una cola con mutex: el
+// intento N+1 ni siquiera arranca a leer 'iw dev' hasta que el intento N
+// resolvio por completo, exito o fallo) se garantiza que nunca hay dos
+// lecturas de 'iw dev' en vuelo al mismo tiempo.
+let hwsimClaimTail = Promise.resolve();
 
-  let pid;
-  try {
-    pid = await runtime.getPid(containerId);
-  } catch (e) {
-    warn(`no se pudo obtener el PID de ${instanceId}: ${e}`);
-    return;
-  }
+function runHwsimClaim(fn) {
+  const attempt = hwsimClaimTail.then(fn);
+  // El tail sigue avanzando aunque este intento haya fallado -- un reclamo
+  // rechazado nunca debe trabar a los que vienen atras en la cola. `attempt`
+  // (lo que se devuelve al llamador) si conserva el resultado/error real.
+  hwsimClaimTail = attempt.then(() => {}, () => {});
+  return attempt;
+}
 
+// Solo para tests: la cola es un singleton a nivel de modulo, asi que sin
+// esto un test podria arrancar con el tail todavia "sucio" de un test
+// anterior (por ejemplo uno que dejo un mock a medio resolver).
+function _resetHwsimClaimTailForTests() {
+  hwsimClaimTail = Promise.resolve();
+}
+
+// Para decidir si es seguro recargar mac80211_hwsim cuando 'iw dev' no
+// muestra ningun phy libre: si de verdad todos estan en uso por otra
+// instancia que sigue corriendo, recargar el modulo se los robaria (ver la
+// nuance portada de jg-dashboard/redroid.service.ts). Solo se recarga si
+// NINGUNA otra instancia con wifi falso esta corriendo ahora mismo.
+async function anyOtherInstanceUsingHwsim(excludeContainerId) {
+  const others = store.readAll().filter((i) => i.needsHwsimWifi && i.containerId && i.containerId !== excludeContainerId);
+  for (const other of others) {
+    try {
+      const info = await runtime.inspect(other.containerId);
+      if (info.State.Running) return true;
+    } catch {
+      // el contenedor ya no existe -- no cuenta como "en uso"
+    }
+  }
+  return false;
+}
+
+// Seccion critica de ensureHwsimWifi, siempre corrida a traves de
+// runHwsimClaim: elige un par phy/iface libre y lo mueve al netns de la
+// instancia, incluyendo el renombrado de las interfaces ya dentro de ese
+// netns. Nunca corre superpuesta con otro reclamo.
+async function claimAndAssignHwsimPair(instanceId, containerId, pid) {
   // Un phy de un swap anterior puede seguir con el nombre "wlan0_fake".
   await execFileAsync('ip', ['link', 'set', 'wlan0_fake', 'down']).catch(() => {});
   await execFileAsync('ip', ['link', 'set', 'wlan0_fake', 'name', 'wlan0']).catch(() => {});
@@ -55,6 +104,28 @@ async function ensureHwsimWifi(instanceId, containerId) {
   } catch (e) {
     warn(`'iw dev' fallo para ${instanceId}: ${e}`);
     return;
+  }
+
+  // Visto en la practica: a veces un phy no vuelve al netns default del host
+  // cuando muere el contenedor que lo tenia -- directamente desaparece
+  // (causa raiz nunca confirmada). Si NINGUNO esta libre, solo tiene sentido
+  // recargar el modulo si ninguna otra instancia con wifi falso esta
+  // corriendo ahora mismo -- si alguna lo esta, recargar le robaria los
+  // radios que ya tiene asignados.
+  if (freePairs.length === 0) {
+    if (await anyOtherInstanceUsingHwsim(containerId)) {
+      warn(`0 phys libres para ${instanceId} pero otra instancia esta usando hwsim -- no se recarga el modulo`);
+    } else {
+      warn(`0 phys libres para ${instanceId} y ninguna otra instancia usando hwsim -- recargando mac80211_hwsim`);
+      try {
+        await execFileAsync('rmmod', ['mac80211_hwsim']);
+        await execFileAsync('modprobe', ['mac80211_hwsim', `radios=${HWSIM_RADIO_COUNT}`]);
+        const { stdout } = await execFileAsync('iw', ['dev']);
+        freePairs = parsePhyIfacePairs(stdout);
+      } catch (e) {
+        warn(`recarga de mac80211_hwsim fallo para ${instanceId}: ${e}`);
+      }
+    }
   }
 
   if (freePairs.length < 2) {
@@ -96,6 +167,26 @@ async function ensureHwsimWifi(instanceId, containerId) {
   } else {
     warn(`setup incompleto para ${instanceId} (pid ${pid})`);
   }
+}
+
+// Corre en cada start (Docker recrea el netns cada vez). Los phys de una
+// instancia vuelven solos al netns del host cuando su contenedor muere.
+async function ensureHwsimWifi(instanceId, containerId) {
+  try {
+    await execFileAsync('modprobe', ['mac80211_hwsim', `radios=${HWSIM_RADIO_COUNT}`]);
+  } catch (e) {
+    warn(`modprobe fallo para ${instanceId}: ${e}`);
+  }
+
+  let pid;
+  try {
+    pid = await runtime.getPid(containerId);
+  } catch (e) {
+    warn(`no se pudo obtener el PID de ${instanceId}: ${e}`);
+    return;
+  }
+
+  await runHwsimClaim(() => claimAndAssignHwsimPair(instanceId, containerId, pid));
 }
 
 function scheduleHwsimWifiFix(instanceId, containerId) {
@@ -185,4 +276,5 @@ module.exports = {
   ensureHwsimWifi, scheduleHwsimWifiFix,
   ensureWifiConnected, scheduleWifiConnectedFix,
   ensureEth0Routing, scheduleEth0RoutingFix,
+  _resetHwsimClaimTailForTests,
 };

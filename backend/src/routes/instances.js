@@ -4,9 +4,12 @@ const binder = require('../lib/binder');
 const hwsimWifi = require('../lib/hwsimWifi');
 const hwAccel = require('../lib/hwAccel');
 const androidIdentity = require('../lib/androidIdentity');
+const deviceProfile = require('../lib/deviceProfile');
 const store = require('../lib/store');
 const portAllocator = require('../lib/portAllocator');
 const moduleGate = require('../lib/moduleGate');
+const moduleManifests = require('../lib/moduleManifests');
+const moduleAcceptance = require('../lib/moduleAcceptance');
 const catalog = require('../../images.json');
 
 const router = express.Router();
@@ -62,6 +65,29 @@ function revalidateModulesIfImageKnown(instance) {
 function sendError(res, e, fallbackStatus = 500) {
   const status = e.httpStatus >= 400 && e.httpStatus < 600 ? e.httpStatus : fallbackStatus;
   res.status(status).json({ error: e.message, ...(e.modules ? { modules: e.modules } : {}) });
+}
+
+// device-profile es opt-in por request, nunca requerido de forma dura por
+// una imagen (no esta en moduleGate.requiredModuleIdsForImage porque ninguna
+// imagen lo exige) -- por eso no pasa por moduleGate.check (ese metodo solo
+// mira los modulos que la imagen ELEGIDA requiere), se gatea consultando su
+// aceptacion directo, igual de estricto: sin aceptacion vigente del
+// manifest, no se ejecuta nada.
+function assertDeviceProfileReady(img) {
+  const manifest = moduleManifests.get('device-profile');
+  if (!manifest) throw httpError('No existe el manifest del modulo "device-profile".', 500);
+
+  if (img) {
+    const reason = moduleManifests.incompatibilityReason(manifest, img);
+    if (reason) throw httpError(`No se puede aplicar el perfil de dispositivo: ${reason}`, 409);
+  }
+
+  if (!moduleAcceptance.isAccepted('device-profile', manifest.version)) {
+    throw Object.assign(
+      new Error('Hace falta leer y aceptar el contrato del modulo "device-profile" antes de continuar.'),
+      { httpStatus: 428, modules: [manifest] },
+    );
+  }
 }
 
 function scheduleWifiFixes(instance) {
@@ -190,6 +216,59 @@ router.post('/:id/restart', async (req, res) => {
     await runtime.restart(instance.containerId);
     scheduleWifiFixes(instance);
     res.json(await withRuntimeStatus(instance));
+  } catch (e) {
+    sendError(res, e);
+  }
+});
+
+// No hay convencion previa de "etapa 6 bajo demanda" (ver ARQUITECTURA.md)
+// disparada por el usuario contra una instancia puntual -- esta ruta es la
+// primera. A diferencia de scheduleWifiFixes (fire-and-forget tras el
+// start), esto responde recien cuando el spoof + restart terminaron, para
+// que el frontend sepa de una si funciono.
+router.post('/:id/device-profile', async (req, res) => {
+  const instance = store.get(req.params.id);
+  if (!instance) return res.status(404).json({ error: 'Instancia no encontrada' });
+  try {
+    const { profile } = req.body || {};
+    if (profile !== undefined && typeof profile !== 'string') {
+      throw httpError('"profile" debe ser un string (nombre de perfil) u omitirse para revertir al default.', 400);
+    }
+    if (profile !== undefined && profile !== deviceProfile.DEFAULT_PROFILE && !deviceProfile.DEVICE_PROFILES[profile]) {
+      throw httpError(`Perfil de dispositivo desconocido: "${profile}".`, 400);
+    }
+
+    // A diferencia de revalidateModulesIfImageKnown (ahi start/restart nunca
+    // dependieron del catalogo, asi que omitir la revalidacion es benigno),
+    // aca la imagen es un prerequisito real: sin su androidVersion no se
+    // puede armar el fingerprint del perfil.
+    const img = catalog.find((i) => i.id === instance.imageId);
+    if (!img) {
+      throw httpError(
+        `No se encontro en el catalogo la imagen "${instance.imageId}" de esta instancia -- no se puede determinar androidVersion para armar el perfil.`,
+        409,
+      );
+    }
+    assertDeviceProfileReady(img);
+
+    const info = await runtime.inspect(instance.containerId).catch(() => null);
+    if (!info || info.State.Status !== 'running') {
+      throw httpError('La instancia tiene que estar corriendo para aplicar un perfil de dispositivo.', 409);
+    }
+
+    const appliedKey = await deviceProfile.applyDeviceProfile(instance.containerId, img.androidVersion, profile);
+    // "mount -o remount,rw /" deja el filesystem escribible en caliente, pero
+    // varias props de build.prop quedan cacheadas por el runtime de Android
+    // hasta el proximo boot completo -- sin este restart, el spoof queda a
+    // medio aplicar (ver ROADMAP.md Fase 3, nota de jg-dashboard).
+    await runtime.restart(instance.containerId);
+    // El restart recrea el netns del contenedor -- sin volver a correr esto,
+    // una instancia con wifi falso queda sin radios hasta el proximo
+    // start/restart manual.
+    scheduleWifiFixes(instance);
+
+    const updated = store.upsert({ ...instance, deviceProfile: appliedKey === deviceProfile.DEFAULT_PROFILE ? null : appliedKey });
+    res.json(await withRuntimeStatus(updated));
   } catch (e) {
     sendError(res, e);
   }
