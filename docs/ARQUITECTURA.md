@@ -112,6 +112,85 @@ en qué etapa(s) opera — eso determina si el backend necesita crear la
 instancia sin arrancarla (etapa 4) o si puede trabajar sobre una ya viva
 (etapa 6).
 
+## Fase 5: el runner genérico y la convención `etapa`/`entry`
+
+Hasta Fase 4, "etapa" y "entry" eran campos del manifest que ningún código
+todavía interpretaba — `hwenc` (el primer módulo con lógica de ejecución
+real, ver `backend/src/modules/hwenc/`) estaba cableado a mano en
+`instances.js`, con un `if (img.hwEncCapable)` explícito. Fase 5 generaliza
+eso: `backend/src/lib/moduleRunner.js` es el orquestador que, para cualquier
+módulo que declare `etapa`/`entry`, hace `require()` dinámico de su `entry`
+(resuelto relativo a **la carpeta del propio módulo**, vía
+`moduleManifests.moduleDir(id)` — nunca relativo a `moduleRunner.js`) y llama
+a la función que le corresponde por convención de nombre fijo:
+
+| Etapa | Nombre exportado       | Cuándo se llama                                   | Argumentos      |
+|------:|-------------------------|----------------------------------------------------|-----------------|
+| 3     | `prepareCreate`         | antes de `runtime.create()`                        | ninguno         |
+| 4     | `integrate`              | entre `runtime.create()` y `runtime.start()`        | `containerId`   |
+| 5     | `ensureHostInfraReady`   | antes de `start`/`restart` (create incluido)        | ninguno         |
+| 6     | `ensureRuntimeReady`     | después de `start`/`restart`, fire-and-forget       | `containerId`   |
+
+Un módulo sólo necesita exportar los hooks de las etapas que declara en su
+manifest — los módulos "puramente contrato" (GApps/Magisk/WiFi falso, sin
+lógica de ejecución propia todavía) no declaran `entry`, y el runner
+simplemente no los toca; `moduleGate.js` sigue siendo quien decide si pueden
+activarse en absoluto (compatibilidad + consentimiento), sin superponerse
+con esto.
+
+**Decisiones de diseño tomadas al generalizar (no estaban especificadas de
+antemano, documentadas acá para que quede rastro de por qué):**
+
+- **Etapa 3 es aditiva, no reemplaza nada:** `prepareCreate()` devuelve
+  `{ binds?, cmd? }` y `instances.js` los concatena a los que ya arma para
+  cualquier instancia (ancho/alto/dpi/fps/gpu\_mode) — un módulo nunca puede
+  pisar lo que el core ya decidió, sólo sumar. Esto reemplaza el
+  `REQUIRED_BOOT_FLAGS` de `hwenc`, que se exportaba desde Fase 2 pero nunca
+  se leía en ningún lado (código muerto) hasta ahora.
+- **Etapa 5 (infraestructura del host) vive en los exports del mismo
+  `entry`, no en una convención aparte.** La alternativa —dejar que
+  `instances.js` siguiera llamando a `hwAccel.ensureDaemonRunning()` a mano,
+  gateado por `img.hwEncCapable`— hubiera dejado a `hwenc` como caso especial
+  para siempre, exactamente lo que Fase 5 busca eliminar. En cambio,
+  `hwenc/integrate.js` exporta `ensureHostInfraReady()` como un wrapper de
+  una línea que delega en `hwAccel.js` (dueño real de esa lógica, sin
+  duplicarla) — el runner no necesita saber que "hwenc" y "el daemon VA-API"
+  tienen algo que ver entre sí, sólo que el módulo declaró etapa 5 y expone
+  el hook con el nombre esperado. Ver `backend/src/modules/hwenc/README.md`
+  para el detalle.
+- **`requiredModuleIds` se persiste en la instancia al crearla**, no se
+  recalcula desde el catálogo en cada start/restart — mismo criterio que ya
+  usaba el campo `hwEncCapable` guardado por instancia antes de esta fase:
+  si `images.json` cambia o la imagen se borra del catálogo después de
+  crear una instancia, sus módulos ya inyectados siguen corriendo sus etapas
+  5/6 igual (el gate de consentimiento, en cambio, sí se revalida contra el
+  catálogo vigente — son dos preocupaciones distintas, ver
+  `revalidateModulesIfImageKnown` en `instances.js`).
+- **Descubrimiento de manifests en dos ubicaciones, no una.** Los manifests
+  planos existentes (`backend/src/modules/manifests/*.json`) no se movieron
+  a una carpeta por módulo — `moduleManifests.loadAll()` escanea esa carpeta
+  Y `backend/src/modules/<id>/manifest.json` (usado por `hwenc`), validando
+  unicidad de `id` entre ambas fuentes. Menor superficie de cambio y menos
+  conflicto con otro trabajo tocando esos mismos archivos en paralelo.
+- **Etapa 4 se corre en serie y de punta a punta** (no `Promise.all`): si un
+  módulo futuro falla a mitad de inyectar archivos en `/vendor`, no tiene
+  sentido seguir con el siguiente ni mucho menos arrancar la instancia con
+  la mitad de los módulos aplicados en silencio.
+- **Etapa 6 es fire-and-forget**, mismo patrón que ya usaban
+  `scheduleWifiFixes`/`hwsimWifi.js`: un fixup post-boot que falla no tiene
+  que tumbar un start/restart que por lo demás ya funcionó — la instancia ya
+  está viva, esto es un ajuste sobre algo que ya arrancó, no una
+  precondición para que arranque.
+
+**[PENDIENTE]** nada de este runner se validó todavía contra un host real
+con Docker/redroid corriendo — sólo hay cobertura de unit tests con fixtures
+y mocks (`backend/test/moduleRunner.test.js`). Los pilotos de módulos de
+usuario (CIFI, watchdog de WiFi falso — sección 5 de `REQUIREMENTS.md`,
+"Extensibilidad: módulos definidos por el usuario") son un mecanismo
+*distinto* (scheduling periódico + pause/resume/status) y siguen sin
+diseñarse — este runner resuelve el ciclo de vida de creación/arranque de un
+módulo, no scheduling continuo.
+
 ## Encontrado el 28/09: el propio árbol de AOSP tenía GApps mezclado
 
 Al mapear estas etapas contra el proyecto real, apareció un caso concreto

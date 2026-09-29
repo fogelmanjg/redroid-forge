@@ -167,24 +167,57 @@ piloto (CIFI) es un script con bugs sutiles ya conocidos (herencia de lock
 de `adb` tras reboot) que hay que no reintroducir al migrarlo.
 
 **Pasos:**
-1. Diseñar la convención de módulo de usuario (manifest + script de
-   entrada + contexto que recibe + cómo se agenda), usando como referencia
-   Home Assistant Add-ons y/o el patrón drop-in tipo `cron.d`.
-2. Implementar el mecanismo de scheduling/ciclo de vida (pause/resume/
-   status) en el backend.
-3. Portar el watchdog de CIFI sobre Redroid 15 usando esta convención, en
-   reemplazo del script de cron + `flock` actual.
-4. Validar en vivo varios días sin reaparición del bug de lock heredado.
-5. Segundo piloto, mismo mecanismo: el watchdog persistente de reconexión
-   de WiFi falso (hoy vive hardcodeado en `jg-dashboard`, ver
+1. ✅ **Hecho, parcial** — Diseñada e implementada la convención para
+   módulos con lógica de ejecución ligada al **ciclo de vida de una
+   instancia** (etapas 3-6, ver `docs/ARQUITECTURA.md` sección "Fase 5: el
+   runner genérico y la convención `etapa`/`entry`"): manifest con
+   `etapa`/`entry`, `entry` resuelto relativo a la carpeta del módulo, un
+   nombre de export fijo por etapa (`prepareCreate`/`integrate`/
+   `ensureHostInfraReady`/`ensureRuntimeReady`). **No** es todavía la
+   convención de "módulo de usuario" que pide este paso originalmente
+   (schedule periódico tipo cron + pause/resume/status, referencia CIFI) —
+   esa sigue sin diseñarse. Lo que se resolvió es el caso más urgente y ya
+   real del proyecto: `hwenc` (Fase 2) tenía lógica de integración escrita
+   pero cableada a mano en `instances.js`, sin ningún punto de enganche
+   genérico.
+2. ✅ **Hecho para el mecanismo de ciclo de vida, abierto para scheduling
+   persistente** — `backend/src/lib/moduleRunner.js` orquesta las etapas
+   3-6 desde `instances.js` (create/start/restart), reemplazando el casing
+   especial de `hwenc`/`hwAccel` que existía ahí. Lo que sigue sin
+   implementar: el mecanismo de **scheduling periódico** (correr cada N
+   minutos, pause/resume/status persistente) que pide este paso para
+   watchdogs tipo CIFI — el runner de esta fase resuelve "qué corre en el
+   momento de crear/arrancar una instancia", no "qué corre en loop mientras
+   la instancia vive".
+3. ⬜ Abierto — Portar el watchdog de CIFI sobre Redroid 15 usando la
+   convención de scheduling (todavía sin diseñar, ver paso 2), en reemplazo
+   del script de cron + `flock` actual. **No** se tocó en esta iteración.
+4. ⬜ Abierto — Validar en vivo varios días sin reaparición del bug de lock
+   heredado. Requiere hardware real y días de observación; no intentado acá.
+5. ⬜ Abierto — Segundo piloto, mismo mecanismo: el watchdog persistente de
+   reconexión de WiFi falso (hoy vive hardcodeado en `jg-dashboard`, ver
    `claimHwsimPhyPair`/`wifiWatchdogs` en `redroid.service.ts`) migra a
-   módulo-script en vez de portarse tal cual. Sirve además como el primer
-   caso donde un comportamiento (mantener la conexión o no) queda como
-   configuración del módulo por instancia, no un switch global de código.
+   módulo-script en vez de portarse tal cual.
+
+**Además de lo pedido originalmente en los pasos 1-2** (efecto colateral
+positivo de dejar el runner de ciclo de vida bien genérico, no ad hoc para
+hwenc): `moduleGate.requiredModuleIdsForImage` ahora también deriva `hwenc`
+desde `img.hwEncCapable`, así que activar una imagen con ese flag exige
+aceptar su contrato igual que GApps/Magisk/WiFi falso. Ninguna imagen del
+catálogo (`backend/images.json`) declara ese flag todavía, así que esto no
+cambia el comportamiento observable de nada hoy.
+
+**[PENDIENTE] nada de lo hecho en los pasos 1-2 se validó contra un host
+real con Docker/redroid** — sólo hay cobertura de unit tests con
+fixtures/mocks (`backend/test/moduleRunner.test.js`,
+`backend/test/moduleContract.test.js`). Antes de usar esto con hardware
+real, correr el flujo completo (crear → inyectar en `/vendor` → arrancar →
+fixup post-boot) contra la imagen oficial de redroid en un host AMD/Intel.
 
 **Gate:** CIFI corre como módulo dentro de `redroid-forge` (pause/
 resume/status desde la app, no edición manual de cron), validado en vivo
-sin que reaparezca el bug conocido.
+sin que reaparezca el bug conocido. **No cumplido todavía** — los pasos 3-5
+siguen abiertos.
 
 ## Fase 6 — Autenticación opcional (Keycloak)
 
