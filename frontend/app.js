@@ -214,7 +214,13 @@ async function createInstance(name, imageId, form) {
     await loadInstances();
   } catch (err) {
     if (err.status === 428 && err.modules) {
-      const allAccepted = await Contracts.ensureAccepted(err.modules);
+      let allAccepted;
+      try {
+        allAccepted = await Contracts.ensureAccepted(err.modules);
+      } catch (acceptErr) {
+        alert(acceptErr.message);
+        return;
+      }
       if (allAccepted) {
         await createInstance(name, imageId, form);
       }

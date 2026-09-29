@@ -1,6 +1,6 @@
-const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const { readJsonArray, writeJsonArray } = require('./jsonFileStore');
 
 const DATA_DIR = path.join(__dirname, '..', '..', 'data');
 const DEFAULT_STORE_FILE = path.join(DATA_DIR, 'module-acceptances.json');
@@ -13,27 +13,12 @@ const DEFAULT_STORE_FILE = path.join(DATA_DIR, 'module-acceptances.json');
 // usuarios reales.
 let storeFile = DEFAULT_STORE_FILE;
 
-function ensureDataDir() {
-  const dir = path.dirname(storeFile);
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-}
-
 function readAll() {
-  ensureDataDir();
-  if (!fs.existsSync(storeFile)) return [];
-  try {
-    return JSON.parse(fs.readFileSync(storeFile, 'utf-8'));
-  } catch {
-    return [];
-  }
+  return readJsonArray(storeFile);
 }
 
-// Escritura atomica (tmp + rename), mismo patron que lib/store.js.
 function writeAll(records) {
-  ensureDataDir();
-  const tmp = `${storeFile}.tmp`;
-  fs.writeFileSync(tmp, JSON.stringify(records, null, 2));
-  fs.renameSync(tmp, storeFile);
+  writeJsonArray(storeFile, records);
 }
 
 function record({ moduleId, version, userId, instanceId, instanceName }) {

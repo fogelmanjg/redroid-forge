@@ -64,13 +64,14 @@ const Contracts = (() => {
   // Muestra el contrato de un manifest y devuelve una promesa que resuelve
   // en true solo si el usuario acepta Y el backend registra la aceptación.
   function ask(manifest) {
-    return new Promise((resolve) => {
+    return new Promise((resolve, reject) => {
       render(manifest);
       dialog.showModal();
 
       function cleanup() {
         form.removeEventListener('submit', onSubmit);
         els.cancelBtn.removeEventListener('click', onCancel);
+        dialog.removeEventListener('cancel', onDialogCancel);
       }
 
       function onSubmit(e) {
@@ -81,13 +82,17 @@ const Contracts = (() => {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ version: manifest.version }),
         })
-          .then((res) => {
+          .then(async (res) => {
             dialog.close();
-            resolve(res.ok);
+            if (!res.ok) {
+              const body = await res.json().catch(() => null);
+              throw new Error(body?.error || `El backend rechazó la aceptación (HTTP ${res.status})`);
+            }
+            resolve(true);
           })
-          .catch(() => {
+          .catch((err) => {
             dialog.close();
-            resolve(false);
+            reject(err instanceof Error ? err : new Error('No se pudo registrar la aceptación del módulo'));
           });
       }
 
@@ -97,8 +102,17 @@ const Contracts = (() => {
         resolve(false);
       }
 
+      // El <dialog> nativo dispara 'cancel' (no 'submit') al cerrarse con
+      // Escape -- sin este listener, esa vía nunca llamaba a resolve() y
+      // ensureAccepted() quedaba colgado esperando para siempre.
+      function onDialogCancel(e) {
+        e.preventDefault();
+        onCancel();
+      }
+
       form.addEventListener('submit', onSubmit);
       els.cancelBtn.addEventListener('click', onCancel);
+      dialog.addEventListener('cancel', onDialogCancel);
     });
   }
 
