@@ -6,6 +6,7 @@ const hwAccel = require('../lib/hwAccel');
 const androidIdentity = require('../lib/androidIdentity');
 const store = require('../lib/store');
 const portAllocator = require('../lib/portAllocator');
+const moduleGate = require('../lib/moduleGate');
 const catalog = require('../../images.json');
 
 const router = express.Router();
@@ -21,6 +22,46 @@ function findImage(imageId) {
   const img = catalog.find((i) => i.id === imageId);
   if (!img) throw httpError(`Imagen desconocida: ${imageId}`, 400);
   return img;
+}
+
+// Bloquea crear/arrancar/reiniciar si algun modulo que la imagen requiere
+// (GApps, Magisk, WiFi falso -- ver lib/moduleGate.js) no tiene una
+// aceptacion vigente de su manifest, o no es compatible con la imagen
+// elegida (compatibleCon). Se llama antes de tocar Docker para nada: "el
+// backend ejecuta el script/integra el componente" solo despues de esto.
+function assertModulesReady(img) {
+  const result = moduleGate.check(img);
+  if (!result.ok) {
+    throw Object.assign(new Error(result.error), { httpStatus: result.httpStatus, modules: result.modules });
+  }
+}
+
+// Uso estricto (create): la imagen tiene que existir en el catalogo.
+function resolveImageAndGate(imageId) {
+  const img = findImage(imageId);
+  assertModulesReady(img);
+  return img;
+}
+
+// Uso para start/restart: revalida el contrato en cada arranque, pero si la
+// imagen ya no esta en el catalogo (se pudo editar images.json despues de
+// crear la instancia), no bloquea el arranque -- antes de este gate,
+// start/restart nunca dependian del catalogo.
+function revalidateModulesIfImageKnown(instance) {
+  const img = catalog.find((i) => i.id === instance.imageId);
+  if (!img) {
+    console.warn(`[instances] "${instance.imageId}" ya no esta en el catalogo -- se omite la revalidacion de modulos para ${instance.id}`);
+    return;
+  }
+  assertModulesReady(img);
+}
+
+// e.modules (lista de manifests pendientes de aceptar, ver moduleGate.js) se
+// suma al body de error para que el frontend pueda renderizar el/los modales
+// de contrato sin tener que volver a pedirlos.
+function sendError(res, e, fallbackStatus = 500) {
+  const status = e.httpStatus >= 400 && e.httpStatus < 600 ? e.httpStatus : fallbackStatus;
+  res.status(status).json({ error: e.message, ...(e.modules ? { modules: e.modules } : {}) });
 }
 
 function scheduleWifiFixes(instance) {
@@ -60,7 +101,7 @@ router.post('/', async (req, res) => {
       throw httpError(`Ya existe una instancia llamada "${name}"`, 409);
     }
 
-    const img = findImage(imageId);
+    const img = resolveImageAndGate(imageId);
     const adbPort = portAllocator.nextPort();
     const slot = binder.nextFreeSlot();
     const volumeName = `redroid-forge-${name}`;
@@ -108,8 +149,7 @@ router.post('/', async (req, res) => {
 
     res.status(201).json(await withRuntimeStatus(instance));
   } catch (e) {
-    const status = e.httpStatus >= 400 && e.httpStatus < 600 ? e.httpStatus : 500;
-    res.status(status).json({ error: e.message });
+    sendError(res, e);
   }
 });
 
@@ -117,12 +157,16 @@ router.post('/:id/start', async (req, res) => {
   const instance = store.get(req.params.id);
   if (!instance) return res.status(404).json({ error: 'Instancia no encontrada' });
   try {
+    // Revalida el contrato en cada arranque, no solo al crear: si el
+    // manifest de un modulo que esta instancia usa subio de version desde
+    // que se creo, el proximo arranque queda bloqueado hasta reaceptar.
+    revalidateModulesIfImageKnown(instance);
     await ensureHwAccelIfNeeded(instance);
     await runtime.start(instance.containerId);
     scheduleWifiFixes(instance);
     res.json(await withRuntimeStatus(instance));
   } catch (e) {
-    res.status(500).json({ error: e.message });
+    sendError(res, e);
   }
 });
 
@@ -141,12 +185,13 @@ router.post('/:id/restart', async (req, res) => {
   const instance = store.get(req.params.id);
   if (!instance) return res.status(404).json({ error: 'Instancia no encontrada' });
   try {
+    revalidateModulesIfImageKnown(instance);
     await ensureHwAccelIfNeeded(instance);
     await runtime.restart(instance.containerId);
     scheduleWifiFixes(instance);
     res.json(await withRuntimeStatus(instance));
   } catch (e) {
-    res.status(500).json({ error: e.message });
+    sendError(res, e);
   }
 });
 

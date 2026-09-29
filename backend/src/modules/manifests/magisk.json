@@ -1,0 +1,18 @@
+{
+  "id": "magisk",
+  "nombre": "Magisk (root)",
+  "esTerceroNoLibre": true,
+  "licencia": "GPL-3.0 (binario de release redistribuido, no se compila en este proyecto)",
+  "origen": "https://github.com/topjohnwu/Magisk",
+  "descripcion": "Da acceso root dentro de la instancia parcheando el boot/ramdisk, e integra su gestor de modulos.",
+  "queToca": [
+    "parchea el boot/ramdisk de la instancia para habilitar root",
+    "modifica /system y /data dentro del contenedor",
+    "descarga el binario de release desde GitHub (no controlado por este proyecto)"
+  ],
+  "compatibleCon": {
+    "androidVersion": [15],
+    "gpuMode": ["host", "guest"]
+  },
+  "version": 1
+}
