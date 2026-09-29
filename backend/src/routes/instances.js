@@ -2,11 +2,11 @@ const express = require('express');
 const runtime = require('../lib/dockerRuntime');
 const binder = require('../lib/binder');
 const hwsimWifi = require('../lib/hwsimWifi');
-const hwAccel = require('../lib/hwAccel');
 const androidIdentity = require('../lib/androidIdentity');
 const store = require('../lib/store');
 const portAllocator = require('../lib/portAllocator');
 const moduleGate = require('../lib/moduleGate');
+const moduleRunner = require('../lib/moduleRunner');
 const catalog = require('../../images.json');
 
 const router = express.Router();
@@ -29,17 +29,17 @@ function findImage(imageId) {
 // aceptacion vigente de su manifest, o no es compatible con la imagen
 // elegida (compatibleCon). Se llama antes de tocar Docker para nada: "el
 // backend ejecuta el script/integra el componente" solo despues de esto.
-function assertModulesReady(img) {
-  const result = moduleGate.check(img);
+async function assertModulesReady(img) {
+  const result = await moduleGate.check(img);
   if (!result.ok) {
     throw Object.assign(new Error(result.error), { httpStatus: result.httpStatus, modules: result.modules });
   }
 }
 
 // Uso estricto (create): la imagen tiene que existir en el catalogo.
-function resolveImageAndGate(imageId) {
+async function resolveImageAndGate(imageId) {
   const img = findImage(imageId);
-  assertModulesReady(img);
+  await assertModulesReady(img);
   return img;
 }
 
@@ -47,13 +47,32 @@ function resolveImageAndGate(imageId) {
 // imagen ya no esta en el catalogo (se pudo editar images.json despues de
 // crear la instancia), no bloquea el arranque -- antes de este gate,
 // start/restart nunca dependian del catalogo.
-function revalidateModulesIfImageKnown(instance) {
+async function revalidateModulesIfImageKnown(instance) {
   const img = catalog.find((i) => i.id === instance.imageId);
   if (!img) {
     console.warn(`[instances] "${instance.imageId}" ya no esta en el catalogo -- se omite la revalidacion de modulos para ${instance.id}`);
     return;
   }
-  assertModulesReady(img);
+  await assertModulesReady(img);
+}
+
+// requiredModuleIds se calcula una vez al crear (a partir de la imagen que
+// SI estaba en el catalogo en ese momento) y se persiste en la instancia --
+// asi start/restart pueden correr las etapas 5/6 del runner generico
+// (moduleRunner.js) sin depender de que la imagen siga en el catalogo mas
+// adelante, mismo criterio que ya usaba el campo `hwEncCapable` guardado por
+// instancia antes de esta fase.
+//
+// Fallback para instancias creadas ANTES de esta fase (no tienen
+// requiredModuleIds persistido): en vez de asumir "ningun modulo requerido"
+// (que saltearia ensureHostInfraReady/scheduleRuntimeFixups en silencio para
+// una instancia que si los necesita, ej. hwEncCapable=true), se recalcula
+// desde el catalogo con el mismo criterio que revalidateModulesIfImageKnown
+// -- solo si la imagen ya no esta en el catalogo se resigna a [].
+function requiredModuleIdsFor(instance) {
+  if (instance.requiredModuleIds) return instance.requiredModuleIds;
+  const img = catalog.find((i) => i.id === instance.imageId);
+  return img ? moduleGate.requiredModuleIdsForImage(img) : [];
 }
 
 // e.modules (lista de manifests pendientes de aceptar, ver moduleGate.js) se
@@ -69,14 +88,6 @@ function scheduleWifiFixes(instance) {
   hwsimWifi.scheduleHwsimWifiFix(instance.id, instance.containerId);
   hwsimWifi.scheduleWifiConnectedFix(instance.id, instance.containerId);
   hwsimWifi.scheduleEth0RoutingFix(instance.id, instance.containerId);
-}
-
-// A diferencia de scheduleWifiFixes (fire-and-forget, corre despues del
-// start), esto tiene que resolver ANTES del start: el bind del socket ya
-// tiene que existir en el HostConfig del contenedor al crearlo/arrancarlo.
-async function ensureHwAccelIfNeeded(instance) {
-  if (!instance.hwEncCapable) return;
-  await hwAccel.ensureDaemonRunning();
 }
 
 async function withRuntimeStatus(instance) {
@@ -101,12 +112,15 @@ router.post('/', async (req, res) => {
       throw httpError(`Ya existe una instancia llamada "${name}"`, 409);
     }
 
-    const img = resolveImageAndGate(imageId);
+    const img = await resolveImageAndGate(imageId);
+    // Que modulos requiere esta imagen (moduleGate.js) -- se persiste en la
+    // instancia (ver requiredModuleIdsFor()) para que start/restart no
+    // dependan de que la imagen siga en el catalogo despues.
+    const requiredModuleIds = moduleGate.requiredModuleIdsForImage(img);
     const adbPort = portAllocator.nextPort();
     const slot = binder.nextFreeSlot();
     const volumeName = `redroid-forge-${name}`;
     const binds = [...binder.binderBinds(slot), `${volumeName}:/data`];
-    if (img.hwEncCapable) binds.push(hwAccel.daemonBind());
 
     const cmd = [
       `androidboot.redroid_width=${width || 720}`,
@@ -116,6 +130,15 @@ router.post('/', async (req, res) => {
       `androidboot.redroid_gpu_mode=${img.gpuMode}`,
     ];
 
+    // Etapa 3 (moduleRunner.js): cada modulo requerido que declare "etapa"/
+    // "entry" en su manifest puede sumar binds/cmd propios antes de crear el
+    // contenedor -- puramente aditivo sobre lo que ya arma este handler. Es
+    // lo que reemplaza el `if (img.hwEncCapable) binds.push(...)` que antes
+    // vivia hardcodeado aca.
+    const createReq = await moduleRunner.prepareCreate(requiredModuleIds);
+    binds.push(...createReq.binds);
+    cmd.push(...createReq.cmd);
+
     const containerId = await runtime.create({
       name: `redroid-${name}`,
       image: img.dockerImage,
@@ -123,6 +146,20 @@ router.post('/', async (req, res) => {
       binds,
       adbPort,
     });
+
+    // Etapa 4: entre create() y start() -- unica ventana en la que /vendor es
+    // escribible (ver docs/ARQUITECTURA.md). Si un modulo falla aca, no se
+    // sigue a start(): mejor limpiar el contenedor recien creado que dejarlo
+    // huerfano -- todavia no se llego a store.upsert(), asi que sin este
+    // cleanup quedaria invisible para el DELETE de la API (habria que
+    // borrarlo a mano con `docker rm`).
+    try {
+      await moduleRunner.integrate(requiredModuleIds, containerId);
+    } catch (e) {
+      await runtime.remove(containerId, { force: true }).catch(() => {});
+      await runtime.removeVolume(volumeName).catch(() => {});
+      throw e;
+    }
 
     const instance = {
       id: containerId,
@@ -136,15 +173,21 @@ router.post('/', async (req, res) => {
       needsHwsimWifi: !!img.needsHwsimWifi,
       hasGapps: !!img.hasGapps,
       hwEncCapable: !!img.hwEncCapable,
+      requiredModuleIds,
       androidId: null,
       androidIdRegisteredAt: null,
       createdAt: new Date().toISOString(),
     };
     store.upsert(instance);
 
-    await ensureHwAccelIfNeeded(instance);
+    // Etapa 5: infraestructura del host (ej. el daemon VA-API de hwAccel.js,
+    // via el hook de hwenc) -- tiene que estar lista antes del start.
+    await moduleRunner.ensureHostInfraReady(requiredModuleIds);
     await runtime.start(containerId);
     scheduleWifiFixes(instance);
+    // Etapa 6: fixups post-boot fire-and-forget (mismo patron que
+    // scheduleWifiFixes), no bloquean la respuesta.
+    moduleRunner.scheduleRuntimeFixups(requiredModuleIds, containerId);
     if (instance.hasGapps) androidIdentity.scheduleFetch(instance.id);
 
     res.status(201).json(await withRuntimeStatus(instance));
@@ -160,10 +203,12 @@ router.post('/:id/start', async (req, res) => {
     // Revalida el contrato en cada arranque, no solo al crear: si el
     // manifest de un modulo que esta instancia usa subio de version desde
     // que se creo, el proximo arranque queda bloqueado hasta reaceptar.
-    revalidateModulesIfImageKnown(instance);
-    await ensureHwAccelIfNeeded(instance);
+    await revalidateModulesIfImageKnown(instance);
+    const requiredModuleIds = requiredModuleIdsFor(instance);
+    await moduleRunner.ensureHostInfraReady(requiredModuleIds);
     await runtime.start(instance.containerId);
     scheduleWifiFixes(instance);
+    moduleRunner.scheduleRuntimeFixups(requiredModuleIds, instance.containerId);
     res.json(await withRuntimeStatus(instance));
   } catch (e) {
     sendError(res, e);
@@ -185,10 +230,12 @@ router.post('/:id/restart', async (req, res) => {
   const instance = store.get(req.params.id);
   if (!instance) return res.status(404).json({ error: 'Instancia no encontrada' });
   try {
-    revalidateModulesIfImageKnown(instance);
-    await ensureHwAccelIfNeeded(instance);
+    await revalidateModulesIfImageKnown(instance);
+    const requiredModuleIds = requiredModuleIdsFor(instance);
+    await moduleRunner.ensureHostInfraReady(requiredModuleIds);
     await runtime.restart(instance.containerId);
     scheduleWifiFixes(instance);
+    moduleRunner.scheduleRuntimeFixups(requiredModuleIds, instance.containerId);
     res.json(await withRuntimeStatus(instance));
   } catch (e) {
     sendError(res, e);

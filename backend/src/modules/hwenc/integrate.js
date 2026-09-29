@@ -1,10 +1,18 @@
 #!/usr/bin/env node
 'use strict';
 
-// Modulo hwenc (etapas 4 y 5, ver manifest.json y docs/ARQUITECTURA.md):
-// integra el componente Codec2 de VA-API (proyecto redroid-hwenc,
-// Apache-2.0, mismo autor que redroid-forge) en una instancia recien
-// creada, mientras todavia esta detenida.
+// Modulo hwenc (etapas 3, 4, 5 y 6 -- ver manifest.json, moduleRunner.js y
+// docs/ARQUITECTURA.md): integra el componente Codec2 de VA-API (proyecto
+// redroid-hwenc, Apache-2.0, mismo autor que redroid-forge) en una instancia
+// recien creada, mientras todavia esta detenida, y lo deja usable en runtime.
+//
+// Primer modulo que corre a traves del runner generico
+// (backend/src/lib/moduleRunner.js) en vez de estar cableado a mano en
+// instances.js -- expone un hook por etapa que declara en su manifest.json
+// ("etapa": [3, 4, 5, 6]), con el nombre fijo que ese runner espera:
+// prepareCreate (3), integrate (4), ensureHostInfraReady (5),
+// ensureRuntimeReady (6, se llamaba ensureHwencReady antes de esta
+// convencion).
 //
 // A diferencia de GApps/Magisk (seccion 6 de REQUIREMENTS.md), esto SI es
 // codigo propio 100% libre -- no aplica la restriccion de "nunca alojar el
@@ -30,13 +38,14 @@
 // el binario que baja este modulo), falta la entrada de media_codecs.xml
 // (ya la resuelve patchMediaCodecsXml), y el CSD del encoder (ya corregido
 // en el componente). El unico que sigue sin automatizarse es la property
-// AIDL/HIDL -- ver ensureHwencReady() mas abajo.
+// AIDL/HIDL -- ver ensureRuntimeReady() mas abajo.
 
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { execFile } = require('child_process');
 const { promisify } = require('util');
+const hwAccel = require('../../lib/hwAccel');
 const execFileAsync = promisify(execFile);
 
 const ARTIFACTS_DIR = process.env.REDROID_HWENC_ARTIFACTS_DIR
@@ -84,6 +93,20 @@ const REQUIRED_BOOT_FLAGS = ['androidboot.use_redroid_c2=1'];
 const C2_ENCODER_NAME = 'c2.hardware.encoder.h264';
 
 function log(msg) { console.log(`[hwenc-integrate] ${msg}`); }
+
+// Etapa 3 (ver manifest.json y backend/src/lib/moduleRunner.js): que necesita
+// ESTE MODULO al momento de `docker create`, antes de que exista el
+// contenedor. Hasta ahora esto vivia hardcodeado a mano en instances.js
+// (`if (img.hwEncCapable) binds.push(hwAccel.daemonBind())` + el flag de
+// REQUIRED_BOOT_FLAGS sumado aparte, y sin usar en ningun lado) -- el runner
+// generico llama a esta funcion en vez de que instances.js sepa que hwenc
+// existe. El bind del socket del daemon (hwAccel.js, etapa 5) se declara
+// aca, no ahi: es lo que esta instancia necesita para poder hablar con ese
+// daemon una vez arrancada, aunque el daemon en si sea infraestructura
+// separada del host.
+function prepareCreate() {
+  return { binds: [hwAccel.daemonBind()], cmd: REQUIRED_BOOT_FLAGS };
+}
 
 // No reemplaza media_codecs.xml entero -- cada imagen base (oficial,
 // custom, lo que sea) puede traer includes/entradas propias que no
@@ -157,7 +180,19 @@ async function integrate(containerId) {
     'etc/init/redroid-nodcc.rc',
   );
   await patchMediaCodecsXml(containerId);
-  log('listo. Recordar: el Cmd de este contenedor tiene que incluir ' + REQUIRED_BOOT_FLAGS.join(', '));
+  log('listo -- prepareCreate() ya se encargo de sumar los boot flags requeridos al Cmd del contenedor.');
+}
+
+// Etapa 5 (ver manifest.json y moduleRunner.js): infraestructura del host de
+// la que esta instancia depende para hablar con el encoder, independiente de
+// cualquier instancia puntual. La logica real (spawnear el daemon, detectar
+// si ya esta vivo, etc.) vive en hwAccel.js y no se duplica aca -- este
+// modulo solo expone el hook con el nombre que el runner generico espera,
+// delegando. Es la misma decision que ya explicaba el README de este modulo
+// antes de que existiera un runner generico; ahora ademas queda enganchada
+// al ciclo de vida sin casing especial en instances.js.
+async function ensureHostInfraReady() {
+  await hwAccel.ensureDaemonRunning();
 }
 
 // Etapa 6 (ver docs/ARQUITECTURA.md): a diferencia de integrate(), esto
@@ -172,7 +207,11 @@ async function integrate(containerId) {
 // [PENDIENTE] mover esto a un init trigger propio (redroid.c2.rc ya hace
 // algo parecido gateado en un boot flag) para no depender de esto en
 // runtime.
-async function ensureHwencReady(containerId) {
+//
+// Nombre alineado a la convencion generica del runner (STAGE_EXPORT_NAME[6]
+// = "ensureRuntimeReady") -- se llamaba ensureHwencReady() antes de que
+// existiera esa convencion.
+async function ensureRuntimeReady(containerId) {
   // `docker exec` ya aterriza como uid=0 en la imagen oficial de redroid
   // (confirmado en vivo el 29/09) -- a diferencia del patron `su -c` que
   // usa hwsimWifi.js/redroid.service.ts para las imagenes custom con
@@ -184,7 +223,9 @@ async function ensureHwencReady(containerId) {
   log('media.c2.hal.selection=aidl aplicado, mediaserver reiniciado');
 }
 
-module.exports = { integrate, ensureHwencReady, FILES, REQUIRED_BOOT_FLAGS, ARTIFACTS_DIR };
+module.exports = {
+  prepareCreate, integrate, ensureHostInfraReady, ensureRuntimeReady, FILES, REQUIRED_BOOT_FLAGS, ARTIFACTS_DIR,
+};
 
 if (require.main === module) {
   const containerId = process.argv[2];
