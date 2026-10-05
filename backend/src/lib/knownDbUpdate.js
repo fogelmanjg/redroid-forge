@@ -102,6 +102,10 @@ async function applyUpdate({
   } catch {
     throw new UpdateError('la base descargada no es JSON valido', 'formato');
   }
+  // Misma base que ya tenemos (con firma valida): no es un error, ya esta al dia.
+  if (Number.isInteger(candidate.serial) && candidate.serial === current.serial) {
+    return { aplicada: false, serial: current.serial, motivo: 'ya tenes la ultima base publicada' };
+  }
   const verdict = knownDb.checkUpdateAcceptable(candidate, current, forgeVersion);
   if (!verdict.ok) throw new UpdateError(`base rechazada: ${verdict.motivo}`, 'rechazada');
   // 3. Recien ahora se toca el disco: la anterior queda como .prev.

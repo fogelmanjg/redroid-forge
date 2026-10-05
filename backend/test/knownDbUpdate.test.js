@@ -95,12 +95,23 @@ test('rotacion: vale la firma de cualquier clave de la lista', async () => {
   });
 });
 
-test('rollback (serial igual o menor) con firma valida: se rechaza', async () => {
+test('rollback (serial MENOR) con firma valida: se rechaza', async () => {
   const kp = newKey();
-  await serve(published(clone(snapshot), kp), async (baseUrl) => {
+  await serve(published({ ...clone(snapshot), serial: snapshot.serial - 1 }, kp), async (baseUrl) => {
     await assert.rejects(upd.applyUpdate({ baseUrl, trustedKeys: [pem(kp)], current: snapshot, cachePath: tmpCache() }),
       (e) => e.code === 'rechazada' && /no es mayor/.test(e.message));
   });
+});
+
+test('mismo serial con firma valida: no es error, ya esta al dia (y no escribe)', async () => {
+  const kp = newKey();
+  const cachePath = tmpCache();
+  await serve(published(clone(snapshot), kp), async (baseUrl) => {
+    const r = await upd.applyUpdate({ baseUrl, trustedKeys: [pem(kp)], current: snapshot, cachePath });
+    assert.strictEqual(r.aplicada, false);
+    assert.match(r.motivo, /ultima base/);
+  });
+  assert.strictEqual(fs.existsSync(cachePath), false);
 });
 
 test('base que exige un forge mas nuevo: se rechaza', async () => {
