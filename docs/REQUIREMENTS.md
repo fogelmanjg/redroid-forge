@@ -41,6 +41,15 @@ tablero de control.
 
 ### Tiers de soporte por imagen (no una restricción dura)
 
+**Versiones mantenidas (decidido 05/10/2026):** se mantienen en el catálogo
+las **imágenes oficiales de Redroid 11, 13 y 15, y probablemente también 12 y
+14** — siempre la imagen oficial sin modificar (ver "Base de datos de
+combinaciones conocidas" más abajo), nunca imágenes armadas a mano. **Solo
+Redroid 15 tiene soporte completo** (tier "oficial"); el resto es tier
+"comunidad": se ofrecen y corren, pero sin garantía de que los módulos
+funcionen. Una versión sube de tier únicamente cuando una combinación
+validada entra en la base de datos.
+
 Redroid 11 y 13 andan para algunas cosas (11 arranca y corre instancias
 básicas; 13 se probó y funciona en `gpuMode: guest`), pero sin el resto de
 los módulos (hwenc, nvidia, wifi falso) validados sobre esas versiones —
@@ -59,6 +68,56 @@ declaran esto como metadata, no como código especial por versión:
 - La UI/Doctor muestra el tier de la imagen elegida de forma visible (ej.
   "✅ Oficial" vs "⚠️ Comunidad, sin soporte completo") — mismo criterio de
   transparencia que rige el resto del proyecto: nunca ocultar limitaciones.
+
+### Base de datos de combinaciones conocidas (decidido 05/10/2026)
+
+**Regla de base:** redroid-forge parte **siempre de la imagen oficial de
+Redroid 15, sin modificar**. GApps, Magisk, hwenc, wifi falso y demás se
+integran **por instancia, al crearla, solo si hace falta**, como módulos.
+No se usan imágenes prearmadas/personalizadas: atan el proyecto a un build
+host, mezclan contenido no libre (GApps) dentro de una imagen redistribuible
+y hacen imposible razonar sobre qué está realmente corriendo.
+
+**Soporte = combinación conocida, no "imagen".** El proyecto mantiene una
+base de datos de combinaciones **validadas**. Cada entrada fija:
+
+- **Base:** imagen oficial identificada por **digest `sha256`**, no por tag
+  (`15.0.0-latest` es un tag móvil: dos hosts pueden bajar cosas distintas).
+- **Paquete GApps:** versión, origen y `sha256` conocidos.
+- **Versión de Magisk** (si aplica): versión y `sha256`.
+- **Módulos** y sus versiones de manifest validados sobre esa base.
+- **Hardware** sobre el que se validó (tabla estilo `redroid-hwenc`: AMD
+  Polaris/Vega, Intel Iris Xe, NVIDIA...) y fecha de validación.
+
+Consecuencias:
+
+- Una combinación presente en la base es **tier "oficial"**: es lo que el
+  proyecto soporta y a lo que responde ante un reporte de error. El primer
+  filtro de cualquier reporte es "¿es una combinación conocida?".
+- Una imagen base, paquete GApps o versión de Magisk **fuera de la base** no se
+  bloquea (coherente con los tiers de arriba), pero queda **sin soporte** y
+  con advertencia visible en UI/Doctor, y se ofrecen solo los módulos que
+  puedan garantizarse sobre ella.
+- Los binarios de terceros (GApps, Magisk) se **verifican contra el `sha256`
+  de la base antes de usarse**; si no coincide, no se inyectan. Nunca se
+  descarga "la última versión" sin fijar.
+- El módulo GApps/Magisk recibe su origen y checksum **de la base**, no los
+  trae hardcodeados en su manifest.
+
+**La base vive en un repositorio externo**, separado del código de
+redroid-forge, y es **actualizable** por el usuario:
+
+- Cada release de redroid-forge **incluye un snapshot** de la base con lo
+  último conocido al momento de liberarla (así funciona offline y es
+  reproducible por versión).
+- Opcionalmente (acción explícita del usuario, nunca silenciosa) se puede
+  **actualizar la base** desde el repositorio externo para ver combinaciones
+  validadas después de esa release, sin esperar una versión nueva.
+- La base actualizada se **verifica** (firma o hash publicado) antes de
+  reemplazar el snapshot; si falla, se conserva el anterior.
+- **[PENDIENTE]** formato exacto (JSON/YAML), nombre y ubicación del
+  repositorio, mecanismo de verificación (firma vs. hash), y cómo se aportan
+  combinaciones nuevas (PR con evidencia de validación).
 
 - **CIFI (watchdog de reapertura automática) migra de Redroid 11 a Redroid
   15.** Se había dejado en 11 por menor consumo de recursos frente al encoder
@@ -275,7 +334,7 @@ para v1.
 | Nombre | `redroid-forge` (verificado libre en GitHub, npm y Docker Hub — se descartó `jg-redroid-manager` por demasiado personal, y `redroid-manager` a secas por estar tomado y ser un espacio ya poblado) |
 | Ubicación | Repo nuevo standalone en GitHub (no dentro de Plenum) |
 | Visibilidad | **Público** (implicado por el objetivo de popularidad — ver sección 8) |
-| Versión de Android objetivo | Redroid 15 = tier "oficial"; 11/13 = tier "comunidad", no bloqueadas (sección 2) |
+| Versión de Android objetivo | Imágenes oficiales 11, 13 y 15 (probablemente 12 y 14); soporte completo solo en 15 = tier "oficial"; el resto "comunidad", no bloqueadas (sección 2) |
 | `jg-dashboard` | Deja de tener redroid integrado, pasa a consumir `redroid-forge`; código viejo convive hasta que el nuevo esté completo |
 | `plenum-redroid` | Misma política que `jg-dashboard` |
 | `jg-escritorio` | Fuera de alcance, no relevante para este proyecto |
@@ -284,10 +343,13 @@ para v1.
 | Contrato de módulo | Manifest estructurado (JSON/YAML) versionado por módulo, ver sección 5 |
 | Stack técnico | Node.js + Express + `dockerode`, sin build step; frontend vanilla HTML/CSS/JS |
 | CIFI | Migra de Redroid 11 a 15; entra como caso piloto de módulo de extensibilidad de usuario |
+| Imágenes base | Solo la imagen oficial de Redroid 15, sin modificar; GApps/Magisk/etc. se integran por instancia. Soporte = combinación conocida (base por digest + GApps + Magisk + módulos) en una base de datos en repo externo, actualizable, con snapshot por release (sección 2) |
 | Catálogo de módulos | No es cerrado — existe convención para módulos definidos por el usuario, ver sección 5 |
 
 ## 10. Pendiente / abierto
 
+- **[PENDIENTE] Base de datos de combinaciones conocidas** (sección 2) —
+  formato, repositorio, verificación de integridad y flujo de contribución.
 - **[PENDIENTE] Mecanismo de donaciones/soporte** — recién se decide en beta
   0.9 (GitHub Sponsors, Open Collective, contrato de soporte directo, etc.).
 - **[PENDIENTE] Convención exacta de módulos definidos por el usuario**

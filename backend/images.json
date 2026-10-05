@@ -1,41 +1,15 @@
 [
   {
-    "id": "android-11-gapps",
-    "label": "Android 11 · GApps",
-    "dockerImage": "android-redroid:11-gapps",
-    "androidVersion": 11,
-    "gpuMode": "host",
-    "needsHwsimWifi": false,
-    "hasGapps": true,
-    "hasMagisk": false,
-    "hwEncCapable": false,
-    "soporte": "comunidad",
-    "notaSoporte": "Arranca y corre instancias basicas. No probado con hwenc, nvidia ni wifi falso."
-  },
-  {
-    "id": "android-15-jg-gapps-official",
-    "label": "Android 15 · GApps oficial · NDK · ARM64 fix · Magisk — v2.0",
-    "dockerImage": "redroid-jg-15:gapps-official",
+    "id": "android-15-official",
+    "label": "Android 15 · Redroid oficial",
+    "dockerImage": "redroid/redroid:15.0.0-latest",
     "androidVersion": 15,
     "gpuMode": "host",
     "needsHwsimWifi": false,
-    "hasGapps": true,
-    "hasMagisk": true,
-    "hwEncCapable": false,
-    "soporte": "oficial",
-    "notaSoporte": "Wifi falso y device profile validados. hwenc/nvidia (redroid-hwenc/redroid-nvidia) NO estan en esta imagen -- son trabajo posterior a esta build (jul/2026), falta un rebuild de AOSP+Docker con el componente Codec2 real para tenerlo."
-  },
-  {
-    "id": "android-15-jg-wifi-v3",
-    "label": "Android 15 · GApps oficial · WiFi real v3 (fix desconexion + IP stale + hwsim rename)",
-    "dockerImage": "redroid-jg-15:wifi-v3",
-    "androidVersion": 15,
-    "gpuMode": "host",
-    "needsHwsimWifi": true,
-    "hasGapps": true,
+    "hasGapps": false,
     "hasMagisk": false,
-    "hwEncCapable": false,
+    "hwEncCapable": true,
     "soporte": "oficial",
-    "notaSoporte": "Wifi falso y device profile validados. hwenc/nvidia (redroid-hwenc/redroid-nvidia) NO estan en esta imagen -- son trabajo posterior a esta build (jul/2026), falta un rebuild de AOSP+Docker con el componente Codec2 real para tenerlo."
+    "notaSoporte": "Imagen oficial sin modificar: es la unica base prevista para redroid-forge. Los extras (GApps, Magisk, hwenc, wifi falso) se integran por instancia al crearla, como modulos. hwenc validado contra esta imagen (29-30/09)."
   }
 ]

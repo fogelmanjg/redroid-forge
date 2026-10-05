@@ -61,6 +61,11 @@ conocidos (ej. el artefacto de scanline en la 4060 con el driver
 3. Sumar selección de modo GPU (host/soft) y detección de vendor al flujo
    de creación de instancia.
 4. Validar en un host AMD/Intel real y en un host NVIDIA real.
+   - ✅ **AMD Polaris (RX 480, jgustavo46) validado el 05/10/2026** con la
+     imagen oficial `redroid/redroid:15.0.0-latest` + módulo hwenc: Doctor
+     verde (binder legacy), daemon elige solo el import VA-API pre-modificador
+     (Tier 5.12), encoder `c2.hardware.encoder.h264` registrado, `screenrecord`
+     5 s = 74 frames H.264 con imagen correcta. Faltan Intel y NVIDIA.
 
 **Gate:** una instancia creada desde `redroid-forge` reproduce el mismo
 comportamiento de aceleración ya validado por separado, en al menos un host
@@ -167,6 +172,17 @@ piloto (CIFI) es un script con bugs sutiles ya conocidos (herencia de lock
 de `adb` tras reboot) que hay que no reintroducir al migrarlo.
 
 **Pasos:**
+0. ⬜ Abierto — **Base de datos de combinaciones conocidas + módulos
+   GApps/Magisk sobre la imagen oficial** (decisión 05/10/2026, ver
+   `REQUIREMENTS.md` sección 2). Reemplaza a las imágenes custom del catálogo
+   (`gapps-official`, `wifi-v3`): la base es la imagen oficial fijada por
+   digest, y GApps/Magisk se inyectan por instancia desde paquetes con
+   versión y `sha256` conocidos, verificados antes de usarse. Incluye: formato
+   de la base, snapshot incluido en cada release, actualización opcional desde
+   el repo externo con verificación, y tier "sin soporte" para lo que no esté
+   en la base. Las imágenes que usa el redroid de `jg-dashboard` se siguen
+   manteniendo allá, pero no son relevantes para `redroid-forge`: son
+   proyectos separados y no tienen que ser compatibles entre sí.
 1. ✅ **Hecho, parcial** — Diseñada e implementada la convención para
    módulos con lógica de ejecución ligada al **ciclo de vida de una
    instancia** (etapas 3-6, ver `docs/ARQUITECTURA.md` sección "Fase 5: el
@@ -241,6 +257,14 @@ codebases distintas (Angular/NestJS en un caso, el módulo federado de
 Plenum en el otro), y hay que coordinar la migración sin downtime real
 sobre instancias que están en uso.
 
+**Aclaración (05/10/2026):** `redroid-forge` y el redroid de `jg-dashboard`
+se tratan como **dos proyectos separados que no tienen que ser compatibles
+entre sí** (ni imágenes, ni instancias, ni estado). Por eso las pruebas de
+`redroid-forge` se hacen en `jgustavo46` y no en server01. Cuando
+`redroid-forge` esté funcionando, el redroid del dashboard se **quita y se
+reemplaza** por `redroid-forge`; recién en ese momento se vuelve a server01.
+No hay migración de imágenes ni de instancias del dashboard viejo.
+
 **Pasos:**
 1. `jg-dashboard` pasa a llamar a la API/embed de `redroid-forge` en
    vez de usar su propio `redroid.service.ts`.
@@ -271,3 +295,20 @@ se retoma el mecanismo de donaciones/soporte (sección 8 de
   `REQUIREMENTS.md` sección 10) — se evalúan e insertan en la fase que
   corresponda cuando se identifiquen, no generan una fase propia por sí
   solos.
+- **Bloqueador de publicidad configurable (idea, 04/10/2026).** A nivel
+  sistema y por aplicación. Encaja como módulo de usuario de la Fase 5
+  (manifest + script), no como parte del core. Diseño a decidir; opciones
+  vistas:
+  - *Cliente VPN local* (NetGuard probado a mano, no necesita root): permite
+    reglas por app (uid). Requisito de plataforma: Android abre `/dev/tun`,
+    no `/dev/net/tun`; el contenedor debe crearse con
+    `--device /dev/net/tun:/dev/tun` (o `mknod /dev/tun c 10 200`, que no
+    sobrevive a recrear el contenedor). Sin ese nodo `Vpn.jniCreate` falla
+    con "Cannot create interface" y la VPN nunca se establece.
+  - *Efecto colateral a resolver:* la VPN también captura a `adbd` (uid
+    2000); con bloqueo activo el adb TCP queda inalcanzable. El módulo debe
+    permitir `com.android.shell` por defecto.
+  - *Alternativa sin VPN:* DNS privado / filtrado a nivel red del host
+    (bloqueo por dominio, sin granularidad por app).
+  - Reglas por app: definir si se guardan en el manifest del módulo o por
+    instancia.

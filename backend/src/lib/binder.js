@@ -37,13 +37,33 @@ function nextFreeSlot() {
   return slot;
 }
 
+// Kernels sin CONFIG_ANDROID_BINDERFS (ej. jgustavo46, ver Doctor): no hay
+// binderfs ni binder-control, los nodos los crea el modulo binder_linux al
+// cargarse, segun su parametro `devices=` (/dev/binderN, /dev/hwbinderN, ...).
+// No se pueden crear en caliente -- si el slot pedido no esta en `devices=`,
+// hay que ampliar ese parametro y recargar el modulo.
+function useLegacyBinder(exists = fs.existsSync) {
+  return !exists(`${BINDERFS_ROOT}/binder-control`);
+}
+
 // Devuelve los binds Docker "/dev/binderfs/binderN:/dev/binder" (y hwbinder/vndbinder)
-// para un slot dado, creando los dispositivos si hace falta.
-function binderBinds(slot) {
+// para un slot dado, creando los dispositivos si hace falta. En modo legacy el
+// origen es "/dev/binderN" y se exige que ya exista.
+function binderBinds(slot, { legacy = useLegacyBinder(), exists = fs.existsSync } = {}) {
   const names = [`binder${slot}`, `hwbinder${slot}`, `vndbinder${slot}`];
   const targets = ['/dev/binder', '/dev/hwbinder', '/dev/vndbinder'];
+  if (legacy) {
+    const missing = names.filter((n) => !exists(`/dev/${n}`));
+    if (missing.length) {
+      throw new Error(
+        `binder legacy: faltan /dev/${missing.join(', /dev/')} -- el modulo binder_linux no los creo. ` +
+        'Ampliar "options binder_linux devices=..." (ver Doctor) y recargar el modulo.'
+      );
+    }
+    return names.map((n, i) => `/dev/${n}:${targets[i]}`);
+  }
   names.forEach(ensureBinderDevice);
   return names.map((n, i) => `${BINDERFS_ROOT}/${n}:${targets[i]}`);
 }
 
-module.exports = { nextFreeSlot, binderBinds, BINDERFS_ROOT };
+module.exports = { nextFreeSlot, binderBinds, useLegacyBinder, BINDERFS_ROOT };
