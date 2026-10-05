@@ -180,8 +180,9 @@ de `adb` tras reboot) que hay que no reintroducir al migrarlo.
    versión y `sha256` conocidos, verificados antes de usarse. Incluye: formato
    de la base, snapshot incluido en cada release, actualización opcional desde
    el repo externo con verificación, y tier "sin soporte" para lo que no esté
-   en la base. Es prerrequisito de la Fase 7 (reemplazar el redroid del
-   dashboard, que hoy depende de esas imágenes).
+   en la base. Las imágenes que usa el redroid de `jg-dashboard` se siguen
+   manteniendo allá, pero no son relevantes para `redroid-forge`: son
+   proyectos separados y no tienen que ser compatibles entre sí.
 1. ✅ **Hecho, parcial** — Diseñada e implementada la convención para
    módulos con lógica de ejecución ligada al **ciclo de vida de una
    instancia** (etapas 3-6, ver `docs/ARQUITECTURA.md` sección "Fase 5: el
@@ -255,6 +256,14 @@ prendido, Keycloak filtra el acceso.
 codebases distintas (Angular/NestJS en un caso, el módulo federado de
 Plenum en el otro), y hay que coordinar la migración sin downtime real
 sobre instancias que están en uso.
+
+**Aclaración (05/10/2026):** `redroid-forge` y el redroid de `jg-dashboard`
+se tratan como **dos proyectos separados que no tienen que ser compatibles
+entre sí** (ni imágenes, ni instancias, ni estado). Por eso las pruebas de
+`redroid-forge` se hacen en `jgustavo46` y no en server01. Cuando
+`redroid-forge` esté funcionando, el redroid del dashboard se **quita y se
+reemplaza** por `redroid-forge`; recién en ese momento se vuelve a server01.
+No hay migración de imágenes ni de instancias del dashboard viejo.
 
 **Pasos:**
 1. `jg-dashboard` pasa a llamar a la API/embed de `redroid-forge` en
