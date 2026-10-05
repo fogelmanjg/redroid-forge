@@ -194,7 +194,10 @@ de `adb` tras reboot) que hay que no reintroducir al migrarlo.
    ✅ hecho: núcleo puro `backend/src/lib/knownDb.js` (validación, resolución
    de soporte, `serial` anti-rollback, firma ed25519) + snapshot semilla
    `backend/db/snapshot.json` + tests. **Todavía no está cableado** a la
-   creación de instancias. Las imágenes que usa el redroid de `jg-dashboard` se siguen
+   creación de instancias. Sub-paso 2 ✅ hecho: API de solo lectura
+   (`/api/db`, `/api/db/combinaciones`), carga por `serial` con fallback
+   (`knownDbStore.js`) y check en el Doctor; snapshot en `serial` 2 con la
+   validación de Intel Iris Xe. Las imágenes que usa el redroid de `jg-dashboard` se siguen
    manteniendo allá, pero no son relevantes para `redroid-forge`: son
    proyectos separados y no tienen que ser compatibles entre sí.
 1. ✅ **Hecho, parcial** — Diseñada e implementada la convención para

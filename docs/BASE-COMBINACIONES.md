@@ -340,7 +340,14 @@ que el trabajo humano no crezca linealmente con los usuarios:
 1. ✅ **Este documento + seed + núcleo puro** (`knownDb.js`: validar
    documento, resolver, comparar `serial`, verificar firma) con tests. Sin
    tocar el flujo de creación.
-2. API de solo lectura (`/api/db`) + check en el Doctor.
+2. ✅ **Hecho (05/10/2026)** API de solo lectura (`GET /api/db`,
+   `GET /api/db/combinaciones`) + check "Base de datos de combinaciones
+   conocidas" en el Doctor. Carga con `backend/src/lib/knownDbStore.js`: elige
+   por `serial` entre el snapshot y una copia descargada (todavía no existe
+   quién la descargue), ignora con aviso una copia inválida/rollback/que exija
+   un forge más nuevo, y nunca tumba la app por eso. El snapshot pasó a
+   `serial` 2: suma la validación de **Intel Iris Xe** y los `chequeos` de ambas
+   validaciones.
 3. Cargar snapshot/cache con elección por `serial`; `POST /api/db/update`
    con verificación completa.
 4. Cache y verificación de paquetes (descarga, `sha256`, import manual).
