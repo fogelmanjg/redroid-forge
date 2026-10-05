@@ -230,7 +230,24 @@ lugar se compromete. Se propone **firma ed25519 del `database.json`**:
 **Decidido (05/10/2026):** la clave se genera y se **firma por primera vez al
 liberar la primera versión usable completa** de redroid-forge, no antes (hasta
 entonces la base viaja solo como snapshot dentro de la release, que no
-necesita firma). Al principio se firma a mano; el modelo para cuando haya más
+necesita firma).
+
+**Clave dedicada, no una existente (decidido 05/10/2026).** No se reutiliza la
+clave SSH de ningún servidor: esa clave es una identidad de acceso a máquinas y
+a GitHub (si se filtra o se rota, se rompe el acceso; si la de firma se filtra,
+habría que rotar el acceso), vive en un servidor siempre encendido al alcance
+de procesos y agentes, y su comentario (`usuario@host`) quedaría publicado en
+un proyecto público. La clave de firma es nueva, con **passphrase**, y la
+privada vive **solo en la máquina de quien libera** (nunca en un servidor
+compartido ni en CI, ver 6.1). La herramienta `backend/scripts/db-sign.js`
+(`keygen`/`sign`/`verify`, sin dependencias) la genera y firma; se mudará al
+repo `redroid-forge-db`. Las claves **públicas** autorizadas van en
+`backend/db/trusted-keys.json`. **La clave del mantenedor se generó el
+05/10/2026** (`mantenedor-2026-10`, con passphrase; la privada vive en
+`~/.redroid-forge-keys/` de quien libera, fuera de cualquier repo). Un fork o
+espejo propio usa su lista con `REDROID_FORGE_DB_TRUSTED_KEYS_FILE`; si la
+lista queda vacía, la app no consulta ni aplica bases descargadas. Las bases se
+publican en el repo **`fogelmanjg/redroid-forge-db`** (ver su `RELEASING.md`). Al principio se firma a mano; el modelo para cuando haya más
 colaboradores está en 6.1.
 
 ### 4.4 Descarga de paquetes (GApps/Magisk)
@@ -348,8 +365,16 @@ que el trabajo humano no crezca linealmente con los usuarios:
    un forge más nuevo, y nunca tumba la app por eso. El snapshot pasó a
    `serial` 2: suma la validación de **Intel Iris Xe** y los `chequeos` de ambas
    validaciones.
-3. Cargar snapshot/cache con elección por `serial`; `POST /api/db/update`
-   con verificación completa.
+3. ✅ **Hecho (05/10/2026)** Descarga y actualización con verificación
+   completa (`backend/src/lib/knownDbUpdate.js`): la **firma se verifica sobre
+   los bytes descargados antes de parsear nada**, luego forma + `serial`
+   (anti-rollback) + `minForgeVersion`, y recién ahí se escribe (atómico, la
+   anterior queda como `database.prev.json`). `GET /api/db` informa el estado;
+   `POST /api/db/check` consulta (solo `latest.json`); `POST /api/db/update`
+   aplica (siempre acción explícita). Chequeo automático al abrir y cada 24 h
+   (solo consulta), desactivable con `REDROID_FORGE_DB_CHECK=0`; URL
+   configurable con `REDROID_FORGE_DB_URL` (espejos). Sin claves de confianza no
+   hay consultas de red.
 4. Cache y verificación de paquetes (descarga, `sha256`, import manual).
 5. Cableado en creación de instancia: `veredicto` persistido y mostrado;
    `images.json` derivado de `bases`.

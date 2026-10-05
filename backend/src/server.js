@@ -14,6 +14,9 @@ app.use('/api/db', require('./routes/db'));
 const PORT = process.env.PORT || 8080;
 app.listen(PORT, () => {
   console.log(`redroid-forge escuchando en :${PORT}`);
+  // Consulta (nunca aplica) si hay una base de combinaciones mas nueva: al
+  // abrir y una vez al dia. Desactivable con REDROID_FORGE_DB_CHECK=0.
+  require('./lib/knownDbUpdate').startScheduler();
 });
 
 // Última red: un bug en un solo request no puede tumbar el proceso entero

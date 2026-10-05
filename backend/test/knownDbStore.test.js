@@ -102,6 +102,12 @@ test('doctor.checkKnownDb: ok sobre el snapshot real', () => {
   assert.match(r.detail, /serial/);
 });
 
+// Los tests de rutas corren SIN claves de confianza (archivo vacio) para que
+// ninguno toque la red, aunque el build real traiga la clave del mantenedor.
+const NO_KEYS = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'nokeys-')), 'keys.json');
+fs.writeFileSync(NO_KEYS, JSON.stringify({ keys: [] }));
+process.env.REDROID_FORGE_DB_TRUSTED_KEYS_FILE = NO_KEYS;
+
 async function withServer(fn) {
   const app = express();
   app.use('/api/db', require('../src/routes/db'));
@@ -126,5 +132,31 @@ test('GET /api/db/combinaciones: lista con la base resuelta', async () => {
     assert.strictEqual(j.combinaciones[0].id, 'redroid15-hwenc');
     assert.strictEqual(j.combinaciones[0].baseInfo.id, 'redroid-15-2025-06-27');
     assert.strictEqual(j.combinaciones[0].validaciones.length, 2);
+  });
+});
+
+test('POST /api/db/update sin claves de confianza: 412 y mensaje claro', async () => {
+  await withServer(async (base) => {
+    const r = await fetch(`${base}/api/db/update`, { method: 'POST' });
+    assert.strictEqual(r.status, 412);
+    const j = await r.json();
+    assert.strictEqual(j.code, 'sin-claves');
+  });
+});
+
+test('POST /api/db/check sin claves: 502 y no hace ninguna conexion', async () => {
+  await withServer(async (base) => {
+    const r = await fetch(`${base}/api/db/check`, { method: 'POST' });
+    assert.strictEqual(r.status, 502);
+    assert.match((await r.json()).motivo, /sin claves/);
+  });
+});
+
+test('GET /api/db incluye el estado de la actualizacion', async () => {
+  await withServer(async (base) => {
+    const j = await (await fetch(`${base}/api/db`)).json();
+    assert.strictEqual(j.actualizacion.clavesDeConfianza, 0);
+    assert.strictEqual(j.actualizacion.chequeoAutomatico, true);
+    assert.match(j.actualizacion.urlBase, /redroid-forge-db/);
   });
 });
