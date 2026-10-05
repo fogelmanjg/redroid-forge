@@ -225,7 +225,9 @@ async function ensureHostInfraReady() {
 const RUNTIME_READY_MAX_ATTEMPTS = 8;
 const RUNTIME_READY_RETRY_DELAY_MS = 3000;
 
-async function execAndroidWithRetry(containerId, argv) {
+// `noRetryCodes`: exit codes que son una respuesta definitiva del comando (no
+// un "Android todavia no booteo") y por lo tanto no tiene sentido reintentar.
+async function execAndroidWithRetry(containerId, argv, { noRetryCodes = [] } = {}) {
   let lastErr;
   for (let attempt = 1; attempt <= RUNTIME_READY_MAX_ATTEMPTS; attempt++) {
     try {
@@ -234,6 +236,7 @@ async function execAndroidWithRetry(containerId, argv) {
       return;
     } catch (e) {
       lastErr = e;
+      if (noRetryCodes.includes(e.code)) throw e;
       // eslint-disable-next-line no-await-in-loop
       await new Promise((r) => setTimeout(r, RUNTIME_READY_RETRY_DELAY_MS));
     }
@@ -244,7 +247,7 @@ async function execAndroidWithRetry(containerId, argv) {
 async function ensureRuntimeReady(containerId) {
   await execAndroidWithRetry(containerId, ['setprop', 'media.c2.hal.selection', 'aidl']);
   try {
-    await execAndroidWithRetry(containerId, ['pkill', 'mediaserver']);
+    await execAndroidWithRetry(containerId, ['pkill', 'mediaserver'], { noRetryCodes: [1] });
   } catch (e) {
     // pkill devuelve exit 1 (no exit 0) cuando no encuentra ningun proceso
     // "mediaserver" vivo en ese instante -- confirmado en vivo el 30/09, no
