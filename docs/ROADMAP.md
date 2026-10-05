@@ -61,6 +61,11 @@ conocidos (ej. el artefacto de scanline en la 4060 con el driver
 3. Sumar selección de modo GPU (host/soft) y detección de vendor al flujo
    de creación de instancia.
 4. Validar en un host AMD/Intel real y en un host NVIDIA real.
+   - ✅ **AMD Polaris (RX 480, jgustavo46) validado el 05/10/2026** con la
+     imagen oficial `redroid/redroid:15.0.0-latest` + módulo hwenc: Doctor
+     verde (binder legacy), daemon elige solo el import VA-API pre-modificador
+     (Tier 5.12), encoder `c2.hardware.encoder.h264` registrado, `screenrecord`
+     5 s = 74 frames H.264 con imagen correcta. Faltan Intel y NVIDIA.
 
 **Gate:** una instancia creada desde `redroid-forge` reproduce el mismo
 comportamiento de aceleración ya validado por separado, en al menos un host

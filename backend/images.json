@@ -13,6 +13,19 @@
     "notaSoporte": "Arranca y corre instancias basicas. No probado con hwenc, nvidia ni wifi falso."
   },
   {
+    "id": "android-15-official",
+    "label": "Android 15 · Redroid oficial",
+    "dockerImage": "redroid/redroid:15.0.0-latest",
+    "androidVersion": 15,
+    "gpuMode": "host",
+    "needsHwsimWifi": false,
+    "hasGapps": false,
+    "hasMagisk": false,
+    "hwEncCapable": true,
+    "soporte": "oficial",
+    "notaSoporte": "Imagen oficial sin modificar: es la unica base prevista para redroid-forge. Los extras (GApps, Magisk, hwenc, wifi falso) se integran por instancia al crearla, como modulos. hwenc validado contra esta imagen (29-30/09)."
+  },
+  {
     "id": "android-15-jg-gapps-official",
     "label": "Android 15 · GApps oficial · NDK · ARM64 fix · Magisk — v2.0",
     "dockerImage": "redroid-jg-15:gapps-official",
