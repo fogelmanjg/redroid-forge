@@ -57,7 +57,8 @@ async function main() {
     const keyFile = path.join(dir, 'db-signing.key');
     if (fs.existsSync(keyFile)) die(`ya existe ${keyFile}: no se sobrescribe (borralo a mano si de verdad queres otra)`);
     if (!passphrase && !noPass) passphrase = await newPassphrase();
-    fs.mkdirSync(dir, { recursive: true });
+    fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+    fs.chmodSync(dir, 0o700);
     const { publicKey, privateKey } = crypto.generateKeyPairSync('ed25519');
     const privOpts = { type: 'pkcs8', format: 'pem', ...(passphrase ? { cipher: 'aes-256-cbc', passphrase } : {}) };
     fs.writeFileSync(keyFile, privateKey.export(privOpts), { mode: 0o600 });
