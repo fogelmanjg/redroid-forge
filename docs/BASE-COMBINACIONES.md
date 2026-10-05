@@ -2,8 +2,8 @@
 
 Estado: **borrador de diseño (05/10/2026)**. Implementa la decisión de
 `REQUIREMENTS.md` sección 2 ("Base de datos de combinaciones conocidas") y el
-paso 0 de la Fase 5 del `ROADMAP.md`. Lo marcado **[DECIDIR]** necesita
-confirmación antes de implementarse.
+paso 0 de la Fase 5 del `ROADMAP.md`. Pendiente de decidir: ver
+§10 de `REQUIREMENTS.md`.
 
 ## 1. Qué problema resuelve
 
@@ -159,9 +159,15 @@ Al cargar se usa la de **mayor `serial`** (si la cacheada es más vieja que el
 snapshot de una release nueva, gana el snapshot — así actualizar redroid-forge
 nunca deja una base vieja pisando una más nueva).
 
-### 4.2 Actualización (siempre explícita)
+### 4.2 Detección y actualización
 
-`POST /api/db/update` (botón en UI). Nunca en segundo plano ni al arrancar.
+- **Detección (decidido 05/10/2026):** redroid-forge **consulta si hay una
+  base nueva una vez al día y al abrir la app**. Es solo una consulta liviana
+  (`serial` publicado), no descarga ni aplica nada; si hay una más nueva se
+  avisa en la UI/Doctor. Se puede desactivar por configuración (para quien no
+  quiera que la app haga ninguna conexión por su cuenta).
+- **Aplicar** es siempre **explícito**: `POST /api/db/update` (botón en UI).
+  Nunca se aplica en segundo plano.
 
 1. Descarga `database.json` + `database.json.sig` de la URL configurada
    (por defecto, la release más reciente del repo externo; configurable para
@@ -188,9 +194,11 @@ lugar se compromete. Se propone **firma ed25519 del `database.json`**:
 - Se verifica con `crypto` de Node (ed25519 nativo): **sin dependencias
   nuevas**, coherente con la decisión de stack.
 
-**[DECIDIR]** quién custodia la clave privada y cómo se firma (a mano al
-liberar vs. paso de CI con secreto). Recomendación: a mano al principio —
-la base cambia poco y se evita un secreto en CI.
+**Decidido (05/10/2026):** la clave se genera y se **firma por primera vez al
+liberar la primera versión usable completa** de redroid-forge, no antes (hasta
+entonces la base viaja solo como snapshot dentro de la release, que no
+necesita firma). Al principio se firma a mano; el modelo para cuando haya más
+colaboradores está en 6.1.
 
 ### 4.4 Descarga de paquetes (GApps/Magisk)
 
@@ -222,14 +230,15 @@ su propio manifest:
   llevar `origen` hardcodeado como fuente de descarga (siguen declarándolo
   para el contrato mostrado al usuario).
 - **Doctor**: nuevo check "Base de datos de combinaciones" — versión
-  (`serial`/fecha), origen (snapshot o actualizada), edad. Aviso suave si
-  tiene más de N días **[DECIDIR N]**; nunca falla por eso.
+  (`serial`/fecha), origen (snapshot o actualizada), y si el
+  chequeo diario (4.2) detectó una base más nueva. Es un aviso: nunca falla
+  por eso.
 - **API de solo lectura** para la UI: `GET /api/db` (estado/estadísticas),
   `GET /api/db/combinaciones`.
 
 ## 6. Repositorio externo
 
-Nombre tentativo **`redroid-forge-db`** **[DECIDIR]**. Estructura:
+Nombre: **`redroid-forge-db`** (confirmado 05/10/2026). Estructura:
 
 ```
 bases/*.json          una por imagen base
@@ -246,7 +255,42 @@ enlace). La CI del repo valida: schema, que las referencias existan
 validación `ok`, y que cada `origen` de paquete **todavía descargue al
 `sha256` declarado** (detecta enlaces muertos o cambiados).
 
-## 6.1 Riesgos conocidos
+## 6.1 Mantenimiento a escala (quién actualiza la lista)
+
+Si nadie usa redroid-forge, esto es trivial; si lo usa mucha gente, **no
+puede depender de una sola persona haciendo todo a mano**. El diseño busca
+que el trabajo humano no crezca linealmente con los usuarios:
+
+1. **Degradación elegante.** Si la base queda desactualizada o sin
+   mantenedor, nada se rompe: lo desconocido cae en "comunidad"/"sin
+   soporte" y la app sigue funcionando. Lo único que se pierde es que haya
+   menos combinaciones "oficiales".
+2. **Dos niveles de confianza para entrar a la base:**
+   - **`comunidad`**: entra con checks **automáticos** (schema, referencias,
+     hashes de paquetes descargables). Revisión humana mínima.
+   - **`oficial`**: requiere revisión de un mantenedor (hay una promesa de
+     soporte detrás). Es el cuello de botella intencional, y el único.
+3. **Reportes generados por la propia app.** Un botón "reportar combinación
+   validada" arma el JSON (digests, versiones de módulos, hardware, resultado
+   del Doctor y de los chequeos automáticos) listo para abrir un PR/issue. El
+   contribuyente no escribe a mano ni se equivoca de formato; el mantenedor
+   revisa evidencia estructurada en vez de texto libre.
+4. **Bots para lo repetitivo.** Un job programado en el repo detecta nuevos
+   digests de las imágenes oficiales y abre un PR "base nueva sin validar";
+   revisa que los `origen` de paquetes sigan descargando al `sha256`
+   declarado y abre un issue si no.
+5. **Más de un mantenedor para firmar.** El verificador ya acepta una *lista*
+   de claves públicas: cada mantenedor firma con su clave y se puede revocar
+   una sola sin invalidar las demás. Costo: cada clave de la lista puede
+   publicar cualquier base, por eso la lista se mantiene corta y vive dentro
+   del código de la release (no se actualiza desde la propia base).
+6. **Firma en CI, solo cuando valga la pena.** Con varios mantenedores y
+   volumen real se puede firmar en CI con la clave como secreto protegido
+   (ramas protegidas + revisión obligatoria antes del release). Es un
+   trade-off consciente contra el riesgo de 4.3; no se hace antes de
+   necesitarlo.
+
+## 6.2 Riesgos conocidos
 
 - **Enlaces de origen que mueren o cambian de contenido.** Mitigación:
   el hash lo detecta; la importación manual lo cubre; la CI del repo lo

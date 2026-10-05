@@ -348,8 +348,12 @@ para v1.
 
 ## 10. Pendiente / abierto
 
-- **[PENDIENTE] Base de datos de combinaciones conocidas** (sección 2) —
-  formato, repositorio, verificación de integridad y flujo de contribución.
+- **[PENDIENTE] Base de datos de combinaciones conocidas** (sección 2, diseño
+  en `docs/BASE-COMBINACIONES.md`). Decidido: repo externo `redroid-forge-db`,
+  firma ed25519 (primera firma al liberar la primera versión usable
+  completa), chequeo diario y al abrir la app (aplicar es explícito). Falta:
+  formato final del archivo y el modelo de mantenimiento a escala (§6.1 del
+  doc) cuando haya más colaboradores.
 - **[PENDIENTE] Mecanismo de donaciones/soporte** — recién se decide en beta
   0.9 (GitHub Sponsors, Open Collective, contrato de soporte directo, etc.).
 - **[PENDIENTE] Convención exacta de módulos definidos por el usuario**
