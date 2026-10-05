@@ -33,10 +33,10 @@ test('resolve: combinacion exacta validada en el vendor del host -> oficial', ()
   assert.deepStrictEqual(r, { nivel: 'oficial', combinacion: 'redroid15-hwenc', motivos: [] });
 });
 
-test('resolve: vendor distinto al validado -> comunidad con motivo', () => {
-  const r = k.resolve(snapshot, { ...base, hostGpuVendor: 'intel' });
+test('resolve: vendor distinto a los validados -> comunidad con motivo', () => {
+  const r = k.resolve(snapshot, { ...base, hostGpuVendor: 'nvidia' });
   assert.strictEqual(r.nivel, 'comunidad');
-  assert.match(r.motivos[0], /validada en amd.*intel/);
+  assert.match(r.motivos[0], /validada en amd, intel.*nvidia/);
 });
 
 test('resolve: digest desconocido -> sin-soporte', () => {
@@ -82,7 +82,7 @@ test('pickNewest: gana el mayor serial, empate al primero', () => {
 });
 
 test('checkUpdateAcceptable: rollback, forge viejo y base invalida se rechazan', () => {
-  const nueva = { ...clone(snapshot), serial: 2 };
+  const nueva = { ...clone(snapshot), serial: snapshot.serial + 1 };
   assert.deepStrictEqual(k.checkUpdateAcceptable(nueva, snapshot, '0.1.0'), { ok: true });
   assert.match(k.checkUpdateAcceptable(snapshot, snapshot, '0.1.0').motivo, /no es mayor/);
   assert.match(k.checkUpdateAcceptable({ ...nueva, minForgeVersion: '0.2.0' }, snapshot, '0.1.0').motivo, /exige redroid-forge/);

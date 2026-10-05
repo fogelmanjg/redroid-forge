@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "serial": 1,
+  "serial": 2,
   "generatedAt": "2026-10-05T00:00:00Z",
   "minForgeVersion": "0.1.0",
   "bases": [
@@ -22,16 +22,78 @@
       "base": "redroid-15-2025-06-27",
       "gapps": null,
       "magisk": null,
-      "modulos": { "hwenc": 3 },
+      "modulos": {
+        "hwenc": 3
+      },
       "soporte": "oficial",
       "validaciones": [
         {
-          "hardware": { "vendor": "amd", "gpu": "Radeon RX 480 (Polaris10)", "driver": "radeonsi" },
+          "hardware": {
+            "vendor": "amd",
+            "gpu": "Radeon RX 480 (Polaris10)",
+            "driver": "radeonsi"
+          },
           "fecha": "2026-10-05",
           "forgeVersion": "0.1.0",
           "resultado": "ok",
+          "chequeos": [
+            {
+              "id": "doctor",
+              "resultado": "ok",
+              "detalle": "binder legacy slots 1-2, daemon VA-API con radeonsi"
+            },
+            {
+              "id": "hwenc.encoder-registrado",
+              "resultado": "ok",
+              "detalle": "c2.hardware.encoder.h264 listado en dumpsys media.player"
+            },
+            {
+              "id": "hwenc.screenrecord-frames",
+              "resultado": "ok",
+              "detalle": "74 frames H.264 en 5 s, imagen correcta"
+            },
+            {
+              "id": "hwenc.scrcpy-visual",
+              "resultado": "ok",
+              "detalle": "visto en vivo por scrcpy desde n02, sin artefactos"
+            }
+          ],
           "notas": "Doctor verde (binder legacy), encoder c2.hardware.encoder.h264 registrado, screenrecord 5 s = 74 frames H.264 con imagen correcta, visto por scrcpy desde n02.",
           "evidencia": "https://github.com/fogelmanjg/redroid-forge/pull/4"
+        },
+        {
+          "hardware": {
+            "vendor": "intel",
+            "gpu": "Iris Xe (TigerLake-LP GT2)",
+            "driver": "iHD"
+          },
+          "fecha": "2026-10-05",
+          "forgeVersion": "0.1.0",
+          "resultado": "ok",
+          "chequeos": [
+            {
+              "id": "doctor",
+              "resultado": "ok",
+              "detalle": "binder legacy slot 0 (devices= por default), daemon VA-API con iHD, modificador Y_TILED"
+            },
+            {
+              "id": "hwenc.encoder-registrado",
+              "resultado": "ok",
+              "detalle": "c2.hardware.encoder.h264 listado en dumpsys media.player"
+            },
+            {
+              "id": "hwenc.screenrecord-frames",
+              "resultado": "ok",
+              "detalle": "209 frames H.264 Constrained Baseline 1000x600 en MP4 valido; el daemon registro 209 encodes"
+            },
+            {
+              "id": "hwenc.scrcpy-visual",
+              "resultado": "ok",
+              "detalle": "visto en vivo por scrcpy, imagen limpia y fluida"
+            }
+          ],
+          "notas": "Requirio dos arreglos propios de Intel: intel-media-driver en la imagen del backend y normalizacion de start codes Annex-B a 4 bytes en el daemon (iHD emite 3 y el parser de CSD de MPEG4Writer exige 4). Instancia 1000x600 con tope de 3 GB, uso real ~1,6 GB.",
+          "evidencia": "https://github.com/fogelmanjg/redroid-forge/pull/6"
         }
       ],
       "problemasConocidos": []

@@ -69,6 +69,17 @@ function validateDatabase(db) {
     for (const v of vals) {
       if (!v.hardware || !isStr(v.hardware.vendor)) errors.push(`combinacion "${c.id}": validacion sin hardware.vendor`);
       if (!['ok', 'parcial', 'falla'].includes(v.resultado)) errors.push(`combinacion "${c.id}": resultado de validacion invalido`);
+      // Chequeos reproducibles (docs/BASE-COMBINACIONES.md 1.1): opcionales
+      // por ahora, pero si estan deben tener id y resultado validos.
+      if (v.chequeos !== undefined) {
+        if (!Array.isArray(v.chequeos)) errors.push(`combinacion "${c.id}": "chequeos" debe ser un array`);
+        else {
+          for (const ch of v.chequeos) {
+            if (!isStr(ch.id)) errors.push(`combinacion "${c.id}": chequeo sin "id"`);
+            if (!['ok', 'falla', 'omitido'].includes(ch.resultado)) errors.push(`combinacion "${c.id}": chequeo "${ch.id}" con resultado invalido`);
+          }
+        }
+      }
     }
   }
   if (errors.length) throw new Error(`Base invalida: ${errors.join('; ')}`);

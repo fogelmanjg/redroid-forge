@@ -258,6 +258,28 @@ function checkAndroidIdRegistration() {
   });
 }
 
+// Base de datos de combinaciones conocidas (docs/BASE-COMBINACIONES.md).
+// Informativo: nunca 'fail' por antiguedad -- la app funciona igual sin ella,
+// solo sabe menos sobre que combinaciones estan validadas.
+function checkKnownDb() {
+  const knownDbStore = require('./knownDbStore');
+  try {
+    const cur = knownDbStore.loadCurrent();
+    const s = knownDbStore.summarize(cur);
+    const origen = s.source === 'snapshot' ? 'snapshot de esta version' : 'base descargada';
+    const detail = `Base serial ${s.serial} (${s.generatedAt.slice(0, 10)}, ${origen}): ${s.counts.combinaciones} combinacion(es), ${s.counts.oficiales} validada(s) por el proyecto.`;
+    if (s.warnings.length) {
+      return { status: 'warn', detail: `${detail} Avisos: ${s.warnings.join('; ')}` };
+    }
+    return { status: 'ok', detail };
+  } catch (e) {
+    return {
+      status: 'warn',
+      detail: `No se pudo cargar la base de combinaciones conocidas: ${e.message}. Sin ella toda combinacion se trata como "sin soporte conocido".`,
+    };
+  }
+}
+
 async function runAll() {
   const [dockerSocket, hwsim, imagePresence, hwAccelCheck] = await Promise.all([
     checkDockerSocket(),
@@ -275,6 +297,7 @@ async function runAll() {
     { id: 'hwsim', label: 'mac80211_hwsim (WiFi falso)', ...hwsim },
     { id: 'gpu', label: 'GPU / /dev/dri', ...checkGpu() },
     { id: 'hw-accel', label: 'Aceleracion HW (hwenc, VA-API)', ...hwAccelCheck },
+    { id: 'known-db', label: 'Base de datos de combinaciones conocidas', ...checkKnownDb() },
     ...imagePresence,
     ...checkAndroidIdRegistration(),
   ];
@@ -282,4 +305,4 @@ async function runAll() {
   return checks;
 }
 
-module.exports = { runAll };
+module.exports = { runAll, checkKnownDb };

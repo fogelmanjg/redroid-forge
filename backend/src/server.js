@@ -9,6 +9,7 @@ app.use('/api/instances', require('./routes/instances'));
 app.use('/api/doctor', require('./routes/doctor'));
 app.use('/api/images', require('./routes/images'));
 app.use('/api/modules', require('./routes/modules'));
+app.use('/api/db', require('./routes/db'));
 
 const PORT = process.env.PORT || 8080;
 app.listen(PORT, () => {
