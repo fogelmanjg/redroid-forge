@@ -102,6 +102,12 @@ test('doctor.checkKnownDb: ok sobre el snapshot real', () => {
   assert.match(r.detail, /serial/);
 });
 
+// Los tests de rutas corren SIN claves de confianza (archivo vacio) para que
+// ninguno toque la red, aunque el build real traiga la clave del mantenedor.
+const NO_KEYS = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'nokeys-')), 'keys.json');
+fs.writeFileSync(NO_KEYS, JSON.stringify({ keys: [] }));
+process.env.REDROID_FORGE_DB_TRUSTED_KEYS_FILE = NO_KEYS;
+
 async function withServer(fn) {
   const app = express();
   app.use('/api/db', require('../src/routes/db'));

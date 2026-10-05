@@ -165,8 +165,18 @@ test('getConfig: URL por defecto, override y desactivar el chequeo', () => {
   assert.strictEqual(upd.getConfig({ REDROID_FORGE_DB_CHECK: '0' }).chequeoAutomatico, false);
 });
 
-test('el build de desarrollo no trae claves de confianza', () => {
-  assert.deepStrictEqual(upd.loadTrustedKeys(), []);
+test('el build trae la clave publica del mantenedor y es una ed25519 valida', () => {
+  const keys = upd.loadTrustedKeys();
+  assert.strictEqual(keys.length, 1);
+  assert.strictEqual(crypto.createPublicKey(keys[0]).asymmetricKeyType, 'ed25519');
+});
+
+test('REDROID_FORGE_DB_TRUSTED_KEYS_FILE reemplaza la lista (forks/espejos)', () => {
+  const f = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'tk-')), 'keys.json');
+  fs.writeFileSync(f, JSON.stringify({ keys: [] }));
+  process.env.REDROID_FORGE_DB_TRUSTED_KEYS_FILE = f;
+  try { assert.deepStrictEqual(upd.loadTrustedKeys(), []); } finally { delete process.env.REDROID_FORGE_DB_TRUSTED_KEYS_FILE; }
+  assert.strictEqual(upd.loadTrustedKeys().length, 1);
 });
 
 test('scripts/db-sign.js: keygen (con passphrase) -> sign -> verify, y detecta alteraciones', () => {

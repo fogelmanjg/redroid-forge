@@ -25,7 +25,10 @@ class UpdateError extends Error {
   }
 }
 
-function loadTrustedKeys(file = TRUSTED_KEYS_PATH) {
+// Un fork o un espejo propio puede firmar con otras claves: se apunta a su
+// lista con REDROID_FORGE_DB_TRUSTED_KEYS_FILE (la define quien opera la app,
+// igual que REDROID_FORGE_DB_URL; no viaja dentro de la base descargada).
+function loadTrustedKeys(file = process.env.REDROID_FORGE_DB_TRUSTED_KEYS_FILE || TRUSTED_KEYS_PATH) {
   try {
     const j = JSON.parse(fs.readFileSync(file, 'utf-8'));
     return (j.keys || []).map((k) => k.pem).filter(Boolean);

@@ -242,8 +242,12 @@ privada vive **solo en la máquina de quien libera** (nunca en un servidor
 compartido ni en CI, ver 6.1). La herramienta `backend/scripts/db-sign.js`
 (`keygen`/`sign`/`verify`, sin dependencias) la genera y firma; se mudará al
 repo `redroid-forge-db`. Las claves **públicas** autorizadas van en
-`backend/db/trusted-keys.json` (vacío en builds de desarrollo: sin claves, la
-app no consulta ni aplica bases descargadas). Al principio se firma a mano; el modelo para cuando haya más
+`backend/db/trusted-keys.json`. **La clave del mantenedor se generó el
+05/10/2026** (`mantenedor-2026-10`, con passphrase; la privada vive en
+`~/.redroid-forge-keys/` de quien libera, fuera de cualquier repo). Un fork o
+espejo propio usa su lista con `REDROID_FORGE_DB_TRUSTED_KEYS_FILE`; si la
+lista queda vacía, la app no consulta ni aplica bases descargadas. Las bases se
+publican en el repo **`fogelmanjg/redroid-forge-db`** (ver su `RELEASING.md`). Al principio se firma a mano; el modelo para cuando haya más
 colaboradores está en 6.1.
 
 ### 4.4 Descarga de paquetes (GApps/Magisk)
