@@ -1,0 +1,4 @@
+node_modules/
+backend/data/*.json
+.claude/
+backend/native/vaapi-daemon/daemon

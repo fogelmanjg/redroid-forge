@@ -9,10 +9,19 @@ services:
       - PORT=${PORT:-8080}
       - ADB_PORT_START=${ADB_PORT_START:-5555}
       - ADB_PORT_END=${ADB_PORT_END:-5595}
+      # Solo hace falta para validar/usar el modulo hwenc de verdad (ver
+      # backend/src/modules/hwenc/integrate.js) -- vacio por default para no
+      # exigirle este arbol de AOSP a cualquiera que levante redroid-forge.
+      - REDROID_HWENC_ARTIFACTS_DIR=${REDROID_HWENC_ARTIFACTS_DIR:-}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - /lib/modules:/lib/modules:ro
       - /dev/binderfs:/dev/binderfs
       - /dev/vaapi-helper:/dev/vaapi-helper
       - ./backend/data:/app/backend/data
+      # Bind opcional (mismo camino de origen y destino, integrate.js resuelve
+      # rutas relativas a REDROID_HWENC_ARTIFACTS_DIR de arriba) -- si la
+      # variable no esta seteada, monta /dev/null:/dev/null (no-op inocuo) en
+      # vez de romper `docker compose up` para quien no tiene este arbol.
+      - ${REDROID_HWENC_ARTIFACTS_DIR:-/dev/null}:${REDROID_HWENC_ARTIFACTS_DIR:-/dev/null}:ro
     restart: unless-stopped

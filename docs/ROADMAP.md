@@ -271,3 +271,20 @@ se retoma el mecanismo de donaciones/soporte (sección 8 de
   `REQUIREMENTS.md` sección 10) — se evalúan e insertan en la fase que
   corresponda cuando se identifiquen, no generan una fase propia por sí
   solos.
+- **Bloqueador de publicidad configurable (idea, 04/10/2026).** A nivel
+  sistema y por aplicación. Encaja como módulo de usuario de la Fase 5
+  (manifest + script), no como parte del core. Diseño a decidir; opciones
+  vistas:
+  - *Cliente VPN local* (NetGuard probado a mano, no necesita root): permite
+    reglas por app (uid). Requisito de plataforma: Android abre `/dev/tun`,
+    no `/dev/net/tun`; el contenedor debe crearse con
+    `--device /dev/net/tun:/dev/tun` (o `mknod /dev/tun c 10 200`, que no
+    sobrevive a recrear el contenedor). Sin ese nodo `Vpn.jniCreate` falla
+    con "Cannot create interface" y la VPN nunca se establece.
+  - *Efecto colateral a resolver:* la VPN también captura a `adbd` (uid
+    2000); con bloqueo activo el adb TCP queda inalcanzable. El módulo debe
+    permitir `com.android.shell` por defecto.
+  - *Alternativa sin VPN:* DNS privado / filtrado a nivel red del host
+    (bloqueo por dominio, sin granularidad por app).
+  - Reglas por app: definir si se guardan en el manifest del módulo o por
+    instancia.

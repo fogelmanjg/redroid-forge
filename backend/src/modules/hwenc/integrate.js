@@ -211,15 +211,50 @@ async function ensureHostInfraReady() {
 // Nombre alineado a la convencion generica del runner (STAGE_EXPORT_NAME[6]
 // = "ensureRuntimeReady") -- se llamaba ensureHwencReady() antes de que
 // existiera esa convencion.
+//
+// `docker exec containerId <argv...>` aterriza como uid=0 tanto en la imagen
+// oficial de redroid como en las imagenes custom con Magisk (confirmado en
+// vivo el 29-30/09 contra ambas) -- no hace falta ningun wrapper `su -c`. Lo
+// que si hace falta es retry con backoff: el runner generico (moduleRunner.js)
+// dispara esta etapa apenas runtime.start() resuelve, sin esperar el boot
+// real de Android, asi que el primer intento (a veces varios) falla con
+// "exec setprop: no such file or directory" simplemente porque /system
+// todavia no esta poblado del todo. Mismo patron que ensureWifiConnected en
+// hwsimWifi.js -- el runner generico no tiene por que saber de tiempos de
+// boot de Android, es conocimiento de este modulo.
+const RUNTIME_READY_MAX_ATTEMPTS = 8;
+const RUNTIME_READY_RETRY_DELAY_MS = 3000;
+
+async function execAndroidWithRetry(containerId, argv) {
+  let lastErr;
+  for (let attempt = 1; attempt <= RUNTIME_READY_MAX_ATTEMPTS; attempt++) {
+    try {
+      // eslint-disable-next-line no-await-in-loop
+      await execFileAsync('docker', ['exec', containerId, ...argv]);
+      return;
+    } catch (e) {
+      lastErr = e;
+      // eslint-disable-next-line no-await-in-loop
+      await new Promise((r) => setTimeout(r, RUNTIME_READY_RETRY_DELAY_MS));
+    }
+  }
+  throw lastErr;
+}
+
 async function ensureRuntimeReady(containerId) {
-  // `docker exec` ya aterriza como uid=0 en la imagen oficial de redroid
-  // (confirmado en vivo el 29/09) -- a diferencia del patron `su -c` que
-  // usa hwsimWifi.js/redroid.service.ts para las imagenes custom con
-  // Magisk, esta imagen no tiene ni siquiera un binario `su`. Si este
-  // modulo se reusa alguna vez sobre una imagen que si lo necesite, agregar
-  // ese wrapper de vuelta.
-  await execFileAsync('docker', ['exec', containerId, 'setprop', 'media.c2.hal.selection', 'aidl']);
-  await execFileAsync('docker', ['exec', containerId, 'pkill', 'mediaserver']);
+  await execAndroidWithRetry(containerId, ['setprop', 'media.c2.hal.selection', 'aidl']);
+  try {
+    await execAndroidWithRetry(containerId, ['pkill', 'mediaserver']);
+  } catch (e) {
+    // pkill devuelve exit 1 (no exit 0) cuando no encuentra ningun proceso
+    // "mediaserver" vivo en ese instante -- confirmado en vivo el 30/09, no
+    // es una falla real: mediaserver puede estar reiniciandose solo (comun
+    // durante el boot de Android, independiente de este pkill). Cualquier
+    // otro codigo si es un error real (ENOENT si /system no estaba listo,
+    // etc.) y se deja propagar.
+    if (e.code !== 1) throw e;
+    log(`pkill mediaserver: no habia proceso vivo en ${containerId} (probablemente ya se reinicio solo)`);
+  }
   log('media.c2.hal.selection=aidl aplicado, mediaserver reiniciado');
 }
 

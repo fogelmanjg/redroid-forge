@@ -21,9 +21,9 @@
     "needsHwsimWifi": false,
     "hasGapps": true,
     "hasMagisk": true,
-    "hwEncCapable": false,
+    "hwEncCapable": true,
     "soporte": "oficial",
-    "notaSoporte": "Wifi falso y device profile validados. hwenc/nvidia (redroid-hwenc/redroid-nvidia) NO estan en esta imagen -- son trabajo posterior a esta build (jul/2026), falta un rebuild de AOSP+Docker con el componente Codec2 real para tenerlo."
+    "notaSoporte": "Wifi falso y device profile validados. hwenc se inyecta como modulo en cada instancia (Fase 5) -- no necesita rebuild de esta imagen base, validandose en vivo el 30/09. nvidia (redroid-nvidia, Venus-proxy+NVENC) sigue sin implementar."
   },
   {
     "id": "android-15-jg-wifi-v3",
