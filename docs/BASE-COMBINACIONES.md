@@ -23,6 +23,34 @@ Principios (ya decididos):
 - La base **no redistribuye** binarios de terceros: guarda *punteros*
   (URL de origen + `sha256`), nunca el contenido de GApps/Magisk.
 
+## 1.1 Alcance de la promesa: verificable, no garantizada
+
+redroid-forge es software libre, sin garantías (Apache-2.0), y **no puede
+asegurar que la base de datos sea correcta**. Lo que sí ofrece es que
+**cualquiera pueda comprobar por sí mismo** lo que la base afirma:
+
+- **Firma = autenticidad, no corrección.** La firma (4.3) prueba quién
+  publicó la base y que no fue alterada. No dice que las combinaciones
+  funcionen. La UI y la documentación no presentan la firma como un sello de
+  calidad.
+- **"Oficial" significa "validada con evidencia", no "garantizada".** Es la
+  etiqueta de las combinaciones que el proyecto probó y de las que puede
+  mostrar evidencia (validaciones con hardware, fecha y resultado). El texto
+  visible dice "validada por el proyecto" y enlaza a esa evidencia; nunca
+  "soportado" o "seguro" a secas.
+- **Verificación local.** Cada combinación declara una lista de *chequeos
+  automáticos reproducibles* (ej. hwenc: el encoder `c2.hardware.encoder.h264`
+  está registrado y `screenrecord` produce N frames H.264; GApps: el Android ID
+  se registra; Magisk: `su` responde). El usuario puede **correrlos en su
+  host** y ver el resultado (sub-paso 8 del plan). Así la afirmación "esto
+  anda" deja de ser un acto de fe: se puede repetir.
+- **Todo lo comprobable lo es sin confiar en nadie:** el `digest` de la base se
+  compara contra lo que el usuario realmente tiene, el `sha256` de cada
+  paquete contra lo que realmente bajó, y las validaciones enlazan a su
+  evidencia pública.
+- **Los reportes de la comunidad entran como lo que son:** evidencia de un
+  tercero, que un mantenedor puede decidir promover o no (6.1).
+
 ## 2. Modelo de datos
 
 Un solo documento JSON (`schemaVersion` 1) con cuatro colecciones. Se separa
@@ -96,6 +124,11 @@ con `docker load` sin repo) **no matchea nunca** una base → sin soporte.
       "fecha": "2026-10-05",
       "forgeVersion": "0.1.0",
       "resultado": "ok",              // ok | parcial | falla
+      "chequeos": [                   // reproducibles por el usuario (ver 1.1)
+        { "id": "doctor", "resultado": "ok" },
+        { "id": "hwenc.encoder-registrado", "resultado": "ok" },
+        { "id": "hwenc.screenrecord-frames", "resultado": "ok", "detalle": "74 frames" }
+      ],
       "notas": "Doctor verde (binder legacy), encoder c2 registrado, 74 frames H.264.",
       "evidencia": "https://github.com/fogelmanjg/redroid-forge/pull/4"
     }
@@ -316,3 +349,7 @@ que el trabajo humano no crezca linealmente con los usuarios:
 6. Módulos GApps y Magisk reales sobre la imagen oficial (consumen 4).
 7. Repo externo `redroid-forge-db` + herramientas de build/firma + primera
    release firmada.
+8. **Verificación local** (1.1): cada módulo declara sus chequeos
+   reproducibles; la app los corre sobre una instancia y compara contra los
+   `chequeos` de la combinación. Sin esto, "validada" es solo una afirmación
+   del repo; con esto, el usuario la puede repetir.
