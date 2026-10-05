@@ -41,6 +41,15 @@ tablero de control.
 
 ### Tiers de soporte por imagen (no una restricción dura)
 
+**Versiones mantenidas (decidido 05/10/2026):** se mantienen en el catálogo
+las **imágenes oficiales de Redroid 11, 13 y 15, y probablemente también 12 y
+14** — siempre la imagen oficial sin modificar (ver "Base de datos de
+combinaciones conocidas" más abajo), nunca imágenes armadas a mano. **Solo
+Redroid 15 tiene soporte completo** (tier "oficial"); el resto es tier
+"comunidad": se ofrecen y corren, pero sin garantía de que los módulos
+funcionen. Una versión sube de tier únicamente cuando una combinación
+validada entra en la base de datos.
+
 Redroid 11 y 13 andan para algunas cosas (11 arranca y corre instancias
 básicas; 13 se probó y funciona en `gpuMode: guest`), pero sin el resto de
 los módulos (hwenc, nvidia, wifi falso) validados sobre esas versiones —
@@ -325,7 +334,7 @@ para v1.
 | Nombre | `redroid-forge` (verificado libre en GitHub, npm y Docker Hub — se descartó `jg-redroid-manager` por demasiado personal, y `redroid-manager` a secas por estar tomado y ser un espacio ya poblado) |
 | Ubicación | Repo nuevo standalone en GitHub (no dentro de Plenum) |
 | Visibilidad | **Público** (implicado por el objetivo de popularidad — ver sección 8) |
-| Versión de Android objetivo | Redroid 15 = tier "oficial"; 11/13 = tier "comunidad", no bloqueadas (sección 2) |
+| Versión de Android objetivo | Imágenes oficiales 11, 13 y 15 (probablemente 12 y 14); soporte completo solo en 15 = tier "oficial"; el resto "comunidad", no bloqueadas (sección 2) |
 | `jg-dashboard` | Deja de tener redroid integrado, pasa a consumir `redroid-forge`; código viejo convive hasta que el nuevo esté completo |
 | `plenum-redroid` | Misma política que `jg-dashboard` |
 | `jg-escritorio` | Fuera de alcance, no relevante para este proyecto |
