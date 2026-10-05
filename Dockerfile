@@ -17,13 +17,12 @@ RUN npm install --omit=dev
 COPY backend ./
 COPY frontend ../frontend
 
-# drm_fourcc.h vive en /usr/include/libdrm en Alpine, pero daemon.c lo incluye
-# como <drm/drm_fourcc.h> (convencion Debian/Ubuntu, donde se probo el daemon
-# originalmente) -- el symlink evita tocar el codigo portado.
+# daemon.c incluye <drm/drm_fourcc.h>; libdrm-dev de Alpine hoy ya lo instala
+# en /usr/include/drm (versiones anteriores solo en /usr/include/libdrm, y
+# habia que symlinkearlo -- confirmado en vivo el 05/10 que ya no hace falta,
+# y que el `rm` del symlink rompia el build al encontrar un directorio real).
 RUN apk add --no-cache --virtual .build-deps build-base libva-dev mesa-dev libdrm-dev vulkan-headers \
-  && ln -s /usr/include/libdrm /usr/include/drm \
   && make -C native/vaapi-daemon \
-  && rm /usr/include/drm \
   && apk del .build-deps
 
 ENV PORT=8080
