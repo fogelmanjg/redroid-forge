@@ -7,9 +7,12 @@ FROM node:22-alpine
 # `docker exec` (ver sus propios comentarios [PENDIENTE]: portar a dockerode's
 # putArchive() cuando el modulo se use en volumen -- por ahora, mientras es el
 # unico modulo con logica de etapa 4 real, el CLI alcanza) ;
+# intel-media-driver -> driver VA-API iHD para GPUs Intel (Gen8+ / Iris Xe);
+# mesa-va-gallium solo cubre AMD (radeonsi) y nouveau -- confirmado en vivo el
+# 05/10 en n02 (TigerLake): sin esto vaInitialize falla y el daemon muere ;
 # build-base/libva-dev/mesa-dev -> compilar backend/native/vaapi-daemon (solo
 # build-time, no quedan instalados en la imagen final, ver stage de abajo)
-RUN apk add --no-cache iproute2 iw kmod util-linux python3 pciutils docker-cli libva mesa-gbm mesa-egl mesa-va-gallium
+RUN apk add --no-cache iproute2 iw kmod util-linux python3 pciutils docker-cli libva mesa-gbm mesa-egl mesa-va-gallium intel-media-driver
 
 WORKDIR /app/backend
 COPY backend/package.json backend/package-lock.json ./
