@@ -172,6 +172,16 @@ piloto (CIFI) es un script con bugs sutiles ya conocidos (herencia de lock
 de `adb` tras reboot) que hay que no reintroducir al migrarlo.
 
 **Pasos:**
+0. ⬜ Abierto — **Base de datos de combinaciones conocidas + módulos
+   GApps/Magisk sobre la imagen oficial** (decisión 05/10/2026, ver
+   `REQUIREMENTS.md` sección 2). Reemplaza a las imágenes custom del catálogo
+   (`gapps-official`, `wifi-v3`): la base es la imagen oficial fijada por
+   digest, y GApps/Magisk se inyectan por instancia desde paquetes con
+   versión y `sha256` conocidos, verificados antes de usarse. Incluye: formato
+   de la base, snapshot incluido en cada release, actualización opcional desde
+   el repo externo con verificación, y tier "sin soporte" para lo que no esté
+   en la base. Es prerrequisito de la Fase 7 (reemplazar el redroid del
+   dashboard, que hoy depende de esas imágenes).
 1. ✅ **Hecho, parcial** — Diseñada e implementada la convención para
    módulos con lógica de ejecución ligada al **ciclo de vida de una
    instancia** (etapas 3-6, ver `docs/ARQUITECTURA.md` sección "Fase 5: el
