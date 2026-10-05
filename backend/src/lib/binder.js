@@ -29,12 +29,30 @@ function ensureBinderDevice(name) {
 
 // Slots: sin el offset de convivencia con jg-dashboard v1 de plenum-redroid —
 // acá el store propio es la única fuente de verdad, así que alcanza con
-// tomar el próximo entero libre.
-function nextFreeSlot() {
-  const used = new Set(store.readAll().map((i) => i.binderSlot).filter(Boolean));
-  let slot = 1;
-  while (used.has(slot)) slot++;
-  return slot;
+// tomar el próximo entero libre. En modo binderfs los nodos se crean a pedido,
+// así que cualquier slot >= 1 sirve. En modo legacy (ver abajo) solo sirven
+// los slots cuyos tres nodos ya existen en el host: se prefieren los
+// numerados (1, 2, ...) y se cae al slot 0 (/dev/binder, sin sufijo) si no
+// hay otro -- caso de un host con el default `devices=binder,hwbinder,
+// vndbinder` del modulo (confirmado en n02).
+function nextFreeSlot({ legacy = useLegacyBinder(), exists = fs.existsSync } = {}) {
+  const used = new Set(store.readAll().map((i) => i.binderSlot).filter((s) => s != null));
+  if (!legacy) {
+    let slot = 1;
+    while (used.has(slot)) slot++;
+    return slot;
+  }
+  const candidates = [];
+  for (let n = 1; n <= 32; n++) candidates.push(n);
+  candidates.push(0);
+  const free = candidates.find((n) => !used.has(n) && legacyNodeNames(n).every((name) => exists(`/dev/${name}`)));
+  if (free === undefined) {
+    throw new Error(
+      'binder legacy: no hay ningun slot libre con sus tres nodos en /dev. ' +
+      'Ampliar "options binder_linux devices=..." (ver Doctor) y recargar el modulo.'
+    );
+  }
+  return free;
 }
 
 // Kernels sin CONFIG_ANDROID_BINDERFS (ej. jgustavo46, ver Doctor): no hay
@@ -42,6 +60,12 @@ function nextFreeSlot() {
 // cargarse, segun su parametro `devices=` (/dev/binderN, /dev/hwbinderN, ...).
 // No se pueden crear en caliente -- si el slot pedido no esta en `devices=`,
 // hay que ampliar ese parametro y recargar el modulo.
+// Slot 0 = nodos sin sufijo (/dev/binder); slot N>=1 = /dev/binderN.
+function legacyNodeNames(slot) {
+  const suffix = slot === 0 ? '' : String(slot);
+  return [`binder${suffix}`, `hwbinder${suffix}`, `vndbinder${suffix}`];
+}
+
 function useLegacyBinder(exists = fs.existsSync) {
   return !exists(`${BINDERFS_ROOT}/binder-control`);
 }
@@ -50,9 +74,9 @@ function useLegacyBinder(exists = fs.existsSync) {
 // para un slot dado, creando los dispositivos si hace falta. En modo legacy el
 // origen es "/dev/binderN" y se exige que ya exista.
 function binderBinds(slot, { legacy = useLegacyBinder(), exists = fs.existsSync } = {}) {
-  const names = [`binder${slot}`, `hwbinder${slot}`, `vndbinder${slot}`];
   const targets = ['/dev/binder', '/dev/hwbinder', '/dev/vndbinder'];
   if (legacy) {
+    const names = legacyNodeNames(slot);
     const missing = names.filter((n) => !exists(`/dev/${n}`));
     if (missing.length) {
       throw new Error(
@@ -62,6 +86,7 @@ function binderBinds(slot, { legacy = useLegacyBinder(), exists = fs.existsSync 
     }
     return names.map((n, i) => `/dev/${n}:${targets[i]}`);
   }
+  const names = [`binder${slot}`, `hwbinder${slot}`, `vndbinder${slot}`];
   names.forEach(ensureBinderDevice);
   return names.map((n, i) => `${BINDERFS_ROOT}/${n}:${targets[i]}`);
 }

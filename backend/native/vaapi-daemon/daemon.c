@@ -507,6 +507,35 @@ static int convert_rgba_to_nv12(vaapi_state_t *st, VASurfaceID rgba_surface,
     return 0;
 }
 
+/* Normaliza TODOS los start codes Annex-B de un bitstream a 4 bytes
+ * (00 00 00 01). Hace falta porque el driver Intel (iHD) emite start codes de
+ * 3 bytes (00 00 01) y radeonsi de 4: el parser del CSD de MPEG4Writer (usado
+ * por screenrecord y por el muxer MP4 de scrcpy) exige 4 bytes y aborta con
+ * "FORTIFY: write: count 18446744073709551615 > SSIZE_MAX" si recibe 3 --
+ * confirmado en vivo el 05/10/2026 en un Iris Xe (n02), mientras que el
+ * stream crudo (--output-format=h264) decodificaba perfecto. Es seguro hacerlo
+ * sobre todo el buffer: por las reglas de emulation-prevention, la secuencia
+ * 00 00 01 no puede aparecer dentro del payload de un NAL, asi que cada
+ * ocurrencia es un start code. Un 00 00 01 ya precedido por 00 se deja como
+ * esta (ya es de 4 bytes, o lleva trailing_zero_8bits).
+ * Devuelve un buffer nuevo (malloc) y libera `in`. */
+static unsigned char *normalize_start_codes(unsigned char *in, size_t n, size_t *out_n) {
+    size_t cap = n + n / 3 + 4;
+    unsigned char *out = malloc(cap);
+    if (!out) { *out_n = n; return in; }
+    size_t o = 0;
+    for (size_t i = 0; i < n; i++) {
+        if (i + 2 < n && in[i] == 0 && in[i + 1] == 0 && in[i + 2] == 1
+            && (i == 0 || in[i - 1] != 0)) {
+            out[o++] = 0;
+        }
+        out[o++] = in[i];
+    }
+    free(in);
+    *out_n = o;
+    return out;
+}
+
 /* Imports the client's dma-buf as surfaces[0], runs the same encode
  * sequence tier2/tier3 already proved, and returns malloc'd Annex-B H.264
  * bytes (caller frees). Returns byte count, or -1 on error. */
@@ -734,6 +763,7 @@ static long encode_one_frame(vaapi_state_t *st, int dmabuf_fd, const EncodeReque
     vaDestroyBuffer(st->dpy, coded_buf);
     vaDestroySurfaces(st->dpy, &st->surfaces[0], 1);
 
+    out = normalize_start_codes(out, total, &total);
     *out_buf = out;
     return (long)total;
 }

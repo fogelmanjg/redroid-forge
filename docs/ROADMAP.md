@@ -65,7 +65,16 @@ conocidos (ej. el artefacto de scanline en la 4060 con el driver
      imagen oficial `redroid/redroid:15.0.0-latest` + módulo hwenc: Doctor
      verde (binder legacy), daemon elige solo el import VA-API pre-modificador
      (Tier 5.12), encoder `c2.hardware.encoder.h264` registrado, `screenrecord`
-     5 s = 74 frames H.264 con imagen correcta. Faltan Intel y NVIDIA.
+     5 s = 74 frames H.264 con imagen correcta.
+   - ✅ **Intel Iris Xe (TigerLake-LP, n02) validado el 05/10/2026**, misma
+     imagen oficial + hwenc, binder legacy slot 0, instancia 1000x600 con tope
+     de 3 GB (uso real ~1,6 GB): daemon con `iHD`, `screenrecord` a MP4 = 209
+     frames H.264 válidos. Dos bugs reales encontrados y corregidos acá:
+     (1) la imagen del backend no traía `intel-media-driver` (solo
+     `mesa-va-gallium`, que cubre AMD/nouveau) y el daemon moría en
+     `vaInitialize`; (2) `iHD` emite start codes Annex-B de **3 bytes** y
+     radeonsi de 4, y el parser de CSD de `MPEG4Writer` exige 4 (abortaba con
+     `FORTIFY: write: count -1`); el daemon ahora normaliza a 4 bytes. Falta NVIDIA.
 
 **Gate:** una instancia creada desde `redroid-forge` reproduce el mismo
 comportamiento de aceleración ya validado por separado, en al menos un host
