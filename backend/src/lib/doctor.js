@@ -28,6 +28,11 @@ function checkBinderfs() {
   if (fs.existsSync(ctrlPath)) {
     return { status: 'ok', detail: `${ctrlPath} presente.` };
   }
+  // Modo legacy (kernel sin CONFIG_ANDROID_BINDERFS): binder_linux crea
+  // /dev/binderN segun `devices=`. Ver binder.js (useLegacyBinder).
+  if (fs.existsSync('/dev/binder1') && fs.existsSync('/dev/hwbinder1') && fs.existsSync('/dev/vndbinder1')) {
+    return { status: 'ok', detail: 'binder legacy (binder_linux con devices=): /dev/binder1 y compañia presentes. Cada instancia usa un slot; revisar que `devices=` cubra los que necesites.' };
+  }
   return {
     status: 'fail',
     detail: `${ctrlPath} no existe — binderfs no esta montado en el host.`,
