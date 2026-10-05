@@ -303,9 +303,22 @@ No hay migración de imágenes ni de instancias del dashboard viejo.
 nuevo.
 
 **Pasos:**
-1. Quitar el código de redroid de `jg-dashboard` y `plenum-redroid` (recién
-   acá, nunca antes del gate de la Fase 7).
-2. Escribir README/CONTRIBUTING/atribución definitivos, issue templates.
+1. **Asegurar el código viejo en GitHub antes de borrar nada.** ✅ Hecho el
+   05/10/2026: se pusheó `jg-dashboard` (los 2 commits pendientes, incluido
+   `27bd149`, el último trabajo de redroid) y `plenum-redroid` —que no era un
+   repo git ni existía en GitHub— se subió, congelado, a
+   `fogelmanjg-plenum/plenum-redroid` (privado, con un README que lo marca como
+   archivado y reemplazado por `redroid-forge`; sin `.env` ni datos de
+   ejecución). **Falta**, justo antes de borrar: volver a commitear/pushear
+   cualquier cambio nuevo de redroid en `jg-dashboard` (hoy tiene archivos sin
+   commitear no relacionados con esta decisión) y dejar un tag en el último
+   commit (ej. `redroid-legacy-<fecha>`) para encontrarlo fácil.
+2. Quitar **todo** el código de redroid de `jg-dashboard` y `plenum-redroid`
+   (recién acá, nunca antes del gate de la Fase 7), incluido el código muerto
+   del visor `ws-scrcpy`/oauth2-proxy. Decisión (05/10/2026): ese código queda
+   en GitHub como proyecto viejo, muerto y reemplazado por `redroid-forge`; no
+   se porta nada como compatibilidad.
+3. Escribir README/CONTRIBUTING/atribución definitivos, issue templates.
 
 **Gate:** proyecto en condición de llamarse **beta 0.9** — a partir de acá
 se retoma el mecanismo de donaciones/soporte (sección 8 de

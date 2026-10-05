@@ -170,6 +170,19 @@ redroid-forge, y es **actualizable** por el usuario:
   Ambos caminos conviven en paralelo mientras dura la migración — recién
   cuando el reemplazo funciona de punta a punta se da de baja el código
   viejo.
+- **Destino del código viejo (decidido 05/10/2026):** cuando `redroid-forge`
+  lo reemplace, **todo el código de redroid de `jg-dashboard` y de
+  `plenum-redroid` se elimina** de esos proyectos. No se mantiene ni se
+  conserva como camino de compatibilidad. El código anterior queda **en GitHub
+  como un proyecto viejo, muerto y reemplazado por `redroid-forge`** (solo como
+  historial). Antes de eliminar, hay que **asegurar que ese código esté
+  realmente en GitHub** (ver Fase 8 del `ROADMAP.md`; `plenum-redroid` ya se
+  archivó en `fogelmanjg-plenum/plenum-redroid`, privado, como proyecto que no
+  logró sus objetivos).
+- **El visor web `ws-scrcpy` no se porta.** Está deprecado desde 2026-07-02
+  (se creó cuando no se podía acceder a scrcpy desde Android; hoy se usa scrcpy
+  directo y el visor ya no tiene sentido). Ninguna instancia del dashboard lo
+  usa y su infraestructura (redis, secretos OAuth) ya no existe.
 - `jg-escritorio` (xpra + Docker) **no es relevante para este proyecto por
   ahora** — queda fuera del alcance.
 
