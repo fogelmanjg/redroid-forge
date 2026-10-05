@@ -1,0 +1,4 @@
+{
+  "comentario": "Claves publicas ed25519 (PEM, SPKI) autorizadas a firmar la base de combinaciones. Vacio en builds de desarrollo: sin claves, redroid-forge no consulta ni aplica bases descargadas. Se completa al liberar la primera version usable (docs/BASE-COMBINACIONES.md 4.3). Lista corta a proposito: cada clave puede publicar cualquier base.",
+  "keys": []
+}

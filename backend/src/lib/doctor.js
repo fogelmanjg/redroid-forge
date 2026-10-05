@@ -268,10 +268,14 @@ function checkKnownDb() {
     const s = knownDbStore.summarize(cur);
     const origen = s.source === 'snapshot' ? 'snapshot de esta version' : 'base descargada';
     const detail = `Base serial ${s.serial} (${s.generatedAt.slice(0, 10)}, ${origen}): ${s.counts.combinaciones} combinacion(es), ${s.counts.oficiales} validada(s) por el proyecto.`;
+    const last = require('./knownDbUpdate').getLastCheck();
+    const nueva = last && last.ok && last.disponible
+      ? ` Hay una base mas nueva publicada (serial ${last.serialRemoto}): actualizala desde POST /api/db/update.`
+      : '';
     if (s.warnings.length) {
-      return { status: 'warn', detail: `${detail} Avisos: ${s.warnings.join('; ')}` };
+      return { status: 'warn', detail: `${detail}${nueva} Avisos: ${s.warnings.join('; ')}` };
     }
-    return { status: 'ok', detail };
+    return { status: 'ok', detail: `${detail}${nueva}` };
   } catch (e) {
     return {
       status: 'warn',

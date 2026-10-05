@@ -197,7 +197,11 @@ de `adb` tras reboot) que hay que no reintroducir al migrarlo.
    creación de instancias. Sub-paso 2 ✅ hecho: API de solo lectura
    (`/api/db`, `/api/db/combinaciones`), carga por `serial` con fallback
    (`knownDbStore.js`) y check en el Doctor; snapshot en `serial` 2 con la
-   validación de Intel Iris Xe. Las imágenes que usa el redroid de `jg-dashboard` se siguen
+   validación de Intel Iris Xe. Sub-paso 3 ✅ hecho: descarga + verificación de firma
+   ed25519 + anti-rollback + actualización atómica (`knownDbUpdate.js`) y
+   herramienta de firma `backend/scripts/db-sign.js`. Sin claves de confianza
+   configuradas (build de desarrollo) no se consulta ni aplica nada: la clave
+   real se genera al liberar la primera versión usable. Las imágenes que usa el redroid de `jg-dashboard` se siguen
    manteniendo allá, pero no son relevantes para `redroid-forge`: son
    proyectos separados y no tienen que ser compatibles entre sí.
 1. ✅ **Hecho, parcial** — Diseñada e implementada la convención para
