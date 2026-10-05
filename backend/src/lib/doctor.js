@@ -30,8 +30,16 @@ function checkBinderfs() {
   }
   // Modo legacy (kernel sin CONFIG_ANDROID_BINDERFS): binder_linux crea
   // /dev/binderN segun `devices=`. Ver binder.js (useLegacyBinder).
-  if (fs.existsSync('/dev/binder1') && fs.existsSync('/dev/hwbinder1') && fs.existsSync('/dev/vndbinder1')) {
-    return { status: 'ok', detail: 'binder legacy (binder_linux con devices=): /dev/binder1 y compañia presentes. Cada instancia usa un slot; revisar que `devices=` cubra los que necesites.' };
+  const legacySlots = [];
+  for (let n = 0; n <= 32; n++) {
+    const sfx = n === 0 ? '' : String(n);
+    if (['binder', 'hwbinder', 'vndbinder'].every((b) => fs.existsSync(`/dev/${b}${sfx}`))) legacySlots.push(n);
+  }
+  if (legacySlots.length > 0) {
+    return {
+      status: 'ok',
+      detail: `binder legacy (binder_linux con devices=): ${legacySlots.length} slot(s) disponible(s) [${legacySlots.join(', ')}] (0 = /dev/binder sin sufijo). Cada instancia usa un slot; si necesitas mas instancias simultaneas, amplia \`devices=\`.`,
+    };
   }
   return {
     status: 'fail',
