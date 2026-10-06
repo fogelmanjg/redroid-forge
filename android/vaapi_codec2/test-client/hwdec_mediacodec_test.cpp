@@ -48,6 +48,7 @@ int main(int argc, char **argv) {
         return 2;
     }
     const char *path = argv[1];
+    const bool p010 = getenv("OUT_P010") != nullptr;  // pedir P010 (10 bits) y hashear las muestras de 16 bits
     const char *name = (argc > 2 && strcmp(argv[2], "-") != 0) ? argv[2] : nullptr;
     FILE *out = argc > 3 ? fopen(argv[3], "w") : stdout;
     crc_init();
@@ -91,7 +92,7 @@ int main(int argc, char **argv) {
     AMediaCodec *codec = name ? AMediaCodec_createCodecByName(name) : AMediaCodec_createDecoderByType(mime);
     if (!codec) { fprintf(stderr, "RESULTADO: no se pudo crear el decoder %s\n", name ? name : mime); return 3; }
     // Pide I420 planar (COLOR_FormatYUV420Planar = 19): CCodec convierte si el componente entrega otro layout.
-    AMediaFormat_setInt32(trackFmt, AMEDIAFORMAT_KEY_COLOR_FORMAT, 19);
+    AMediaFormat_setInt32(trackFmt, AMEDIAFORMAT_KEY_COLOR_FORMAT, p010 ? 54 : 19);  // 54 = YUVP010, 19 = I420
     if (AMediaCodec_configure(codec, trackFmt, nullptr, nullptr, 0) != AMEDIA_OK) {
         fprintf(stderr, "RESULTADO: configure fallo (%s)\n", name ? name : mime);
         return 3;
@@ -166,8 +167,21 @@ int main(int argc, char **argv) {
                 uint8_t *p = AMediaCodec_getOutputBuffer(codec, oi, &osz);
                 if (width == 0) refresh();
                 const int32_t w = cropR - cropL + 1, h = cropB - cropT + 1;
-                const int32_t cs = stride / 2;
                 packed.clear();
+                if (p010) {
+                    // P010: muestras de 16 bits; `stride` viene en bytes. Plano Y y despues UV intercalado.
+                    packed.reserve((size_t)w * h * 3);
+                    for (int32_t r = 0; r < h; r++) {
+                        const uint8_t *row = p + (size_t)(cropT + r) * stride + (size_t)cropL * 2;
+                        packed.insert(packed.end(), row, row + (size_t)w * 2);
+                    }
+                    const uint8_t *uv = p + (size_t)stride * sliceH;
+                    for (int32_t r = 0; r < h / 2; r++) {
+                        const uint8_t *row = uv + (size_t)(cropT / 2 + r) * stride + (size_t)cropL * 2;
+                        packed.insert(packed.end(), row, row + (size_t)w * 2);
+                    }
+                } else {
+                const int32_t cs = stride / 2;
                 packed.reserve((size_t)w * h * 3 / 2);
                 for (int32_t r = 0; r < h; r++) {
                     const uint8_t *row = p + (size_t)(cropT + r) * stride + cropL;
@@ -180,6 +194,7 @@ int main(int argc, char **argv) {
                         const uint8_t *row = pl + (size_t)(cropT / 2 + r) * cs + cropL / 2;
                         packed.insert(packed.end(), row, row + w / 2);
                     }
+                }
                 }
                 if (frames == 0 && getenv("DUMP_FIRST")) {  // diagnostico: primer frame I420 crudo + parametros
                     if (FILE *d = fopen("raw.yuv", "wb")) { fwrite(p, 1, osz, d); fclose(d); }

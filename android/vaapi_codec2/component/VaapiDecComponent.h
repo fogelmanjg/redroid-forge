@@ -43,6 +43,7 @@ public:
     uint32_t width() const { return mSize->width; }
     uint32_t height() const { return mSize->height; }
     std::shared_ptr<C2StreamColorAspectsInfo::output> getColorAspects_l() { return mColorAspects; }
+    std::shared_ptr<C2StreamPixelFormatInfo::output> getPixelFormat_l() const { return mPixelFormat; }
 
 private:
     static C2R SizeSetter(bool mayBlock, const C2P<C2StreamPictureSizeInfo::output> &oldMe,
@@ -116,6 +117,7 @@ private:
     bool mSignalledError = false;
     bool mSignalledOutputEos = false;
     uint32_t mWidth = 0, mHeight = 0;  // ultimo tamano de salida informado al framework
+    uint32_t mHalPixelFormat = 0;      // ultimo formato de pixel de salida informado (YV12 / P010)
     std::set<uint64_t> mPending;       // trabajos entregados al decoder cuyo frame aun no salio
 };
 

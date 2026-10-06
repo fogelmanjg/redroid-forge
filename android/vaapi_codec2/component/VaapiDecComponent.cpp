@@ -132,6 +132,17 @@ VaapiDecInterface::VaapiDecInterface(const std::shared_ptr<C2ReflectorHelper> &h
                          .withSetter(SizeSetter)
                          .build());
 
+    // Formato de pixel de salida. Para contenido de 10 bits el framework puede pedir P010 (o
+    // IMPLEMENTATION_DEFINED en modo superficie, para que pueda elegirlo); 420_888 es la salida de 8 bits.
+    addParameter(DefineParam(mPixelFormat, C2_PARAMKEY_PIXEL_FORMAT)
+                         .withDefault(new C2StreamPixelFormatInfo::output(
+                                 0u, HAL_PIXEL_FORMAT_YCBCR_420_888))
+                         .withFields({C2F(mPixelFormat, value).oneOf({
+                                 HAL_PIXEL_FORMAT_YCBCR_420_888, HAL_PIXEL_FORMAT_YCBCR_P010,
+                                 HAL_PIXEL_FORMAT_IMPLEMENTATION_DEFINED})})
+                         .withSetter(Setter<decltype(*mPixelFormat)>::StrictValueWithNoDeps)
+                         .build());
+
     addParameter(DefineParam(mMaxSize, C2_PARAMKEY_MAX_PICTURE_SIZE)
                          .withDefault(new C2StreamMaxPictureSizeTuning::output(0u, 320, 240))
                          .withFields({
@@ -141,8 +152,8 @@ VaapiDecInterface::VaapiDecInterface(const std::shared_ptr<C2ReflectorHelper> &h
                          .withSetter(MaxPictureSizeSetter, mSize)
                          .build());
 
-    // Perfiles y niveles: solo lo que el hardware decodifica a 8 bits en esta primera version
-    // (el soporte de 10 bits es un paso posterior). Misma lista que los decoders por software.
+    // Perfiles y niveles: los de los decoders por software de AOSP mas los de 10 bits (HEVC Main10,
+    // VP9 perfil 2), que es lo que usa el HDR. Si el hardware del host no los decodifica, la sesion falla al abrirse.
     switch (codec->wireCodec) {
     case VAAPI_HWDEC_CODEC_H264:
         addParameter(
@@ -180,7 +191,8 @@ VaapiDecInterface::VaapiDecInterface(const std::shared_ptr<C2ReflectorHelper> &h
                         .withFields({
                                 C2F(mProfileLevel, profile).oneOf({
                                         C2Config::PROFILE_HEVC_MAIN,
-                                        C2Config::PROFILE_HEVC_MAIN_STILL}),
+                                        C2Config::PROFILE_HEVC_MAIN_STILL,
+                                        C2Config::PROFILE_HEVC_MAIN_10}),
                                 C2F(mProfileLevel, level).oneOf({
                                         C2Config::LEVEL_HEVC_MAIN_1, C2Config::LEVEL_HEVC_MAIN_2,
                                         C2Config::LEVEL_HEVC_MAIN_2_1, C2Config::LEVEL_HEVC_MAIN_3,
@@ -200,7 +212,7 @@ VaapiDecInterface::VaapiDecInterface(const std::shared_ptr<C2ReflectorHelper> &h
                         .withDefault(new C2StreamProfileLevelInfo::input(
                                 0u, C2Config::PROFILE_VP9_0, C2Config::LEVEL_VP9_5))
                         .withFields({
-                                C2F(mProfileLevel, profile).oneOf({C2Config::PROFILE_VP9_0}),
+                                C2F(mProfileLevel, profile).oneOf({C2Config::PROFILE_VP9_0, C2Config::PROFILE_VP9_2}),
                                 C2F(mProfileLevel, level).oneOf({
                                         C2Config::LEVEL_VP9_1, C2Config::LEVEL_VP9_1_1,
                                         C2Config::LEVEL_VP9_2, C2Config::LEVEL_VP9_2_1,
@@ -536,15 +548,8 @@ void VaapiDecComponent::finishFrame(Frame &frame, const std::unique_ptr<C2Work> 
     const uint64_t index = static_cast<uint64_t>(frame.pts);
     mPending.erase(index);
 
-    if (frame.tenBit) {
-        // La salida de 10 bits (HEVC Main10, VP9 perfil 2) todavia no esta soportada.
-        ALOGE("10-bit output is not supported yet");
-        mSignalledError = true;
-        return;
-    }
-
     // Tamano de salida: se informa al framework antes del primer frame y en cada cambio.
-    std::shared_ptr<C2Param> sizeUpdate;
+    std::shared_ptr<C2Param> sizeUpdate, pixelFormatUpdate;
     if (frame.width != mWidth || frame.height != mHeight) {
         C2StreamPictureSizeInfo::output size(0u, frame.width, frame.height);
         std::vector<std::unique_ptr<C2SettingResult>> failures;
@@ -558,14 +563,36 @@ void VaapiDecComponent::finishFrame(Frame &frame, const std::unique_ptr<C2Work> 
         mHeight = frame.height;
     }
 
+    // Formato de salida. 8 bits: YV12. 10 bits: P010 si el framework lo acepto Y gralloc sabe asignarlo (el
+    // daemon ya entrega P010, asi que se copia tal cual); si no, YV12 de 8 bits quedandose con los 8 bits altos
+    // (como los decoders de software de AOSP). No se intenta asignar P010 "a ver si anda": en redroid
+    // gralloc lo rechaza y un pedido fallido deja al servicio sin poder asignar ningun bloque mas, asi que
+    // se usa la misma comprobacion que AOSP.
+    uint32_t format = HAL_PIXEL_FORMAT_YV12;
+    if (frame.tenBit && mIntf->getPixelFormat_l()->value != HAL_PIXEL_FORMAT_YCBCR_420_888 &&
+        getHalPixelFormatForBitDepth10(false) == HAL_PIXEL_FORMAT_YCBCR_P010) {
+        format = HAL_PIXEL_FORMAT_YCBCR_P010;
+    }
+
     std::shared_ptr<C2GraphicBlock> block;
     C2MemoryUsage usage = {C2MemoryUsage::CPU_READ, C2MemoryUsage::CPU_WRITE};
-    c2_status_t err = pool->fetchGraphicBlock(alignPitch(frame.width), frame.height,
-                                              HAL_PIXEL_FORMAT_YV12, usage, &block);
+    // El allocator de gralloc de redroid alinea el pitch a 256 bytes (ver alignPitch).
+    c2_status_t err = pool->fetchGraphicBlock(alignPitch(frame.width), frame.height, format, usage, &block);
     if (err != C2_OK) {
         ALOGE("fetchGraphicBlock for the output failed: %d", err);
         mSignalledError = true;
         return;
+    }
+    if (mHalPixelFormat != format) {
+        C2StreamPixelFormatInfo::output pixelFormat(0u, format);
+        std::vector<std::unique_ptr<C2SettingResult>> failures;
+        if (mIntf->config({&pixelFormat}, C2_MAY_BLOCK, &failures) != C2_OK) {
+            ALOGE("cannot set the output pixel format");
+            mSignalledError = true;
+            return;
+        }
+        pixelFormatUpdate.reset(C2Param::Copy(pixelFormat).release());
+        mHalPixelFormat = format;
     }
     {
         C2GraphicView wView = block->map().get();
@@ -574,34 +601,64 @@ void VaapiDecComponent::finishFrame(Frame &frame, const std::unique_ptr<C2Work> 
             mSignalledError = true;
             return;
         }
-        // El daemon entrega NV12 compacto (sin padding); el bloque tiene el layout que le haya dado
-        // gralloc, asi que se copia plano por plano segun rowInc/colInc (igual que C2SoftVpxDec).
-        const uint8_t *srcY = frame.data.data();
-        const uint8_t *srcUv = srcY + static_cast<size_t>(frame.width) * frame.height;
+        // El daemon entrega NV12 (8 bits) o P010 (10 bits) compactos, sin padding; el bloque tiene el
+        // layout que le haya dado gralloc, asi que se copia plano por plano segun rowInc/colInc
+        // (igual que C2SoftVpxDec).
+        const uint32_t w = frame.width, h = frame.height;
+        const uint8_t *src = frame.data.data();
         uint8_t *dstY = const_cast<uint8_t *>(wView.data()[C2PlanarLayout::PLANE_Y]);
         uint8_t *dstU = const_cast<uint8_t *>(wView.data()[C2PlanarLayout::PLANE_U]);
         uint8_t *dstV = const_cast<uint8_t *>(wView.data()[C2PlanarLayout::PLANE_V]);
         C2PlanarLayout layout = wView.layout();
-        size_t dstYStride = layout.planes[C2PlanarLayout::PLANE_Y].rowInc;
-        size_t dstUStride = layout.planes[C2PlanarLayout::PLANE_U].rowInc;
-        size_t dstVStride = layout.planes[C2PlanarLayout::PLANE_V].rowInc;
-        int32_t dstUColInc = layout.planes[C2PlanarLayout::PLANE_U].colInc;
-        int32_t dstVColInc = layout.planes[C2PlanarLayout::PLANE_V].colInc;
+        const size_t dstYStride = layout.planes[C2PlanarLayout::PLANE_Y].rowInc;
+        const size_t dstUStride = layout.planes[C2PlanarLayout::PLANE_U].rowInc;
+        const size_t dstVStride = layout.planes[C2PlanarLayout::PLANE_V].rowInc;
+        const int32_t dstUColInc = layout.planes[C2PlanarLayout::PLANE_U].colInc;
+        const int32_t dstVColInc = layout.planes[C2PlanarLayout::PLANE_V].colInc;
 
-        for (uint32_t y = 0; y < frame.height; y++) {
-            memcpy(dstY + y * dstYStride, srcY + static_cast<size_t>(y) * frame.width, frame.width);
-    }
-    const uint32_t chromaWidth = frame.width / 2;
-    const uint32_t chromaHeight = frame.height / 2;
-    for (uint32_t y = 0; y < chromaHeight; y++) {
-        const uint8_t *srcRow = srcUv + static_cast<size_t>(y) * frame.width;
-        uint8_t *dstURow = dstU + y * dstUStride;
-        uint8_t *dstVRow = dstV + y * dstVStride;
-        for (uint32_t x = 0; x < chromaWidth; x++) {
-            dstURow[x * dstUColInc] = srcRow[x * 2 + 0];
-            dstVRow[x * dstVColInc] = srcRow[x * 2 + 1];
+        if (format == HAL_PIXEL_FORMAT_YCBCR_P010) {
+            // P010 -> P010: mismo orden de muestras (16 bits, valor en los 10 bits altos), copia de filas.
+            const size_t rowBytes = static_cast<size_t>(w) * 2;
+            const uint8_t *srcUv = src + rowBytes * h;
+            for (uint32_t y = 0; y < h; y++) {
+                memcpy(dstY + y * dstYStride, src + y * rowBytes, rowBytes);
+            }
+            for (uint32_t y = 0; y < h / 2; y++) {
+                memcpy(dstU + y * dstUStride, srcUv + y * rowBytes, rowBytes);
+            }
+        } else if (frame.tenBit) {
+            // 10 bits pero el consumidor pidio 8: se queda con los 8 bits altos de cada muestra.
+            const uint16_t *srcY = reinterpret_cast<const uint16_t *>(src);
+            const uint16_t *srcUv = srcY + static_cast<size_t>(w) * h;
+            for (uint32_t y = 0; y < h; y++) {
+                uint8_t *dst = dstY + y * dstYStride;
+                const uint16_t *row = srcY + static_cast<size_t>(y) * w;
+                for (uint32_t x = 0; x < w; x++) dst[x] = static_cast<uint8_t>(row[x] >> 8);
+            }
+            for (uint32_t y = 0; y < h / 2; y++) {
+                const uint16_t *row = srcUv + static_cast<size_t>(y) * w;
+                uint8_t *dstURow = dstU + y * dstUStride;
+                uint8_t *dstVRow = dstV + y * dstVStride;
+                for (uint32_t x = 0; x < w / 2; x++) {
+                    dstURow[x * dstUColInc] = static_cast<uint8_t>(row[x * 2 + 0] >> 8);
+                    dstVRow[x * dstVColInc] = static_cast<uint8_t>(row[x * 2 + 1] >> 8);
+                }
+            }
+        } else {
+            const uint8_t *srcUv = src + static_cast<size_t>(w) * h;
+            for (uint32_t y = 0; y < h; y++) {
+                memcpy(dstY + y * dstYStride, src + static_cast<size_t>(y) * w, w);
+            }
+            for (uint32_t y = 0; y < h / 2; y++) {
+                const uint8_t *row = srcUv + static_cast<size_t>(y) * w;
+                uint8_t *dstURow = dstU + y * dstUStride;
+                uint8_t *dstVRow = dstV + y * dstVStride;
+                for (uint32_t x = 0; x < w / 2; x++) {
+                    dstURow[x * dstUColInc] = row[x * 2 + 0];
+                    dstVRow[x * dstVColInc] = row[x * 2 + 1];
+                }
+            }
         }
-    }
     }
 
     std::shared_ptr<C2Buffer> buffer = createGraphicBuffer(std::move(block),
@@ -611,12 +668,15 @@ void VaapiDecComponent::finishFrame(Frame &frame, const std::unique_ptr<C2Work> 
         buffer->setInfo(mIntf->getColorAspects_l());
     }
 
-    auto fillWork = [buffer, sizeUpdate](const std::unique_ptr<C2Work> &w) {
+    auto fillWork = [buffer, sizeUpdate, pixelFormatUpdate](const std::unique_ptr<C2Work> &w) {
         w->worklets.front()->output.flags = static_cast<C2FrameData::flags_t>(0);
         w->worklets.front()->output.buffers.clear();
         w->worklets.front()->output.buffers.push_back(buffer);
         w->worklets.front()->output.ordinal = w->input.ordinal;
         if (sizeUpdate) w->worklets.front()->output.configUpdate.push_back(C2Param::Copy(*sizeUpdate));
+        if (pixelFormatUpdate) {
+            w->worklets.front()->output.configUpdate.push_back(C2Param::Copy(*pixelFormatUpdate));
+        }
         w->workletsProcessed = 1u;
         w->result = C2_OK;
     };
