@@ -75,34 +75,79 @@ conocidos (ej. el artefacto de scanline en la 4060 con el driver
      `vaInitialize`; (2) `iHD` emite start codes Annex-B de **3 bytes** y
      radeonsi de 4, y el parser de CSD de `MPEG4Writer` exige 4 (abortaba con
      `FORTIFY: write: count -1`); el daemon ahora normaliza a 4 bytes. Falta NVIDIA.
-5. **Decodificación H.264 por hardware (VA-API) en AMD e Intel** — objetivo
-   agregado el 05/10/2026 (no es un port: es trabajo nuevo). Hoy el daemon en
-   AMD/Intel **solo codifica**; el único decode que existe es el de NVIDIA
-   (NVDEC vía `nvidia-vaapi-driver`, validado bit a bit solo en una GTX 1050
-   Ti). Punto de partida, verificado leyendo el código:
+5. **Decodificación por hardware (VA-API) en AMD e Intel** — objetivo
+   agregado el 05/10/2026 (no es un port: es trabajo nuevo), con el alcance
+   ampliado el 06/10/2026.
+
+   **Principio (decidido 06/10/2026): cada instancia usa por hardware todo lo
+   que el hardware del host ofrezca.** No hay un paquete único de capacidades:
+   un host con Iris Xe decodifica H.264, HEVC (8/10/12 bits), VP9 y VP8; uno con
+   Polaris, H.264 y HEVC; uno con Vega/Cezanne, H.264, HEVC y VP9; hardware más
+   nuevo irá sumando (AV1, etc.). Eso es normal y se declara, no se oculta: el
+   Doctor muestra qué códecs decodifica el host por hardware, y solo se
+   registran en Android los decoders que el host soporta de verdad (mismo
+   criterio que `compatibleCon` de los módulos). **El encode no se toca por
+   ahora: se retoma después de terminar la primera versión.**
+
+   Hoy el daemon en AMD/Intel **solo codifica**; el único decode que existe es
+   el de NVIDIA (NVDEC vía `nvidia-vaapi-driver`, validado bit a bit solo en una
+   GTX 1050 Ti) y solo decodifica **un frame intra suelto** (SPS + PPS + un slice
+   IDR por pedido: sin referencias ni B-frames), o sea que es una prueba del
+   mecanismo, no un decoder. Punto de partida, verificado leyendo el código:
    - `decode_h264_init()` fuerza `LIBVA_DRIVER_NAME=nvidia` y abre
      `/dev/dri/renderD128` fijo: en AMD/Intel nunca inicializa.
    - El módulo `hwenc` solo registra el encoder en `media_codecs.xml`, y su
      manifest solo se ofrece para hosts `amd`/`intel` (el componente
      `VaapiDecComponent` existe en el proyecto viejo, pero forge no lo conecta).
-   - El decoder actual cubre **Baseline, un slice, sin B-frames**; el contenido
-     real (YouTube/SmartTube) es AVC **High** con B-frames y varias referencias.
 
-   Sub-pasos: (a) elegir el driver por vendor en vez de forzar `nvidia` y
-   comprobar `VAEntrypointVLD` en `radeonsi` e `iHD` (Sandy Bridge/`i965` queda
-   como caso opcional); (b) ampliar el decoder a perfil High: parseo completo de
-   SPS/PPS/slice header, B-frames, listas de referencia, varios slices y
-   cropping; (c) del lado de Android, registrar `c2.hardware.decoder.h264` y
-   hacer que el módulo lo ofrezca según lo que el host realmente soporte;
-   (d) validar bit a bit (PSNR) contra el decode por software en Polaris e Iris
-   Xe, y con contenido real; (e) medir CPU antes y después.
+   **Medido el 06/10/2026** (ffmpeg + VA-API, decode puro, `-threads 1` en
+   software; 0 frames distintos contra software en todos los casos):
+   720p30 High con B-frames: Polaris 1,77 s de CPU por software contra 0,33 s por
+   hardware; Iris Xe 4,56 s contra 0,49 s. 2160p30 10 bits (5 s): HEVC Main10 HDR10
+   Polaris ×14, Iris Xe ×22, 5700G ×7,5 (server01 cargado); VP9 perfil 2 Iris Xe
+   ×17, 5700G ×10; **VP9 no soportado en Polaris** (sin bloque de hardware). Por
+   software, 4K necesita 2 a 2,7 núcleos para ir en tiempo real; por hardware,
+   0,1 a 0,26.
 
-   **Dificultad: Alta** — con VA-API quien decodifica tiene que parsear los
-   encabezados y armar los buffers de cada frame, así que no es un cambio de
-   configuración. **Gate propio** (no bloquea el de arriba): reproducir H.264
-   High de 720p/1080p en una instancia sobre AMD y sobre Intel con decode por
-   hardware, con salida equivalente al decode por software y un uso de CPU
+   **Enfoque (decidido 06/10/2026): libavcodec con hwaccel VA-API dentro del
+   daemon**, no un parser H.264 propio. Cubre High, B-frames, varios slices y,
+   donde el hardware lo soporta, HEVC y VP9, sin escribir un parser por códec
+   (extender el parser propio habría sido ~1.500–2.500 líneas y solo H.264).
+   **Licencia:** el FFmpeg de Alpine se compila con `--enable-gpl
+   --enable-version3`; enlazarlo haría de la imagen una obra GPLv3, incompatible
+   con publicar una imagen Apache-2.0. Por eso el `Dockerfile` **compila su
+   propio libavcodec mínimo (LGPL, `--disable-gpl`)**, solo con los decoders y el
+   hwaccel VA-API necesarios, desde un tarball fijado por versión y `sha256`.
+
+   Sub-pasos: (1) sesión de decode vendor-agnóstica con libavcodec en el daemon,
+   probada solo en el host con un cliente de línea de comandos (exactitud contra
+   software y CPU, sin tocar Android); (2) protocolo v2 con sesión por stream,
+   un access unit por pedido y salida de 0 o 1 frame con flush; **para 1080p/4K
+   los frames tienen que viajar sin copia (dma-buf exportado desde VA-API)**:
+   un frame 4K de 10 bits pesa casi 25 MB (~750 MB/s a 30 fps), inviable por
+   socket; (3) del lado de Android, componente Codec2 con salida demorada para
+   los B-frames, recompilado con AOSP, y registro dinámico en `media_codecs.xml`
+   según lo que el host soporte; (4) validar bit a bit contra software y medir
+   CPU en Polaris, Iris Xe y 5700G, con contenido real (SmartTube); (5) anotar
+   las capacidades por códec en la base de combinaciones (un `chequeo` por
+   códec, p. ej. `hwdec.h264`, `hwdec.hevc10`, `hwdec.vp9`).
+
+   **Dificultad: Alta** — con VA-API quien decodifica tiene que armar los
+   buffers de cada frame y manejar referencias y reordenamiento, y el componente
+   Codec2 pasa de un pedido-un frame a salida demorada. **Gate propio** (no
+   bloquea el de abajo): reproducir H.264 High de 720p/1080p, y VP9/HEVC donde
+   el hardware lo soporte, en una instancia sobre AMD y sobre Intel con decode
+   por hardware, con salida equivalente a la de software y un uso de CPU
    claramente menor.
+
+   **HDR (anotado 06/10/2026): no se conserva por scrcpy hoy, y no bloquea nada.**
+   La pantalla de redroid no declara HDR (`supportedHdrTypes=[]`, sin wide color),
+   scrcpy 4.1 no tiene opciones de HDR/10 bits, y el encoder es H.264 de 8 bits:
+   el video HDR llega como SDR. Conservarlo de punta a punta sería otro proyecto
+   (display con HDR en Android, encode HEVC Main10, un scrcpy y un cliente que lo
+   manejen). **scrcpy cambia rápido:** es un punto a **revisar periódicamente**,
+   porque una versión nueva podría cubrir parte de esto. El valor de este
+   objetivo es el ahorro de CPU y la compatibilidad de códecs, no la fidelidad HDR.
 
 **Gate:** una instancia creada desde `redroid-forge` reproduce el mismo
 comportamiento de aceleración ya validado por separado, en al menos un host

@@ -39,10 +39,13 @@ tablero de control.
   - Todo lo reutilizable del módulo redroid de `plenum-redroid` (misma lógica
     de reuso que con `jg-dashboard`, ver sección 4).
 
-- **Objetivo adicional (no es un port): decodificación H.264 por hardware en
-  AMD e Intel** (agregado el 05/10/2026). Hoy solo existe decode por hardware
-  en NVIDIA; en AMD/Intel el daemon únicamente codifica. Alcance: perfil High
-  (el que usan YouTube/SmartTube), no solo Baseline. Detalle y estado en la
+- **Objetivo adicional (no es un port): decodificación por hardware en AMD e
+  Intel** (agregado el 05/10/2026; alcance ampliado el 06/10/2026). Cada
+  instancia usa por hardware **todo lo que el hardware del host ofrezca** (H.264,
+  HEVC, VP9... según la GPU): no hay un paquete único de capacidades, y
+  hardware más nuevo irá sumando. Hoy solo existe decode por hardware en NVIDIA,
+  y limitado a un frame intra suelto. El encode se retoma después de la primera
+  versión. Detalle, mediciones y enfoque (libavcodec compilado como LGPL) en la
   Fase 2 del `ROADMAP.md` (paso 5).
 
 ### Tiers de soporte por imagen (no una restricción dura)
