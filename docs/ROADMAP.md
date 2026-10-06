@@ -75,6 +75,34 @@ conocidos (ej. el artefacto de scanline en la 4060 con el driver
      `vaInitialize`; (2) `iHD` emite start codes Annex-B de **3 bytes** y
      radeonsi de 4, y el parser de CSD de `MPEG4Writer` exige 4 (abortaba con
      `FORTIFY: write: count -1`); el daemon ahora normaliza a 4 bytes. Falta NVIDIA.
+5. **Decodificación H.264 por hardware (VA-API) en AMD e Intel** — objetivo
+   agregado el 05/10/2026 (no es un port: es trabajo nuevo). Hoy el daemon en
+   AMD/Intel **solo codifica**; el único decode que existe es el de NVIDIA
+   (NVDEC vía `nvidia-vaapi-driver`, validado bit a bit solo en una GTX 1050
+   Ti). Punto de partida, verificado leyendo el código:
+   - `decode_h264_init()` fuerza `LIBVA_DRIVER_NAME=nvidia` y abre
+     `/dev/dri/renderD128` fijo: en AMD/Intel nunca inicializa.
+   - El módulo `hwenc` solo registra el encoder en `media_codecs.xml`, y su
+     manifest solo se ofrece para hosts `amd`/`intel` (el componente
+     `VaapiDecComponent` existe en el proyecto viejo, pero forge no lo conecta).
+   - El decoder actual cubre **Baseline, un slice, sin B-frames**; el contenido
+     real (YouTube/SmartTube) es AVC **High** con B-frames y varias referencias.
+
+   Sub-pasos: (a) elegir el driver por vendor en vez de forzar `nvidia` y
+   comprobar `VAEntrypointVLD` en `radeonsi` e `iHD` (Sandy Bridge/`i965` queda
+   como caso opcional); (b) ampliar el decoder a perfil High: parseo completo de
+   SPS/PPS/slice header, B-frames, listas de referencia, varios slices y
+   cropping; (c) del lado de Android, registrar `c2.hardware.decoder.h264` y
+   hacer que el módulo lo ofrezca según lo que el host realmente soporte;
+   (d) validar bit a bit (PSNR) contra el decode por software en Polaris e Iris
+   Xe, y con contenido real; (e) medir CPU antes y después.
+
+   **Dificultad: Alta** — con VA-API quien decodifica tiene que parsear los
+   encabezados y armar los buffers de cada frame, así que no es un cambio de
+   configuración. **Gate propio** (no bloquea el de arriba): reproducir H.264
+   High de 720p/1080p en una instancia sobre AMD y sobre Intel con decode por
+   hardware, con salida equivalente al decode por software y un uso de CPU
+   claramente menor.
 
 **Gate:** una instancia creada desde `redroid-forge` reproduce el mismo
 comportamiento de aceleración ya validado por separado, en al menos un host
