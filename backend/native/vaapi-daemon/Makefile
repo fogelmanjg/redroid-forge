@@ -25,7 +25,16 @@ LDLIBS := -lva -lva-drm -lgbm -lEGL -ldl
 daemon: daemon.c decode_h264.c decode_h264.h protocol.h Makefile
 	$(CC) $(CFLAGS) -o daemon daemon.c decode_h264.c $(LDLIBS)
 
+# Paso 1 del hwdecode (docs/ROADMAP.md, Fase 2, paso 5): sesion de decode por
+# hardware con libavcodec + VA-API, y su cliente de prueba. Aparte del target
+# `daemon` a proposito: todavia no esta cableado al daemon (eso es el paso 2) y
+# necesita las cabeceras de FFmpeg (libavcodec/libavformat/libavutil) y libva.
+FFMPEG_PKGS := libavcodec libavformat libavutil
+hwdec-test: hwdec.c hwdec.h hwdec-test.c Makefile
+	$(CC) -O2 -Wall -o hwdec-test hwdec.c hwdec-test.c \
+	  $(shell pkg-config --cflags --libs $(FFMPEG_PKGS) libva libva-drm)
+
 clean:
-	rm -f daemon
+	rm -f daemon hwdec-test
 
 .PHONY: clean

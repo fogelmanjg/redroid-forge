@@ -119,9 +119,14 @@ conocidos (ej. el artefacto de scanline en la 4060 con el driver
    propio libavcodec mínimo (LGPL, `--disable-gpl`)**, solo con los decoders y el
    hwaccel VA-API necesarios, desde un tarball fijado por versión y `sha256`.
 
-   Sub-pasos: (1) sesión de decode vendor-agnóstica con libavcodec en el daemon,
-   probada solo en el host con un cliente de línea de comandos (exactitud contra
-   software y CPU, sin tocar Android); (2) protocolo v2 con sesión por stream,
+   Sub-pasos: (1) ✅ **hecho el 06/10/2026**: sesión de decode vendor-agnóstica con
+   libavcodec (`backend/native/vaapi-daemon/hwdec.c`, aún sin cablear al daemon),
+   probada solo en el host con un cliente de línea de comandos. **12 de 12 casos
+   soportados dan frames idénticos al software** (H.264 High con B-frames en 720p y
+   1080p, HEVC Main10 4K HDR10 y VP9 perfil 2 4K, en Polaris, Iris Xe y el 5700G), y
+   el único caso sin hardware (VP9 en Polaris) se rechaza sin caer a software.
+   Detalle y cómo repetirlo en el README del daemon. Pendiente de este sub-paso:
+   probar AV1 y VP8 (Iris Xe los anuncia) y medir el CPU real del decode; (2) protocolo v2 con sesión por stream,
    un access unit por pedido y salida de 0 o 1 frame con flush; **para 1080p/4K
    los frames tienen que viajar sin copia (dma-buf exportado desde VA-API)**:
    un frame 4K de 10 bits pesa casi 25 MB (~750 MB/s a 30 fps), inviable por
