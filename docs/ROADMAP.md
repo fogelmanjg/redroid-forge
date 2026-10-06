@@ -182,8 +182,24 @@ conocidos (ej. el artefacto de scanline en la 4060 con el driver
    entrega como 8 bits, mientras que quitar esos perfiles mandaría el video a decoders de software que
    probablemente reinicien Android. Se revisa cuando esté el límite de resolución anunciada (punto 3).
 
+   **Medición por etapa (06/10/2026, Polaris en jgustavo46, por la ruta completa de Android;
+   `REDROID_FORGE_HWDEC_STATS=1` imprime estos promedios al cerrar cada sesión).** Milisegundos por frame, lado daemon:
+
+   | clip | MB/frame | espera GPU (decode) | descarga GPU→RAM | copia compacta | armar cola | escritura al socket | total daemon |
+   |---|---|---|---|---|---|---|---|
+   | H.264 720p60 | 1,4 | 0,5 | 2,5 | 0,1 | 0,6 | 1,2 | ~5,2 (31 % de un core a 60 fps) |
+   | H.264 1080p | 3,1 | 0,7 | 4,3 | 0,2 | 0,9 | 3,2 | ~9,6 |
+   | HEVC 4K | 12,4 | 2,6 | 13,6 | 1,6 | 2,9 | 4,6 | ~26 (techo ~38 fps) |
+
+   **Lo que domina es la descarga GPU→RAM (50-55 %), no el decode** (0,5-2,6 ms, el GPU va sobrado). 12,4 MB en
+   13,6 ms son ~0,9 GB/s: lectura lenta de memoria de video, típica de mapear la superficie con
+   `vaDeriveImage` en una GPU discreta (la ruta de `av_hwframe_transfer_data`). Siguen las copias en CPU
+   (cola + socket + conversión en Android, en serie en un hilo) y, por último, el decode. A 60 fps el
+   presupuesto es 16,7 ms por frame: 720p y 1080p entran, 4K no. No se midió Intel (n02 pausada por RAM) ni
+   el lado Android (lectura del socket y copia al bloque), que suma al total.
+
    **Siguiente tanda del hwdecode (orden decidido 06/10/2026):**
-   1. Medir tiempo por etapa (decode, descarga, copia, socket, conversión).
+   1. ✅ Medir tiempo por etapa (tabla de arriba). Falta el lado Android y Intel.
    2. ✅ Salida de 10 bits en el componente: HEVC Main10 y VP9 perfil 2, como 8 bits (ver hallazgo de arriba).
    3. **Límite de resolución anunciada = el escalón estándar (240/360/480/720/1080/1440/2160p)
       más grande que quepa en la pantalla de la instancia, redondeando hacia abajo, con piso

@@ -5,10 +5,12 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <unistd.h>
 
 #include <libavcodec/avcodec.h>
 #include <libavutil/hwcontext.h>
+#include <libavutil/hwcontext_vaapi.h>
 #include <libavutil/imgutils.h>
 #include <libavutil/pixdesc.h>
 
@@ -96,7 +98,16 @@ struct HwDecSession {
     AVFrame *sw;
     uint8_t *buf;
     size_t cap;
+    /* Tiempos por etapa (REDROID_FORGE_HWDEC_STATS=1), en ns. */
+    int stats;
+    uint64_t ns_send, ns_recv, ns_sync, ns_transfer, ns_copy, nframes, nbytes;
 };
+
+static uint64_t now_ns(void) {
+    struct timespec t;
+    clock_gettime(CLOCK_MONOTONIC, &t);
+    return (uint64_t)t.tv_sec * 1000000000ull + (uint64_t)t.tv_nsec;
+}
 
 static enum AVPixelFormat pick_vaapi(AVCodecContext *ctx, const enum AVPixelFormat *fmts) {
     (void)ctx;
@@ -125,6 +136,7 @@ HwDecSession *hwdec_open(const char *drm_node, HwDecCodec codec) {
     HwDecSession *s = calloc(1, sizeof(*s));
     if (!s) return NULL;
     s->codec = codec;
+    s->stats = getenv("REDROID_FORGE_HWDEC_STATS") != NULL;
     int r = av_hwdevice_ctx_create(&s->hw_dev, AV_HWDEVICE_TYPE_VAAPI, drm_node, NULL, 0);
     if (r < 0) { averr("av_hwdevice_ctx_create(VAAPI)", r); goto fail; }
     s->ctx = avcodec_alloc_context3(dec);
@@ -145,6 +157,7 @@ fail:
 }
 
 int hwdec_send(HwDecSession *s, const uint8_t *data, size_t size, int64_t pts) {
+    const uint64_t t0 = s->stats ? now_ns() : 0;
     av_packet_unref(s->pkt);
     int r = av_new_packet(s->pkt, (int)size);  /* agrega el padding que exige libavcodec */
     if (r < 0) return r;
@@ -152,6 +165,7 @@ int hwdec_send(HwDecSession *s, const uint8_t *data, size_t size, int64_t pts) {
     s->pkt->pts = pts;
     s->pkt->dts = pts;
     r = avcodec_send_packet(s->ctx, s->pkt);
+    if (s->stats) s->ns_send += now_ns() - t0;
     if (r == AVERROR(EAGAIN)) return HWDEC_AGAIN;
     if (r < 0) { averr("avcodec_send_packet", r); return r; }
     return HWDEC_OK;
@@ -166,7 +180,9 @@ int hwdec_send_eos(HwDecSession *s) {
 int hwdec_receive(HwDecSession *s, HwDecFrame *out) {
     av_frame_unref(s->frame);
     av_frame_unref(s->sw);
+    uint64_t t0 = s->stats ? now_ns() : 0;
     int r = avcodec_receive_frame(s->ctx, s->frame);
+    if (s->stats && r == 0) s->ns_recv += now_ns() - t0;
     if (r == AVERROR(EAGAIN)) return HWDEC_AGAIN;
     if (r == AVERROR_EOF) return HWDEC_EOF;
     if (r < 0) { averr("avcodec_receive_frame", r); return r; }
@@ -183,7 +199,17 @@ int hwdec_receive(HwDecSession *s, HwDecFrame *out) {
         return -1;
     }
     s->sw->format = swfmt;
+    if (s->stats) {
+        /* Separa la espera al GPU (el decode es asincrono) de la descarga a RAM. */
+        AVHWFramesContext *hfc = (AVHWFramesContext *)s->frame->hw_frames_ctx->data;
+        AVVAAPIDeviceContext *vctx = hfc->device_ctx->hwctx;
+        t0 = now_ns();
+        vaSyncSurface(vctx->display, (VASurfaceID)(uintptr_t)s->frame->data[3]);
+        s->ns_sync += now_ns() - t0;
+    }
+    t0 = s->stats ? now_ns() : 0;
     r = av_hwframe_transfer_data(s->sw, s->frame, 0);
+    if (s->stats) s->ns_transfer += now_ns() - t0;
     if (r < 0) { averr("av_hwframe_transfer_data", r); return r; }
 
     int w = s->frame->width, h = s->frame->height;
@@ -195,7 +221,9 @@ int hwdec_receive(HwDecSession *s, HwDecFrame *out) {
         s->buf = nb;
         s->cap = need;
     }
+    t0 = s->stats ? now_ns() : 0;
     r = av_image_copy_to_buffer(s->buf, need, (const uint8_t *const *)s->sw->data, s->sw->linesize, swfmt, w, h, 1);
+    if (s->stats) { s->ns_copy += now_ns() - t0; s->nframes++; s->nbytes += (uint64_t)need; }
     if (r < 0) return r;
     out->width = w;
     out->height = h;
@@ -212,6 +240,16 @@ void hwdec_flush(HwDecSession *s) {
 
 void hwdec_close(HwDecSession *s) {
     if (!s) return;
+    if (s->stats && s->nframes) {
+        const double n = (double)s->nframes;
+        fprintf(stderr,
+                "hwdec-stats[%s]: %llu frames, %.1f MB/frame | por frame (ms): send=%.2f receive=%.2f "
+                "espera_GPU(decode)=%.2f descarga_GPU->RAM=%.2f copia_compacta=%.2f\n",
+                hwdec_codec_name(s->codec), (unsigned long long)s->nframes, (double)s->nbytes / n / 1e6,
+                (double)s->ns_send / n / 1e6, (double)s->ns_recv / n / 1e6, (double)s->ns_sync / n / 1e6,
+                (double)s->ns_transfer / n / 1e6,
+                (double)s->ns_copy / n / 1e6);
+    }
     av_packet_free(&s->pkt);
     av_frame_free(&s->frame);
     av_frame_free(&s->sw);

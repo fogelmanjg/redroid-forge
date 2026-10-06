@@ -19,6 +19,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <unistd.h>
 #include <errno.h>
 #include <sys/socket.h>
@@ -961,6 +962,12 @@ static int io_read_all(int fd, void *buf, size_t len) {
     return 1;
 }
 
+static uint64_t mono_ns(void) {
+    struct timespec t;
+    clock_gettime(CLOCK_MONOTONIC, &t);
+    return (uint64_t)t.tv_sec * 1000000000ull + (uint64_t)t.tv_nsec;
+}
+
 static int io_write_all(int fd, const void *buf, size_t len) {
     size_t sent = 0;
     while (sent < len) {
@@ -998,13 +1005,18 @@ static int fq_append(FrameQueue *q, const HwDecFrame *f) {
 }
 
 /* Vacia lo que el decoder tenga listo. Devuelve 0, o <0 si hubo un error real. */
+static __thread uint64_t tl_ns_queue;  /* tiempo en fq_append del hilo actual (REDROID_FORGE_HWDEC_STATS) */
+
 static int hwdec_drain(HwDecSession *s, FrameQueue *q) {
     HwDecFrame f;
     for (;;) {
         int r = hwdec_receive(s, &f);
         if (r == HWDEC_AGAIN || r == HWDEC_EOF) return 0;
         if (r < 0) return r;
-        if (fq_append(q, &f) != 0) return -1;
+        const uint64_t t0 = mono_ns();
+        int ar = fq_append(q, &f);
+        tl_ns_queue += mono_ns() - t0;
+        if (ar != 0) return -1;
     }
 }
 
@@ -1020,6 +1032,9 @@ static void *hwdec_stream_thread(void *arg) {
     unsigned char *cfg = NULL, *last_cfg = NULL, *joined = NULL;
     size_t cfg_len = 0, last_cfg_len = 0, joined_cap = 0;
     int need_replay = 1;
+    const int stats = getenv("REDROID_FORGE_HWDEC_STATS") != NULL;
+    uint64_t ns_wait = 0, ns_write = 0, nresp = 0;
+    tl_ns_queue = 0;
 
     if (io_read_all(fd, &open_req, sizeof(open_req)) != 1) goto done;
     if (open_req.codec < HWDEC_NCODECS) s = hwdec_open(hwdec_node(), (HwDecCodec)open_req.codec);
@@ -1033,7 +1048,9 @@ static void *hwdec_stream_thread(void *arg) {
 
     for (;;) {
         HwDecRequest rq;
+        const uint64_t tw0 = stats ? mono_ns() : 0;
         if (io_read_all(fd, &rq, sizeof(rq)) != 1) break;   /* cerro la conexion: se cierra la sesion */
+        if (stats) ns_wait += mono_ns() - tw0;
         FrameQueue q = {0};
         int status = 0, stop = 0;
 
@@ -1122,12 +1139,21 @@ static void *hwdec_stream_thread(void *arg) {
         }
 
         HwDecResponse resp = {.status = status, .nframes = q.nframes};
+        const uint64_t ts0 = stats ? mono_ns() : 0;
         int werr = io_write_all(fd, &resp, sizeof(resp));
         if (!werr && q.len) werr = io_write_all(fd, q.buf, q.len);
+        if (stats) { ns_write += mono_ns() - ts0; nresp++; }
         free(q.buf);
         if (werr || stop) break;
     }
 done:
+    if (stats && nresp) {
+        fprintf(stderr,
+                "hwdec-stats[daemon]: %llu respuestas | por respuesta (ms): espera_de_android=%.2f armar_cola=%.2f "
+                "escritura_al_socket=%.2f\n",
+                (unsigned long long)nresp, (double)ns_wait / nresp / 1e6, (double)tl_ns_queue / nresp / 1e6,
+                (double)ns_write / nresp / 1e6);
+    }
     free(au);
     free(cfg);
     free(last_cfg);
