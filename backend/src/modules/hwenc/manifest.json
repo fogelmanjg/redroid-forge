@@ -2,20 +2,32 @@
   "id": "hwenc",
   "nombre": "Aceleracion de video por hardware (VA-API)",
   "esTerceroNoLibre": false,
-  "descripcion": "Encode H.264 por hardware (AMD/Intel via VA-API) para streaming/captura de pantalla. El componente Codec2 vive en la instancia y habla con un daemon propio corriendo en el host -- de redroid-hwenc.",
+  "descripcion": "Encode H.264 (AMD/Intel via VA-API) para streaming/captura de pantalla, y decode por hardware de todo lo que el GPU del host ofrezca (H.264, HEVC, VP9 segun el hardware). Los componentes Codec2 viven en la instancia y hablan con un daemon propio corriendo en el host -- de redroid-hwenc.",
   "queToca": [
     "copia un servicio (binario compilado, .rc, politica de seccomp, manifest VINTF) dentro de /vendor de la instancia -- tiene que hacerse ANTES del primer arranque, /vendor queda de solo lectura apenas bootea",
-    "agrega una entrada a /vendor/etc/media_codecs.xml para que el framework liste el encoder",
+    "agrega entradas a /vendor/etc/media_codecs.xml para que el framework liste el encoder y SOLO los decoders que el hardware del host decodifica de verdad (el backend se lo pregunta al daemon al crear la instancia)",
     "agrega el boot flag androidboot.use_redroid_c2=1 al arranque del contenedor (etapa 3, antes hardcodeado a mano en instances.js)",
     "requiere un proceso propio corriendo en el host (el daemon VA-API), fuera de cualquier contenedor, escuchando en /dev/vaapi-helper/socket -- el backend lo levanta solo si no esta corriendo",
     "hace un setprop + reinicio de mediaserver despues de cada boot fresco (etapa 6) -- automatizado desde Fase 5, antes se corria a mano"
   ],
   "compatibleCon": {
-    "androidVersion": [15],
-    "gpuMode": ["host"],
-    "hostGpuVendor": ["amd", "intel"]
+    "androidVersion": [
+      15
+    ],
+    "gpuMode": [
+      "host"
+    ],
+    "hostGpuVendor": [
+      "amd",
+      "intel"
+    ]
   },
-  "etapa": [3, 4, 5, 6],
+  "etapa": [
+    3,
+    4,
+    5,
+    6
+  ],
   "entry": "./integrate.js",
-  "version": 3
+  "version": 4
 }

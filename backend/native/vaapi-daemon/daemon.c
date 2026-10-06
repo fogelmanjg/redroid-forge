@@ -1056,6 +1056,10 @@ static void *hwdec_stream_thread(void *arg) {
         case VAAPI_HWDEC_MSG_EOS:
             status = hwdec_send_eos(s);
             if (status == 0) status = hwdec_drain(s, &q);
+            /* Despues de vaciar, libavcodec queda en estado EOF y rechaza mas entrada. El componente de
+             * Android tambien pide vaciar a mitad de stream (drain sin EOS, p. ej. al cambiar de
+             * resolucion), asi que el decoder se reinicia para poder seguir decodificando. */
+            hwdec_flush(s);
             break;
         case VAAPI_HWDEC_MSG_CLOSE:
             stop = 1;

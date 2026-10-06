@@ -111,24 +111,48 @@ function prepareCreate() {
 // No reemplaza media_codecs.xml entero -- cada imagen base (oficial,
 // custom, lo que sea) puede traer includes/entradas propias que no
 // queremos pisar. Se extrae el archivo YA presente en la instancia, se le
-// agrega la linea del encoder si todavia no esta, y se reinyecta -- sin
-// esta declaracion, MediaCodecList nunca se entera de que el componente
-// existe aunque su store AIDL este bien registrado (Tier 5.6 de
-// redroid-hwenc, confirmado en vivo el 28/09 contra la imagen oficial).
+// agregan las lineas del encoder y de los decoders que el HOST soporta por hardware (las que
+// todavia no estan), y se reinyecta -- sin esta declaracion, MediaCodecList nunca se entera de que
+// los componentes existen aunque su store AIDL este bien registrado (Tier 5.6 de redroid-hwenc,
+// confirmado en vivo el 28/09 contra la imagen oficial).
+//
+// Pura (sin E/S) para poder probarla: devuelve el XML nuevo, o el mismo si no habia nada que agregar.
+function addCodecsToXml(original, decoders) {
+  let xml = original;
+  if (!xml.includes(C2_ENCODER_NAME)) {
+    const patched = xml.replace(/<Encoders>/, `<Encoders>\n        <MediaCodec name="${C2_ENCODER_NAME}" type="video/avc" />`);
+    if (patched === xml) {
+      throw new Error('No se encontro <Encoders> en media_codecs.xml -- formato inesperado, no se pudo parchear');
+    }
+    xml = patched;
+  }
+  const missing = decoders.filter((d) => !xml.includes(`"${d.name}"`));
+  if (missing.length > 0) {
+    const lines = missing.map((d) => `        <MediaCodec name="${d.name}" type="${d.type}" />`).join('\n');
+    const patched = xml.replace(/<Decoders>/, `<Decoders>\n${lines}`);
+    if (patched === xml) {
+      throw new Error('No se encontro <Decoders> en media_codecs.xml -- formato inesperado, no se pudo parchear');
+    }
+    xml = patched;
+  }
+  return xml;
+}
+
 async function patchMediaCodecsXml(containerId) {
+  const caps = await hwAccel.queryHwdecCaps();
+  if (caps.codecs.length > 0) {
+    log(`decode por hardware del host (${caps.driver}): ${caps.codecs.map((c) => c.id).join(', ')}`);
+  } else {
+    log('el host no ofrece decode por hardware (o el daemon no lo informo): no se registran decoders');
+  }
   const tmpPath = path.join(os.tmpdir(), `media_codecs-${containerId.slice(0, 12)}.xml`);
   await execFileAsync('docker', ['cp', `${containerId}:/vendor/etc/media_codecs.xml`, tmpPath]);
   const original = fs.readFileSync(tmpPath, 'utf-8');
-  if (original.includes(C2_ENCODER_NAME)) {
-    log('media_codecs.xml ya tiene la entrada del encoder, no se toca');
-    return;
-  }
-  const patched = original.replace(
-    /<Encoders>/,
-    `<Encoders>\n        <MediaCodec name="${C2_ENCODER_NAME}" type="video/avc" />`,
-  );
+  const patched = addCodecsToXml(original, caps.codecs);
   if (patched === original) {
-    throw new Error('No se encontro <Encoders> en media_codecs.xml -- formato inesperado, no se pudo parchear');
+    log('media_codecs.xml ya tiene todas las entradas, no se toca');
+    fs.unlinkSync(tmpPath);
+    return;
   }
   fs.writeFileSync(tmpPath, patched);
   await execFileAsync('chown', ['root:root', tmpPath]);
@@ -262,7 +286,7 @@ async function ensureRuntimeReady(containerId) {
 }
 
 module.exports = {
-  prepareCreate, integrate, ensureHostInfraReady, ensureRuntimeReady, FILES, REQUIRED_BOOT_FLAGS, ARTIFACTS_DIR,
+  prepareCreate, integrate, ensureHostInfraReady, ensureRuntimeReady, addCodecsToXml, FILES, REQUIRED_BOOT_FLAGS, ARTIFACTS_DIR,
 };
 
 if (require.main === module) {
