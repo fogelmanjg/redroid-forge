@@ -175,6 +175,13 @@ conocidos (ej. el artefacto de scanline en la 4060 con el driver
    de Android hacen la misma consulta con VP9 de 10 bits y probablemente tiren el sistema abajo en esta
    imagen (sin probar); es un bug de gralloc de redroid para reportar upstream.
 
+   **Limitación conocida de esta etapa (decidida 06/10/2026):** SmartTube sigue ofreciendo en su menú
+   formatos UHD y HDR aunque la pantalla de la instancia sea de 720p y no declare HDR (no filtra por
+   pantalla). Solución provisoria: fijar en SmartTube la calidad máxima por defecto (p. ej. 1080p 60 fps
+   VP9 sin HDR), que el reproductor respeta. El HDR no se oculta a propósito: el decoder lo acepta y lo
+   entrega como 8 bits, mientras que quitar esos perfiles mandaría el video a decoders de software que
+   probablemente reinicien Android. Se revisa cuando esté el límite de resolución anunciada (punto 3).
+
    **Siguiente tanda del hwdecode (orden decidido 06/10/2026):**
    1. Medir tiempo por etapa (decode, descarga, copia, socket, conversión).
    2. ✅ Salida de 10 bits en el componente: HEVC Main10 y VP9 perfil 2, como 8 bits (ver hallazgo de arriba).
