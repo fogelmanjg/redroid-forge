@@ -18,6 +18,19 @@ rsync -a "$HERE/vaapi_codec2/" "$AOSP/external/vaapi_codec2/"
 # protocol.h: una sola fuente de verdad, la del daemon (el componente de Android la incluye tal cual).
 cp "$HERE/../backend/native/vaapi-daemon/protocol.h" "$AOSP/external/vaapi_codec2/component/protocol.h"
 
+# El analisis de Soong llegaba a >37 GB porque el recolector de basura de Go no conoce el tope del
+# contenedor y deja crecer el heap hasta el doble de lo vivo. Soong lanza soong_build con `env -i`
+# (borra GOMEMLIMIT), asi que se envuelve el binario en un script que lo fija: con GOMEMLIMIT=26GiB el
+# analisis paso de morir por falta de memoria (20+ min perdidos) a terminar en ~2,5 min. Idempotente:
+# si Soong reconstruye soong_build, el binario nuevo vuelve a ser un ELF y se envuelve de nuevo.
+docker exec -u jgustavo redroid-build-persist sh -c '
+B=/out/host/linux-x86/bin
+if file $B/soong_build | grep -q ELF; then
+  cp -p $B/soong_build $B/soong_build.real
+  printf "#!/bin/sh\nexec env GOMEMLIMIT=26GiB GOGC=50 $B/soong_build.real \"\$@\"\n" > $B/soong_build.wrapper
+  chmod 755 $B/soong_build.wrapper && mv $B/soong_build.wrapper $B/soong_build
+fi'
+
 docker exec -u jgustavo -e HOME=/home/jgustavo -e USER=jgustavo redroid-build-persist bash -c "
 set -e
 cd /src
