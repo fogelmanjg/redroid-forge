@@ -126,11 +126,22 @@ conocidos (ej. el artefacto de scanline en la 4060 con el driver
    1080p, HEVC Main10 4K HDR10 y VP9 perfil 2 4K, en Polaris, Iris Xe y el 5700G), y
    el único caso sin hardware (VP9 en Polaris) se rechaza sin caer a software.
    Detalle y cómo repetirlo en el README del daemon. Pendiente de este sub-paso:
-   probar AV1 y VP8 (Iris Xe los anuncia) y medir el CPU real del decode; (2) protocolo v2 con sesión por stream,
-   un access unit por pedido y salida de 0 o 1 frame con flush; **para 1080p/4K
-   los frames tienen que viajar sin copia (dma-buf exportado desde VA-API)**:
-   un frame 4K de 10 bits pesa casi 25 MB (~750 MB/s a 30 fps), inviable por
-   socket; (3) del lado de Android, componente Codec2 con salida demorada para
+   probar AV1 y VP8 (Iris Xe los anuncia) y medir el CPU real del decode; (2) protocolo v2 con una sesión por stream (conexión persistente atendida en su
+   propio hilo del daemon, para no bloquear al encode), un access unit por pedido, salida de
+   0 a N frames ya reordenados, flush y fin de stream, más un comando para que el backend
+   pregunte qué decodifica el host. **(2a) ✅ hecho el 06/10/2026**, solo en el host:
+   `protocol.h` (`VAAPI_CMD_HWDEC`, `VAAPI_CMD_HWDEC_CAPS`), el daemon compilado con
+   `HWDEC=1` y un cliente de referencia en C (`hwdec_client.c`) que sirve de guía para el
+   componente de Android. Verificado en Polaris, Iris Xe y el 5700G: todos los clips
+   soportados dan frames idénticos al software **a través del daemon**, dos streams
+   simultáneos corren a la vez, y un códec sin hardware (VP9 en Polaris) se rechaza.
+   **(2b) frames sin copia: pendiente, y solo si hace falta.** Los frames hoy viajan como
+   bytes (NV12/P010 compactos): hasta 1080p es barato (~93 MB/s en NV12, unos pocos % de un
+   núcleo); el copiado solo duele en 4K de 10 bits (~25 MB por frame, ~750 MB/s a 30 fps).
+   Con una pantalla de 720p o 1080p, YouTube pocas veces pide 4K, así que se mide antes de
+   construirlo. La vía natural es la inversa de la del encoder: que Android asigne el
+   buffer de salida y le pase su fd al daemon, que decodifica y blitea con VPP ahí;
+   (3) del lado de Android, componente Codec2 con salida demorada para
    los B-frames, recompilado con AOSP, y registro dinámico en `media_codecs.xml`
    según lo que el host soporte; (4) validar bit a bit contra software y medir
    CPU en Polaris, Iris Xe y 5700G, con contenido real (SmartTube); (5) anotar

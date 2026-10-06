@@ -30,7 +30,15 @@
 #include <va/va_drmcommon.h>
 #include <va/va_enc_h264.h>
 #include <va/va_vpp.h>
+/* Segun la version de Alpine/Debian, libdrm-dev deja drm_fourcc.h en <drm/...> (Alpine 3.24,
+ * Debian), solo en <libdrm/...> (Alpine 3.23), o ambos: se cubren los casos (con el -I que
+ * agrega el Makefile desde pkg-config). Confirmado el 06/10/2026: server01 tenia una imagen
+ * alpine:latest 3.23 en cache y el build fallaba ahi, mientras que en 3.24 compilaba. */
+#if __has_include(<drm/drm_fourcc.h>)
 #include <drm/drm_fourcc.h>
+#else
+#include <drm_fourcc.h>
+#endif
 
 #include <gbm.h>
 #define EGL_EGLEXT_PROTOTYPES
@@ -39,6 +47,11 @@
 
 #include "protocol.h"
 #include "decode_h264.h"
+
+#ifdef HAVE_HWDEC
+#include <pthread.h>
+#include "hwdec.h"
+#endif
 
 #define DRM_RENDER_DEVICE "/dev/dri/renderD128"
 
@@ -915,13 +928,181 @@ static void handle_decode(int have_decode, int conn_fd) {
     send_decode_response(conn_fd, 0, out_data, (uint32_t)out_size);
 }
 
-static void handle_connection(vaapi_state_t *st, int have_encode, int have_decode, int conn_fd) {
+#ifdef HAVE_HWDEC
+/* ------------------------------------------------------------------ *
+ * hwdec (protocolo v2, ver protocol.h): decode por hardware con estado.
+ * Una conexion persistente = una sesion = un hilo. El encode y el decode
+ * NVIDIA de arriba siguen atendiendose en serie en el hilo principal.
+ * ------------------------------------------------------------------ */
+_Static_assert((int)HWDEC_H264 == (int)VAAPI_HWDEC_CODEC_H264 && (int)HWDEC_HEVC == (int)VAAPI_HWDEC_CODEC_HEVC &&
+               (int)HWDEC_VP9 == (int)VAAPI_HWDEC_CODEC_VP9 && (int)HWDEC_VP8 == (int)VAAPI_HWDEC_CODEC_VP8 &&
+               (int)HWDEC_MPEG2 == (int)VAAPI_HWDEC_CODEC_MPEG2 && (int)HWDEC_VC1 == (int)VAAPI_HWDEC_CODEC_VC1 &&
+               (int)HWDEC_AV1 == (int)VAAPI_HWDEC_CODEC_AV1 && (int)HWDEC_NCODECS == (int)VAAPI_HWDEC_CODEC_COUNT,
+               "los ids de codec de protocol.h y hwdec.h tienen que coincidir");
+_Static_assert(sizeof(HwDecRequest) == 16 && sizeof(HwDecFrameHeader) == 24 &&
+               sizeof(HwDecResponse) == 8 && sizeof(HwDecCapsResponse) == 176,
+               "layout de protocol.h inesperado (Android y el daemon deben coincidir)");
+
+#define HWDEC_MAX_AU_SIZE (32u * 1024 * 1024)
+
+static const char *hwdec_node(void) {
+    const char *n = getenv("REDROID_FORGE_DRM_NODE");
+    return (n && *n) ? n : "/dev/dri/renderD128";
+}
+
+static int io_read_all(int fd, void *buf, size_t len) {
+    size_t got = 0;
+    while (got < len) {
+        ssize_t n = read(fd, (char *)buf + got, len - got);
+        if (n == 0) return 0;               /* el cliente cerro */
+        if (n < 0) { if (errno == EINTR) continue; return -1; }
+        got += (size_t)n;
+    }
+    return 1;
+}
+
+static int io_write_all(int fd, const void *buf, size_t len) {
+    size_t sent = 0;
+    while (sent < len) {
+        ssize_t n = write(fd, (const char *)buf + sent, len - sent);
+        if (n < 0) { if (errno == EINTR) continue; return -1; }
+        sent += (size_t)n;
+    }
+    return 0;
+}
+
+/* Frames pendientes de enviar: [HwDecFrameHeader][bytes] repetido. */
+typedef struct {
+    unsigned char *buf;
+    size_t len, cap;
+    uint32_t nframes;
+} FrameQueue;
+
+static int fq_append(FrameQueue *q, const HwDecFrame *f) {
+    size_t need = q->len + sizeof(HwDecFrameHeader) + f->size;
+    if (need > q->cap) {
+        size_t cap = q->cap ? q->cap : 1u << 20;
+        while (cap < need) cap *= 2;
+        unsigned char *nb = realloc(q->buf, cap);
+        if (!nb) return -1;
+        q->buf = nb;
+        q->cap = cap;
+    }
+    HwDecFrameHeader h = {.width = f->width, .height = f->height, .is_10bit = (uint32_t)f->is_10bit,
+                          .size = (uint32_t)f->size, .pts = f->pts};
+    memcpy(q->buf + q->len, &h, sizeof(h));
+    memcpy(q->buf + q->len + sizeof(h), f->data, f->size);
+    q->len = need;
+    q->nframes++;
+    return 0;
+}
+
+/* Vacia lo que el decoder tenga listo. Devuelve 0, o <0 si hubo un error real. */
+static int hwdec_drain(HwDecSession *s, FrameQueue *q) {
+    HwDecFrame f;
+    for (;;) {
+        int r = hwdec_receive(s, &f);
+        if (r == HWDEC_AGAIN || r == HWDEC_EOF) return 0;
+        if (r < 0) return r;
+        if (fq_append(q, &f) != 0) return -1;
+    }
+}
+
+static void *hwdec_stream_thread(void *arg) {
+    int fd = (int)(intptr_t)arg;
+    HwDecOpenRequest open_req;
+    HwDecOpenResponse open_resp = {0};
+    HwDecSession *s = NULL;
+    unsigned char *au = NULL;
+    size_t au_cap = 0;
+
+    if (io_read_all(fd, &open_req, sizeof(open_req)) != 1) goto done;
+    if (open_req.codec < HWDEC_NCODECS) s = hwdec_open(hwdec_node(), (HwDecCodec)open_req.codec);
+    if (!s) {
+        open_resp.status = -1;
+        io_write_all(fd, &open_resp, sizeof(open_resp));
+        goto done;
+    }
+    if (io_write_all(fd, &open_resp, sizeof(open_resp)) != 0) goto done;
+    fprintf(stderr, "hwdec: sesion abierta (%s)\n", hwdec_codec_name((HwDecCodec)open_req.codec));
+
+    for (;;) {
+        HwDecRequest rq;
+        if (io_read_all(fd, &rq, sizeof(rq)) != 1) break;   /* cerro la conexion: se cierra la sesion */
+        FrameQueue q = {0};
+        int status = 0, stop = 0;
+
+        switch (rq.msg) {
+        case VAAPI_HWDEC_MSG_AU: {
+            if (rq.size == 0 || rq.size > HWDEC_MAX_AU_SIZE) { status = -2; stop = 1; break; }
+            if (rq.size > au_cap) {
+                unsigned char *nb = realloc(au, rq.size);
+                if (!nb) { status = -3; stop = 1; break; }
+                au = nb;
+                au_cap = rq.size;
+            }
+            if (io_read_all(fd, au, rq.size) != 1) { stop = 1; status = -4; break; }
+            int r;
+            while ((r = hwdec_send(s, au, rq.size, rq.pts)) == HWDEC_AGAIN) {
+                if ((status = hwdec_drain(s, &q)) < 0) break;
+            }
+            if (status == 0 && r < 0) status = r;
+            if (status == 0) status = hwdec_drain(s, &q);
+            break;
+        }
+        case VAAPI_HWDEC_MSG_FLUSH:
+            hwdec_flush(s);
+            break;
+        case VAAPI_HWDEC_MSG_EOS:
+            status = hwdec_send_eos(s);
+            if (status == 0) status = hwdec_drain(s, &q);
+            break;
+        case VAAPI_HWDEC_MSG_CLOSE:
+            stop = 1;
+            break;
+        default:
+            status = -5;
+            stop = 1;
+            break;
+        }
+
+        HwDecResponse resp = {.status = status, .nframes = q.nframes};
+        int werr = io_write_all(fd, &resp, sizeof(resp));
+        if (!werr && q.len) werr = io_write_all(fd, q.buf, q.len);
+        free(q.buf);
+        if (werr || stop) break;
+    }
+done:
+    free(au);
+    hwdec_close(s);
+    close(fd);
+    return NULL;
+}
+
+static void handle_hwdec_caps(int conn_fd) {
+    HwDecCapsResponse resp = {0};
+    HwDecCaps caps;
+    if (hwdec_probe(hwdec_node(), &caps) != 0) {
+        resp.status = -1;
+    } else {
+        for (int i = 0; i < HWDEC_NCODECS; i++) {
+            if (caps.supported[i]) resp.supported_mask |= 1u << i;
+            if (caps.supported_10bit[i]) resp.supported_10bit_mask |= 1u << i;
+        }
+        snprintf(resp.driver, sizeof(resp.driver), "%s", caps.driver);
+    }
+    io_write_all(conn_fd, &resp, sizeof(resp));
+}
+#endif /* HAVE_HWDEC */
+
+/* Devuelve 1 si la conexion pasa a otro hilo (que la cierra), 0 si hay que cerrarla aca. */
+static int handle_connection(vaapi_state_t *st, int have_encode, int have_decode, int conn_fd) {
     VaapiCommand cmd;
     ssize_t n = read(conn_fd, &cmd, sizeof(cmd));
     if (n != (ssize_t)sizeof(cmd)) {
         if (n < 0) perror("read(command tag)");
         else fprintf(stderr, "read(command tag): short read (%zd of %zu bytes)\n", n, sizeof(cmd));
-        return;
+        return 0;
     }
     switch (cmd) {
     case VAAPI_CMD_ENCODE:
@@ -930,10 +1111,30 @@ static void handle_connection(vaapi_state_t *st, int have_encode, int have_decod
     case VAAPI_CMD_DECODE:
         handle_decode(have_decode, conn_fd);
         break;
+#ifdef HAVE_HWDEC
+    case VAAPI_CMD_HWDEC: {
+        pthread_t t;
+        if (pthread_create(&t, NULL, hwdec_stream_thread, (void *)(intptr_t)conn_fd) != 0) {
+            perror("pthread_create(hwdec)");
+            return 0;
+        }
+        pthread_detach(t);
+        return 1;
+    }
+    case VAAPI_CMD_HWDEC_CAPS:
+        handle_hwdec_caps(conn_fd);
+        break;
+#else
+    case VAAPI_CMD_HWDEC:
+    case VAAPI_CMD_HWDEC_CAPS:
+        fprintf(stderr, "hwdec pedido, pero este daemon se compilo sin HAVE_HWDEC\n");
+        break; /* se cierra la conexion: el cliente lo ve como un rechazo limpio */
+#endif
     default:
         fprintf(stderr, "handle_connection: unknown command tag %d\n", (int)cmd);
         break;
     }
+    return 0;
 }
 
 int main(void) {
@@ -959,7 +1160,22 @@ int main(void) {
     if (!have_decode) {
         fprintf(stderr, "No NVIDIA VA-API decode on this host - decode requests will be rejected\n");
     }
-    if (!have_encode && !have_decode) {
+    int have_hwdec = 0;
+#ifdef HAVE_HWDEC
+    {
+        HwDecCaps caps;
+        have_hwdec = (hwdec_probe(hwdec_node(), &caps) == 0);
+        if (have_hwdec) {
+            fprintf(stderr, "hwdec: %s; decodifica por hardware:", caps.driver);
+            for (int i = 0; i < HWDEC_NCODECS; i++)
+                if (caps.supported[i]) fprintf(stderr, " %s%s", hwdec_codec_name((HwDecCodec)i), caps.supported_10bit[i] ? "(+10b)" : "");
+            fputc('\n', stderr);
+        } else {
+            fprintf(stderr, "hwdec: este host no ofrece decode por hardware via VA-API\n");
+        }
+    }
+#endif
+    if (!have_encode && !have_decode && !have_hwdec) {
         fprintf(stderr, "Neither encode nor decode available on this host - nothing to do\n");
         return 1;
     }
@@ -996,8 +1212,7 @@ int main(void) {
             perror("accept");
             break;
         }
-        handle_connection(&st, have_encode, have_decode, conn_fd);
-        close(conn_fd);
+        if (!handle_connection(&st, have_encode, have_decode, conn_fd)) close(conn_fd);
     }
 
     close(listen_fd);

@@ -66,7 +66,9 @@
 
 typedef enum {
     VAAPI_CMD_ENCODE = 1,
-    VAAPI_CMD_DECODE = 2,
+    VAAPI_CMD_DECODE = 2,   /* decode NVIDIA de UN frame intra suelto (Tier 7) */
+    VAAPI_CMD_HWDEC = 3,    /* stream de decode por hardware, persistente (AMD/Intel via libavcodec) */
+    VAAPI_CMD_HWDEC_CAPS = 4, /* que codecs decodifica este host por hardware */
 } VaapiCommand;
 
 /* NV12 only for now -- matches what a real Codec2 encoder input buffer
@@ -108,5 +110,91 @@ typedef struct {
     int32_t status;      /* 0 = ok, negative = error */
     uint32_t frame_size; /* bytes of tightly-packed NV12 following this header, 0 if status != 0 */
 } DecodeResponse;
+
+/* ------------------------------------------------------------------ *
+ * hwdec (protocolo v2): decode por hardware con estado, AMD/Intel.
+ * Diseno en docs/ROADMAP.md (Fase 2, paso 5) y backend/native/vaapi-daemon/hwdec.h.
+ *
+ * A diferencia de ENCODE/DECODE (una conexion = un pedido), VAAPI_CMD_HWDEC es
+ * UNA CONEXION PERSISTENTE POR STREAM, atendida por el daemon en su propio hilo
+ * para no bloquear al encode. Cerrar la conexion cierra la sesion.
+ *
+ *   cliente -> tag VAAPI_CMD_HWDEC (4 bytes), luego HwDecOpenRequest
+ *   daemon  -> HwDecOpenResponse (status != 0: el hardware no soporta ese codec
+ *              o fallo algo; NO hay fallback a software, el cliente decide)
+ *   repetido:
+ *     cliente -> HwDecRequest { msg, size, pts }, y `size` bytes si msg == AU
+ *     daemon  -> HwDecResponse { status, nframes }, y luego `nframes` veces:
+ *                HwDecFrameHeader + `size` bytes de frame
+ *
+ * Cada AU entrega UN access unit (Annex-B para H.264/HEVC, frame crudo para VP8/VP9/AV1)
+ * y la respuesta trae TODOS los frames que el decoder libero hasta ese momento, ya
+ * reordenados: normalmente 0 o 1, mas cuando hay B-frames. EOS vacia el decoder y
+ * devuelve los frames que quedaban. FLUSH descarta referencias y salida pendiente.
+ *
+ * Los frames viajan como bytes (NV12 u P010 compactos, sin padding): barato hasta
+ * 1080p (~93 MB/s en NV12); para 4K de 10 bits (~750 MB/s) habria que pasar un
+ * dma-buf (paso 2b, solo si la medicion lo justifica).
+ *
+ * VAAPI_CMD_HWDEC_CAPS: tag, y el daemon responde HwDecCapsResponse (una sola
+ * respuesta, la conexion se cierra). Lo usa el backend para registrar en Android
+ * solo los decoders que el host soporta de verdad.
+ * ------------------------------------------------------------------ */
+
+/* Mismos valores que HwDecCodec de hwdec.h (el daemon lo verifica al compilar). */
+enum {
+    VAAPI_HWDEC_CODEC_H264 = 0,
+    VAAPI_HWDEC_CODEC_HEVC = 1,
+    VAAPI_HWDEC_CODEC_VP9 = 2,
+    VAAPI_HWDEC_CODEC_VP8 = 3,
+    VAAPI_HWDEC_CODEC_MPEG2 = 4,
+    VAAPI_HWDEC_CODEC_VC1 = 5,
+    VAAPI_HWDEC_CODEC_AV1 = 6,
+    VAAPI_HWDEC_CODEC_COUNT = 7,
+};
+
+typedef enum {
+    VAAPI_HWDEC_MSG_AU = 1,    /* un access unit; sigue `size` bytes */
+    VAAPI_HWDEC_MSG_FLUSH = 2,
+    VAAPI_HWDEC_MSG_EOS = 3,
+    VAAPI_HWDEC_MSG_CLOSE = 4,
+} VaapiHwdecMsg;
+
+typedef struct {
+    uint32_t codec; /* VAAPI_HWDEC_CODEC_* */
+    uint32_t reserved;
+} HwDecOpenRequest;
+
+typedef struct {
+    int32_t status; /* 0 = sesion abierta */
+    uint32_t reserved;
+} HwDecOpenResponse;
+
+typedef struct {
+    uint32_t msg;  /* VaapiHwdecMsg */
+    uint32_t size; /* bytes del AU que siguen (solo AU) */
+    int64_t pts;
+} HwDecRequest;
+
+typedef struct {
+    int32_t status;   /* 0 = ok; <0 error (igual se envian los `nframes` ya decodificados) */
+    uint32_t nframes;
+} HwDecResponse;
+
+typedef struct {
+    uint32_t width;
+    uint32_t height;
+    uint32_t is_10bit; /* 0: NV12, 1: P010 */
+    uint32_t size;     /* bytes de frame que siguen */
+    int64_t pts;
+} HwDecFrameHeader;
+
+typedef struct {
+    int32_t status;
+    uint32_t reserved;
+    uint32_t supported_mask;      /* bit i = VAAPI_HWDEC_CODEC_i decodificable por hardware */
+    uint32_t supported_10bit_mask; /* ... y ademas su variante de 10 bits */
+    char driver[160];             /* cadena del driver VA-API, informativa */
+} HwDecCapsResponse;
 
 #endif
