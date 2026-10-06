@@ -9,6 +9,7 @@
  *   hwdec-test <archivo> [nodo] [salida.md5]
  *   hwdec-test --socket <ruta> <archivo> [salida.md5]   (a traves del daemon, protocolo v2)
  *   hwdec-test --socket-probe <ruta>                     (pregunta capacidades al daemon)
+ *   --twice (antes del archivo): lo decodifica dos veces en la misma sesion, con un fin de stream en el medio
  */
 #include "hwdec.h"
 #include "hwdec_client.h"
@@ -61,6 +62,8 @@ static int be_eos(HwDecSession *s) {
     return g_client ? hwdec_client_eos(g_client) : hwdec_send_eos(s);
 }
 
+static int g_twice;
+static long g_pass1_frames;
 static FILE *g_out;
 static long g_frames;
 static int g_bad;
@@ -106,7 +109,9 @@ int main(int argc, char **argv) {
         return 0;
     }
     const char *sock = NULL;
+    if (argc >= 3 && !strcmp(argv[1], "--twice")) { g_twice = 1; argv += 1; argc -= 1; }
     if (argc >= 4 && !strcmp(argv[1], "--socket")) { sock = argv[2]; argv += 2; argc -= 2; }
+    if (argc >= 3 && !strcmp(argv[1], "--twice")) { g_twice = 1; argv += 1; argc -= 1; }
     if (argc < 2) { fprintf(stderr, "uso: %s --probe [nodo] | [--socket ruta] <archivo> [nodo] [salida.md5]\n", argv[0]); return 2; }
     const char *path = argv[1], *node = argc > 2 ? argv[2] : DEFAULT_NODE;
     g_out = argc > 3 ? fopen(argv[3], "w") : NULL;
@@ -143,42 +148,57 @@ int main(int argc, char **argv) {
 
     AVPacket *pkt = av_packet_alloc(), *out = av_packet_alloc();
     long units = 0;
-    while (av_read_frame(fmt, pkt) >= 0) {
-        if (pkt->stream_index == vi) {
-            if (bsf) {
-                if (av_bsf_send_packet(bsf, pkt) < 0) return 1;
-                while (av_bsf_receive_packet(bsf, out) == 0) {
-                    if (feed(s, out) < 0) return 1;
+    /* --twice: se decodifica el archivo dos veces en la MISMA sesion, con un fin de stream (vaciado) en
+     * el medio. Es lo que hace Android cuando pide vaciar a mitad de video: despues del vaciado el
+     * decoder tiene que poder seguir con un stream nuevo. */
+    for (int pass = 0; pass < (g_twice ? 2 : 1); pass++) {
+        if (pass > 0) {
+            av_seek_frame(fmt, vi, 0, AVSEEK_FLAG_BACKWARD);
+            if (bsf) av_bsf_flush(bsf);
+        }
+        while (av_read_frame(fmt, pkt) >= 0) {
+            if (pkt->stream_index == vi) {
+                if (bsf) {
+                    if (av_bsf_send_packet(bsf, pkt) < 0) return 1;
+                    while (av_bsf_receive_packet(bsf, out) == 0) {
+                        if (feed(s, out) < 0) return 1;
+                        units++;
+                    }
+                } else {
+                    if (feed(s, pkt) < 0) return 1;
                     units++;
                 }
-            } else {
-                if (feed(s, pkt) < 0) return 1;
+            }
+            av_packet_unref(pkt);
+        }
+        if (bsf) {
+            av_bsf_send_packet(bsf, NULL);
+            while (av_bsf_receive_packet(bsf, out) == 0) {
+                if (feed(s, out) < 0) return 1;
                 units++;
             }
         }
-        av_packet_unref(pkt);
-    }
-    if (bsf) {
-        av_bsf_send_packet(bsf, NULL);
-        while (av_bsf_receive_packet(bsf, out) == 0) {
-            if (feed(s, out) < 0) return 1;
-            units++;
+        be_eos(s);
+        /* En proceso el decoder avisa HWDEC_EOF al terminar; por socket no existe ese aviso (la respuesta
+         * al EOS ya trae todos los frames), asi que se vacia la cola UNA vez. */
+        if (g_client) drain(s);
+        else while (drain(s) == HWDEC_AGAIN) {}
+        if (pass == 0 && g_twice) {
+            if (g_client) { /* el daemon reinicia el decoder solo tras el EOS */ }
+            else hwdec_flush(s);
+            if (g_out) fprintf(g_out, "# --- segunda pasada ---\n");
+            g_pass1_frames = g_frames;
         }
     }
-    be_eos(s);
-    /* En proceso el decoder avisa HWDEC_EOF al terminar; por socket no existe ese aviso
-     * (la respuesta al EOS ya trae todos los frames), asi que se vacia la cola UNA vez:
-     * repetir hasta EOF giraria para siempre. */
-    if (g_client) drain(s);
-    else while (drain(s) == HWDEC_AGAIN) {}
     if (g_client) hwdec_client_close(g_client); else hwdec_close(s);
 
     struct rusage ru;
     getrusage(RUSAGE_SELF, &ru);
     double cpu = ru.ru_utime.tv_sec + ru.ru_utime.tv_usec / 1e6 + ru.ru_stime.tv_sec + ru.ru_stime.tv_usec / 1e6;
-    printf("RESULTADO: %s %dx%d -> %ld access units, %ld frames decodificados por hardware, cpu=%.2fs%s\n",
+    printf("RESULTADO: %s %dx%d -> %ld access units, %ld frames decodificados por hardware, cpu=%.2fs%s%s\n",
            hwdec_codec_name(codec), st->codecpar->width, st->codecpar->height, units, g_frames, cpu,
-           g_bad ? " (CON ERRORES)" : "");
+           g_bad ? " (CON ERRORES)" : "",
+           (g_twice && g_frames != 2 * g_pass1_frames) ? " (LA SEGUNDA PASADA NO DIO LOS MISMOS FRAMES)" : "");
     if (g_out) fclose(g_out);
     return g_bad ? 1 : 0;
 }

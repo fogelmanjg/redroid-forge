@@ -31,6 +31,15 @@ echo "   stream 1 rc=$r1: $(grep RESULTADO /tmp/_c1.out | cut -c1-90)"
 echo "   stream 2 rc=$r2: $(grep RESULTADO /tmp/_c2.out | cut -c1-90)"
 [ $r1 = 0 ] && [ $r2 = 0 ] || rc=1
 
+echo "== reinicio tras fin de stream: el mismo clip dos veces en UNA sesion (drain a mitad de video)"
+timeout 300 ./hwdec-test --twice --socket $SOCK "$A" "$NODE" /tmp/_t.md5 > /tmp/_t.out 2>&1; rt=$?
+n1=$(awk '/^# --- segunda/{exit} !/^#/{n++} END{print n+0}' /tmp/_t.md5)
+n2=$(awk 'f&&!/^#/{n++} /^# --- segunda/{f=1} END{print n+0}' /tmp/_t.md5)
+d=$(paste -d' ' <(awk '/^# --- segunda/{exit} !/^#/{split($0,a,","); print a[6]}' /tmp/_t.md5) <(awk 'f&&!/^#/{split($0,a,","); print a[6]} /^# --- segunda/{f=1}' /tmp/_t.md5) | awk '$1!=$2{n++} END{print n+0}')
+echo "   rc=$rt, primera pasada=$n1 frames, segunda=$n2 frames, frames distintos entre pasadas=$d"
+if [ "$rt" = 0 ] && [ "$n1" -gt 0 ] && [ "$n1" = "$n2" ] && [ "$d" = 0 ]; then echo "   OK: el decoder siguio funcionando despues del vaciado"; else echo "   FALLA"; rc=1; fi
+rm -f /tmp/_t.md5 /tmp/_t.out
+
 echo "== el encode sigue respondiendo mientras hay un stream abierto"
 timeout 300 ./hwdec-test --socket $SOCK "$A" "$NODE" /tmp/_c3.md5 > /tmp/_c3.out 2>&1 &
 P3=$!

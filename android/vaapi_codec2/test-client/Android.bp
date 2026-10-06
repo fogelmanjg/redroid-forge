@@ -60,3 +60,18 @@ cc_binary {
         "libcutils_headers",
     ],
 }
+
+// Herramienta de prueba del decode por MediaCodec (solo desarrollo): ver hwdec_mediacodec_test.cpp.
+cc_binary {
+    name: "hwdec_mediacodec_test",
+    srcs: ["hwdec_mediacodec_test.cpp"],
+    shared_libs: [
+        "libmediandk",
+        "liblog",
+    ],
+    header_libs: ["media_ndk_headers"],
+    cflags: [
+        "-Wall",
+        "-Wno-unused-parameter",
+    ],
+}
