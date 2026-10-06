@@ -156,6 +156,33 @@ conocidos (ej. el artefacto de scanline en la 4060 con el driver
    por hardware, con salida equivalente a la de software y un uso de CPU
    claramente menor.
 
+   **Resultados en n02 (Iris Xe) con SmartTube, 06/10/2026** (decoders por hardware en la
+   instancia, pantalla 1280x720, scrcpy conectado a la vez): 720p y 1080p a 24 fps fluidos
+   (0 frames descartados), 720p a 60 fps AVC fluido, un H.264 a 60 fps de mayor resolución con
+   tirones (más de la mitad de los frames descartados), 2160p VP9 no llega, y **HDR (VP9
+   perfil 2, 10 bits) falla** porque el componente rechaza salida de 10 bits. El camino
+   actual hace GPU→RAM→socket→copia a gralloc→compositor (que reescala a la pantalla)
+   →conversión→encode, todo en un hilo por stream.
+
+   **Siguiente tanda del hwdecode (orden decidido 06/10/2026):**
+   1. Medir tiempo por etapa (decode, descarga, copia, socket, conversión).
+   2. Salida de 10 bits (P010) en el componente: HEVC Main10 y VP9 perfil 2.
+   3. **Límite de resolución anunciada = el escalón estándar (240/360/480/720/1080/1440/2160p)
+      más grande que quepa en la pantalla de la instancia, redondeando hacia abajo, con piso
+      en 720p**, y nunca por encima de lo que el hardware decodifique (eso lo informa el
+      daemon). Se aplica al crear la instancia (`media_codecs.xml` y límite de tamaño de la
+      interfaz Codec2); un cambio de pantalla pide recrear o reparchear. A comprobar con
+      SmartTube: los decoders de software siguen declarando 4K y un player que mire el
+      máximo entre todos podría seguir ofreciendo UHD.
+   4. Ganancias baratas según la medición: etapas en hilos (decodificar el N+1 mientras se
+      baja y envía el N), `vaCopy` en vez de leer memoria de video con la CPU, memoria
+      compartida (memfd) en vez de socket, SIMD en la separación de U/V.
+   5. Si no alcanza, 2b (zero-copy): mantiene el frame en el GPU de punta a punta; el
+      compositor lo reescala sin pasar por la CPU. Riesgo: que el gralloc de redroid acepte el
+      formato y modificador de tiling.
+   Escalar dentro del daemon antes de bajar el frame ahorra copia pero cambia el tamaño que
+   ve la app: solo como opción explícita, nunca por defecto.
+
    **HDR (anotado 06/10/2026): no se conserva por scrcpy hoy, y no bloquea nada.**
    La pantalla de redroid no declara HDR (`supportedHdrTypes=[]`, sin wide color),
    scrcpy 4.1 no tiene opciones de HDR/10 bits, y el encoder es H.264 de 8 bits:
