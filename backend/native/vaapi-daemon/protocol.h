@@ -158,6 +158,11 @@ typedef enum {
     VAAPI_HWDEC_MSG_FLUSH = 2,
     VAAPI_HWDEC_MSG_EOS = 3,
     VAAPI_HWDEC_MSG_CLOSE = 4,
+    /* Datos de configuracion del stream (SPS/PPS/VPS en Annex-B, el "codec config" de Android), SIN imagen.
+     * libavcodec rechaza un paquete H.264 que trae solo parametros ("no frame!"), asi que el daemon los
+     * guarda y los antepone al siguiente access unit (y de nuevo tras un FLUSH/EOS). Sigue `size` bytes;
+     * la respuesta no trae frames. */
+    VAAPI_HWDEC_MSG_CONFIG = 5,
 } VaapiHwdecMsg;
 
 typedef struct {

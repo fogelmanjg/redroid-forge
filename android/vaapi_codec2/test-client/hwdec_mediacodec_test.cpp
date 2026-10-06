@@ -8,6 +8,7 @@
 //     que Android elija el decoder por tipo MIME.
 //
 // Se corre desde /data/local/tmp como shell dentro de la instancia.
+#include <dlfcn.h>
 #include <fcntl.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -51,6 +52,19 @@ int main(int argc, char **argv) {
     FILE *out = argc > 3 ? fopen(argv[3], "w") : stdout;
     crc_init();
 
+    // Los componentes Codec2 le avisan al cliente (trabajo terminado, buffer de entrada liberado) con
+    // llamadas Binder ENTRANTES. Una app real ya tiene un grupo de hilos de Binder (lo arranca zygote); un
+    // binario nativo como este no, y sin el nunca llega ningun aviso: el decoder parece "trabado" despues de
+    // llenar sus primeras ranuras de entrada. Se carga por dlopen para no sumar libbinder_ndk al Android.bp.
+    if (void *bn = dlopen("libbinder_ndk.so", RTLD_NOW)) {
+        auto setMax = reinterpret_cast<bool (*)(uint32_t)>(dlsym(bn, "ABinderProcess_setThreadPoolMaxThreadCount"));
+        auto start = reinterpret_cast<void (*)()>(dlsym(bn, "ABinderProcess_startThreadPool"));
+        if (setMax) setMax(4);
+        if (start) start();
+    } else {
+        fprintf(stderr, "AVISO: no se pudo cargar libbinder_ndk.so: sin hilos de Binder no llegan los avisos del decoder\n");
+    }
+
     int fd = open(path, O_RDONLY);
     if (fd < 0) { perror("open"); return 1; }
     off_t size = lseek(fd, 0, SEEK_END);
@@ -87,6 +101,13 @@ int main(int argc, char **argv) {
         return 3;
     }
 
+    {   // diagnostico: formatos negociados (cantidad de ranuras de entrada, tamano de buffer, etc.)
+        AMediaFormat *fi = AMediaCodec_getInputFormat(codec);
+        AMediaFormat *fo = AMediaCodec_getOutputFormat(codec);
+        fprintf(stderr, "FORMATO ENTRADA: %s\nFORMATO SALIDA: %s\n", AMediaFormat_toString(fi), AMediaFormat_toString(fo));
+        AMediaFormat_delete(fi);
+        AMediaFormat_delete(fo);
+    }
     const double t0 = now();
     bool inputEos = false, outputEos = false;
     long frames = 0, stalls = 0;
@@ -108,10 +129,23 @@ int main(int argc, char **argv) {
         AMediaFormat_delete(f);
     };
 
+    long inOk = 0, inBusy = 0, outTry = 0;
+    double lastReport = now();
     while (!outputEos) {
+        if (now() - lastReport > 3.0) {  // diagnostico: si se traba, mostrar donde
+            fprintf(stderr, "... entradas encoladas=%ld sin-buffer-de-entrada=%ld salidas=%ld sin-salida=%ld\n", inOk,
+                    inBusy, frames, outTry);
+            lastReport = now();
+            if (now() - t0 > 20.0 && frames == 0) {
+                fprintf(stderr, "RESULTADO: SIN FRAMES tras 20 s (decoder trabado?)\n");
+                return 4;
+            }
+        }
         if (!inputEos) {
             ssize_t in = AMediaCodec_dequeueInputBuffer(codec, 2000);
+            if (in < 0) inBusy++;
             if (in >= 0) {
+                inOk++;
                 size_t cap = 0;
                 uint8_t *buf = AMediaCodec_getInputBuffer(codec, in, &cap);
                 ssize_t n = AMediaExtractor_readSampleData(ex, buf, cap);
@@ -147,6 +181,12 @@ int main(int argc, char **argv) {
                         packed.insert(packed.end(), row, row + w / 2);
                     }
                 }
+                if (frames == 0 && getenv("DUMP_FIRST")) {  // diagnostico: primer frame I420 crudo + parametros
+                    if (FILE *d = fopen("raw.yuv", "wb")) { fwrite(p, 1, osz, d); fclose(d); }
+                    if (FILE *d = fopen("first.yuv", "wb")) { fwrite(packed.data(), 1, packed.size(), d); fclose(d); }
+                    fprintf(stderr, "DUMP: w=%d h=%d stride=%d sliceH=%d crop=[%d,%d,%d,%d] osz=%zu info.size=%d offset=%d\n",
+                            w, h, stride, sliceH, cropL, cropT, cropR, cropB, osz, info.size, info.offset);
+                }
                 uint32_t crc = crc_update(0xFFFFFFFFu, packed.data(), packed.size()) ^ 0xFFFFFFFFu;
                 fprintf(out, "%ld %lld %dx%d %08x\n", frames, (long long)info.presentationTimeUs, w, h, crc);
                 frames++;
@@ -155,6 +195,8 @@ int main(int argc, char **argv) {
             if (info.flags & AMEDIACODEC_BUFFER_FLAG_END_OF_STREAM) outputEos = true;
         } else if (oi == AMEDIACODEC_INFO_OUTPUT_FORMAT_CHANGED) {
             refresh();
+        } else if (oi == AMEDIACODEC_INFO_TRY_AGAIN_LATER) {
+            outTry++;
         } else if (oi == AMEDIACODEC_INFO_TRY_AGAIN_LATER && inputEos && ++stalls > 2000) {
             fprintf(stderr, "RESULTADO: el decoder dejo de entregar frames sin avisar fin de stream\n");
             break;

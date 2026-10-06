@@ -1015,6 +1015,11 @@ static void *hwdec_stream_thread(void *arg) {
     HwDecSession *s = NULL;
     unsigned char *au = NULL;
     size_t au_cap = 0;
+    /* Configuracion del stream (VAAPI_HWDEC_MSG_CONFIG): pendiente de anteponer al proximo AU, y la ultima
+     * conocida para repetirla tras un reinicio del decoder. */
+    unsigned char *cfg = NULL, *last_cfg = NULL, *joined = NULL;
+    size_t cfg_len = 0, last_cfg_len = 0, joined_cap = 0;
+    int need_replay = 1;
 
     if (io_read_all(fd, &open_req, sizeof(open_req)) != 1) goto done;
     if (open_req.codec < HWDEC_NCODECS) s = hwdec_open(hwdec_node(), (HwDecCodec)open_req.codec);
@@ -1042,16 +1047,61 @@ static void *hwdec_stream_thread(void *arg) {
                 au_cap = rq.size;
             }
             if (io_read_all(fd, au, rq.size) != 1) { stop = 1; status = -4; break; }
+            /* Diagnostico (REDROID_FORGE_HWDEC_DEBUG=1): primeros bytes de cada access unit que llega. Sirve
+             * para ver en que formato lo entrega Android (Annex-B con 00 00 00 01, o con prefijo de largo). */
+            if (getenv("REDROID_FORGE_HWDEC_DEBUG")) {
+                char hex[3 * 24 + 1] = {0};
+                for (uint32_t i = 0; i < rq.size && i < 24; i++) snprintf(hex + 3 * i, 4, "%02x ", au[i]);
+                fprintf(stderr, "hwdec: AU pts=%lld size=%u: %s\n", (long long)rq.pts, rq.size, hex);
+            }
+            /* Antepone la configuracion (SPS/PPS) pendiente, o la ultima conocida si el decoder se reinicio. */
+            const unsigned char *send_buf = au;
+            size_t send_len = rq.size;
+            const unsigned char *pre = cfg_len ? cfg : (need_replay ? last_cfg : NULL);
+            size_t pre_len = cfg_len ? cfg_len : (need_replay ? last_cfg_len : 0);
+            if (pre && pre_len) {
+                if (pre_len + rq.size > joined_cap) {
+                    unsigned char *nb = realloc(joined, pre_len + rq.size);
+                    if (!nb) { status = -3; stop = 1; break; }
+                    joined = nb;
+                    joined_cap = pre_len + rq.size;
+                }
+                memcpy(joined, pre, pre_len);
+                memcpy(joined + pre_len, au, rq.size);
+                send_buf = joined;
+                send_len = pre_len + rq.size;
+            }
+            cfg_len = 0;
+            need_replay = 0;
             int r;
-            while ((r = hwdec_send(s, au, rq.size, rq.pts)) == HWDEC_AGAIN) {
+            while ((r = hwdec_send(s, send_buf, send_len, rq.pts)) == HWDEC_AGAIN) {
                 if ((status = hwdec_drain(s, &q)) < 0) break;
             }
             if (status == 0 && r < 0) status = r;
             if (status == 0) status = hwdec_drain(s, &q);
             break;
         }
+        case VAAPI_HWDEC_MSG_CONFIG: {
+            if (rq.size == 0 || rq.size > HWDEC_MAX_AU_SIZE) { status = -2; stop = 1; break; }
+            /* Android entrega los parametros en VARIOS buffers de configuracion (H.264: primero el SPS y
+             * despues el PPS; HEVC: VPS, SPS, PPS). Mientras ningun access unit los haya consumido se
+             * ACUMULAN; el primer CONFIG despues de un AU empieza un juego nuevo. */
+            size_t total = cfg_len + rq.size;
+            unsigned char *nb = realloc(cfg, total);
+            if (!nb) { status = -3; stop = 1; break; }
+            cfg = nb;
+            if (io_read_all(fd, cfg + cfg_len, rq.size) != 1) { stop = 1; status = -4; break; }
+            cfg_len = total;
+            unsigned char *nl = realloc(last_cfg, total);
+            if (!nl) { status = -3; stop = 1; break; }
+            last_cfg = nl;
+            memcpy(last_cfg, cfg, total);
+            last_cfg_len = total;
+            break;
+        }
         case VAAPI_HWDEC_MSG_FLUSH:
             hwdec_flush(s);
+            need_replay = 1;
             break;
         case VAAPI_HWDEC_MSG_EOS:
             status = hwdec_send_eos(s);
@@ -1060,6 +1110,7 @@ static void *hwdec_stream_thread(void *arg) {
              * Android tambien pide vaciar a mitad de stream (drain sin EOS, p. ej. al cambiar de
              * resolucion), asi que el decoder se reinicia para poder seguir decodificando. */
             hwdec_flush(s);
+            need_replay = 1;
             break;
         case VAAPI_HWDEC_MSG_CLOSE:
             stop = 1;
@@ -1078,6 +1129,9 @@ static void *hwdec_stream_thread(void *arg) {
     }
 done:
     free(au);
+    free(cfg);
+    free(last_cfg);
+    free(joined);
     hwdec_close(s);
     close(fd);
     return NULL;

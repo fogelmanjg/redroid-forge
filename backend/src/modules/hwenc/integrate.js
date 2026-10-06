@@ -129,9 +129,19 @@ function addCodecsToXml(original, decoders) {
   const missing = decoders.filter((d) => !xml.includes(`"${d.name}"`));
   if (missing.length > 0) {
     const lines = missing.map((d) => `        <MediaCodec name="${d.name}" type="${d.type}" />`).join('\n');
-    const patched = xml.replace(/<Decoders>/, `<Decoders>\n${lines}`);
+    // La imagen oficial no trae <Decoders> en este archivo (los decoders de software viven en los
+    // <Include>), asi que normalmente se CREA la seccion. Va AL FINAL, despues de los <Include>:
+    // MediaCodecList prefiere el primero que coincide por tipo, y mientras el decode por hardware no
+    // este validado el de software tiene que seguir siendo el predeterminado (el de hardware se elige
+    // por nombre). Pasarlo al principio es el cambio que "enciende" el hardware por defecto.
+    let patched;
+    if (/<Decoders>/.test(xml)) {
+      patched = xml.replace(/<Decoders>/, `<Decoders>\n${lines}`);
+    } else {
+      patched = xml.replace(/<\/MediaCodecs>/, `    <Decoders>\n${lines}\n    </Decoders>\n</MediaCodecs>`);
+    }
     if (patched === xml) {
-      throw new Error('No se encontro <Decoders> en media_codecs.xml -- formato inesperado, no se pudo parchear');
+      throw new Error('No se encontro <MediaCodecs> en media_codecs.xml -- formato inesperado, no se pudo parchear');
     }
     xml = patched;
   }
@@ -139,16 +149,21 @@ function addCodecsToXml(original, decoders) {
 }
 
 async function patchMediaCodecsXml(containerId) {
+  // Esta etapa (4, crear la instancia) corre ANTES que ensureHostInfraReady (etapa 5, donde arranca el
+  // daemon): sin esto, la primera instancia de un backend recien levantado le preguntaria las
+  // capacidades a un daemon que todavia no existe y no registraria ningun decoder. Es idempotente.
+  await hwAccel.ensureDaemonRunning();
   const caps = await hwAccel.queryHwdecCaps();
   if (caps.codecs.length > 0) {
     log(`decode por hardware del host (${caps.driver}): ${caps.codecs.map((c) => c.id).join(', ')}`);
   } else {
     log('el host no ofrece decode por hardware (o el daemon no lo informo): no se registran decoders');
   }
+  const decoders = caps.codecs;
   const tmpPath = path.join(os.tmpdir(), `media_codecs-${containerId.slice(0, 12)}.xml`);
   await execFileAsync('docker', ['cp', `${containerId}:/vendor/etc/media_codecs.xml`, tmpPath]);
   const original = fs.readFileSync(tmpPath, 'utf-8');
-  const patched = addCodecsToXml(original, caps.codecs);
+  const patched = addCodecsToXml(original, decoders);
   if (patched === original) {
     log('media_codecs.xml ya tiene todas las entradas, no se toca');
     fs.unlinkSync(tmpPath);

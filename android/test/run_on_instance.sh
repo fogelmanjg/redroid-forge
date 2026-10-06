@@ -21,11 +21,11 @@ run() {   # <clip> <componente> <etiqueta>
   ssh "$HOST" "docker cp $W/$clip $CONT:/data/local/tmp/t/$clip && docker exec $CONT sh -c 'cd /data/local/tmp/t && timeout 180 ./hwdec_mediacodec_test $clip $comp out.txt' 2>&1 | grep RESULTADO | cut -c1-150; docker cp $CONT:/data/local/tmp/t/out.txt $W/out_$label.txt 2>/dev/null; python3 $W/verify_mediacodec.py $W/$clip $W/out_$label.txt 2>&1 | sed 's/^/      /'"
 }
 declare -A CLIPS=([h264]="h264_720.mp4 h264_1080.mp4" [hevc]="hevc_1080.mp4" [vp9]="vp9_720.webm")
-declare -A SW=([h264]=c2.android.avc.decoder [hevc]=c2.android.hevc.decoder [vp9]=c2.android.vp9.decoder)
+declare -A SW=([h264]=OMX.google.h264.decoder [hevc]=OMX.google.hevc.decoder [vp9]=OMX.google.vp9.decoder)
 for c in $CODECS; do
   for clip in ${CLIPS[$c]}; do
     echo "== $c / $clip"
-    echo "   control (software de Android, ${SW[$c]}):"; run "$clip" "${SW[$c]}" "sw_${c}_${clip%%.*}"
+    echo "   control (software de Android via ACodec, ${SW[$c]}):"; run "$clip" "${SW[$c]}" "sw_${c}_${clip%%.*}"
     echo "   hardware (c2.hardware.decoder.$c):";         run "$clip" "c2.hardware.decoder.$c" "hw_${c}_${clip%%.*}"
   done
 done

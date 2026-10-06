@@ -98,7 +98,25 @@ test('addCodecsToXml: sin decoders de hardware solo agrega el encoder y no toca 
   assert.doesNotMatch(out, /c2\.hardware\.decoder/);
 });
 
+// El archivo REAL de la imagen oficial de redroid: solo <Encoders> y varios <Include>, sin <Decoders>.
+const XML_OFICIAL = `<?xml version="1.0" encoding="utf-8" ?>
+<!-- <!ELEMENT Decoders (MediaCodec|Include)*> <!ELEMENT Encoders (MediaCodec|Include)*> -->
+<MediaCodecs>
+    <Encoders>
+        <MediaCodec name="OMX.redroid.h264.encoder" type="video/avc" />
+    </Encoders>
+    <Include href="media_codecs_google_audio.xml" />
+    <Include href="media_codecs_google_video.xml" />
+</MediaCodecs>`;
+
+test('addCodecsToXml: la imagen oficial no trae <Decoders>: se crea al final, despues de los <Include>', () => {
+  const out = addCodecsToXml(XML_OFICIAL, DEC);
+  assert.match(out, /<Include href="media_codecs_google_video.xml" \/>\s*<Decoders>[\s\S]*c2\.hardware\.decoder\.h264[\s\S]*<\/Decoders>\s*<\/MediaCodecs>/);
+  assert.match(out, /c2\.hardware\.encoder\.h264/);
+  assert.strictEqual(addCodecsToXml(out, DEC), out); // idempotente tambien aca
+});
+
 test('addCodecsToXml: formato inesperado falla en voz alta', () => {
-  assert.throws(() => addCodecsToXml('<MediaCodecs><Encoders></Encoders></MediaCodecs>', DEC), /Decoders/);
   assert.throws(() => addCodecsToXml('<MediaCodecs></MediaCodecs>', []), /Encoders/);
+  assert.throws(() => addCodecsToXml('<otra><Encoders></Encoders></otra>', DEC), /MediaCodecs/);
 });

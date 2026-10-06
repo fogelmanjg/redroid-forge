@@ -436,3 +436,19 @@ se retoma el mecanismo de donaciones/soporte (sección 8 de
     (bloqueo por dominio, sin granularidad por app).
   - Reglas por app: definir si se guardan en el manifest del módulo o por
     instancia.
+- **Más códecs de audio (idea, 06/10/2026).** Hoy el audio por scrcpy solo
+  anda con `--audio-codec=aac`; el default (opus) falla. scrcpy ofrece opus,
+  aac, flac y raw, así que el límite está en los encoders que la imagen
+  Android expone, no en scrcpy. No es para la primera versión.
+  - *Chequeo previo (~5 min, en la instancia de jgustavo46):* log de scrcpy
+    con opus y `dumpsys media.codec`, para confirmar por qué falla. Hipótesis
+    sin verificar: el `media_codecs.xml` de la imagen oficial no registra el
+    encoder `c2.android.opus.encoder` (AOSP lo trae por software), igual que
+    pasaba con los decoders.
+  - *Si es eso:* se registra desde el módulo de integración al crear la
+    instancia (mismo mecanismo que `addCodecsToXml` para los decoders), sin
+    imagen custom. Con opus como default (menos latencia y bitrate que aac).
+  - `raw` no necesita encoder (más ancho de banda; sirve por LAN y para
+    diagnóstico). `flac` es encoder por software de AOSP: probar si está
+    registrado.
+  - Sin aceleración por hardware: el costo de CPU del audio es despreciable.

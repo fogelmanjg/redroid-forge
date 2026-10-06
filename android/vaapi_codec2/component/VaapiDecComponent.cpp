@@ -10,6 +10,8 @@
 #include <sys/un.h>
 #include <unistd.h>
 
+#include <stdio.h>
+
 #include <algorithm>
 
 #include <system/graphics.h>
@@ -35,7 +37,10 @@ constexpr size_t kMaxPending = 24;
 constexpr uint32_t kMaxAccessUnit = 32u * 1024 * 1024;  // mismo tope que el daemon
 constexpr int kSocketTimeoutSec = 10;
 
-uint32_t align16(uint32_t v) { return (v + 15) & ~15u; }
+// El allocator de gralloc de redroid alinea el pitch a 256 bytes, pero el layout que C2 deduce de un
+// bloque YV12 asume 16: con 1920 (pitch real 2048) el framework leia las filas con otro paso y salian
+// 128 bytes de ceros por fila. Pedir el ancho ya alineado a 256 hace que ambos coincidan.
+uint32_t alignPitch(uint32_t v) { return (v + 255) & ~255u; }
 
 const std::vector<VaapiDecCodec> kCodecs = {
     {"c2.hardware.decoder.h264", MEDIA_MIMETYPE_VIDEO_AVC, VAAPI_HWDEC_CODEC_H264, 8},
@@ -555,7 +560,7 @@ void VaapiDecComponent::finishFrame(Frame &frame, const std::unique_ptr<C2Work> 
 
     std::shared_ptr<C2GraphicBlock> block;
     C2MemoryUsage usage = {C2MemoryUsage::CPU_READ, C2MemoryUsage::CPU_WRITE};
-    c2_status_t err = pool->fetchGraphicBlock(align16(frame.width), frame.height,
+    c2_status_t err = pool->fetchGraphicBlock(alignPitch(frame.width), frame.height,
                                               HAL_PIXEL_FORMAT_YV12, usage, &block);
     if (err != C2_OK) {
         ALOGE("fetchGraphicBlock for the output failed: %d", err);
@@ -585,18 +590,18 @@ void VaapiDecComponent::finishFrame(Frame &frame, const std::unique_ptr<C2Work> 
 
         for (uint32_t y = 0; y < frame.height; y++) {
             memcpy(dstY + y * dstYStride, srcY + static_cast<size_t>(y) * frame.width, frame.width);
+    }
+    const uint32_t chromaWidth = frame.width / 2;
+    const uint32_t chromaHeight = frame.height / 2;
+    for (uint32_t y = 0; y < chromaHeight; y++) {
+        const uint8_t *srcRow = srcUv + static_cast<size_t>(y) * frame.width;
+        uint8_t *dstURow = dstU + y * dstUStride;
+        uint8_t *dstVRow = dstV + y * dstVStride;
+        for (uint32_t x = 0; x < chromaWidth; x++) {
+            dstURow[x * dstUColInc] = srcRow[x * 2 + 0];
+            dstVRow[x * dstVColInc] = srcRow[x * 2 + 1];
         }
-        const uint32_t chromaWidth = frame.width / 2;
-        const uint32_t chromaHeight = frame.height / 2;
-        for (uint32_t y = 0; y < chromaHeight; y++) {
-            const uint8_t *srcRow = srcUv + static_cast<size_t>(y) * frame.width;
-            uint8_t *dstURow = dstU + y * dstUStride;
-            uint8_t *dstVRow = dstV + y * dstVStride;
-            for (uint32_t x = 0; x < chromaWidth; x++) {
-                dstURow[x * dstUColInc] = srcRow[x * 2 + 0];
-                dstVRow[x * dstVColInc] = srcRow[x * 2 + 1];
-            }
-        }
+    }
     }
 
     std::shared_ptr<C2Buffer> buffer = createGraphicBuffer(std::move(block),
@@ -697,8 +702,10 @@ void VaapiDecComponent::process(const std::unique_ptr<C2Work> &work,
         int status;
         {
             std::lock_guard<std::mutex> lock(mLock);
-            status = exchangeLocked(VAAPI_HWDEC_MSG_AU, rView.data(), static_cast<uint32_t>(inSize),
-                                    static_cast<int64_t>(index), &frames);
+            // Los parametros (SPS/PPS/VPS) viajan como CONFIG: el daemon los antepone al siguiente access
+            // unit (libavcodec rechaza un paquete H.264 que no trae ningun slice).
+            status = exchangeLocked(config ? VAAPI_HWDEC_MSG_CONFIG : VAAPI_HWDEC_MSG_AU, rView.data(),
+                                    static_cast<uint32_t>(inSize), static_cast<int64_t>(index), &frames);
         }
         if (status < 0 && frames.empty()) {
             ALOGE("the daemon failed decoding an access unit (status %d)", status);
