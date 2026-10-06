@@ -198,6 +198,17 @@ conocidos (ej. el artefacto de scanline en la 4060 con el driver
    presupuesto es 16,7 ms por frame: 720p y 1080p entran, 4K no. No se midió Intel (n02 pausada por RAM) ni
    el lado Android (lectura del socket y copia al bloque), que suma al total.
 
+   **Descarga GPU→RAM mejorada (06/10/2026, Polaris).** Se comparó `av_hwframe_transfer_data` (ffmpeg) contra
+   `vaGetImage`, `vaDeriveImage` + copia normal y `vaDeriveImage` + cargas no temporales SSE4.1
+   (`REDROID_FORGE_HWDEC_DOWNLOAD=ffmpeg|getimage|derive|derive-sse`). Los tres modos directos dan frames
+   idénticos a ffmpeg. Descarga + copia compacta por frame y fps de punta a punta por Android:
+   720p60 2,4→1,0 ms (160→188 fps), 1080p 4,3→1,9 ms (82→134 fps), 4K 14,6→8,3 ms (31→37 fps).
+   **`derive-sse` queda por defecto**, con una autoverificación: el primer frame de cada sesión se baja
+   también por ffmpeg y se compara byte a byte; si la descarga directa falla o difiere (tiling de Intel,
+   otro driver) la sesión vuelve al camino de ffmpeg y lo avisa por stderr. **Sin probar en Intel (Iris Xe)
+   ni en el 5700G**: ahí puede caer a ffmpeg, o ganar menos, y hay que medirlo.
+   Con esto lo que queda más caro del daemon son la cola y el socket (~3 ms por frame a 1080p).
+
    **Siguiente tanda del hwdecode (orden decidido 06/10/2026):**
    1. ✅ Medir tiempo por etapa (tabla de arriba). Falta el lado Android y Intel.
    2. ✅ Salida de 10 bits en el componente: HEVC Main10 y VP9 perfil 2, como 8 bits (ver hallazgo de arriba).
@@ -208,7 +219,8 @@ conocidos (ej. el artefacto de scanline en la 4060 con el driver
       interfaz Codec2); un cambio de pantalla pide recrear o reparchear. A comprobar con
       SmartTube: los decoders de software siguen declarando 4K y un player que mire el
       máximo entre todos podría seguir ofreciendo UHD.
-   4. Ganancias baratas según la medición: etapas en hilos (decodificar el N+1 mientras se
+   4. Ganancias baratas según la medición (✅ descarga por `vaDeriveImage`+SSE hecha; faltan los hilos en
+      etapas, memoria compartida y SIMD en U/V): etapas en hilos (decodificar el N+1 mientras se
       baja y envía el N), `vaCopy` en vez de leer memoria de video con la CPU, memoria
       compartida (memfd) en vez de socket, SIMD en la separación de U/V.
    5. Si no alcanza, 2b (zero-copy): mantiene el frame en el GPU de punta a punta; el
