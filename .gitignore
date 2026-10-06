@@ -3,3 +3,4 @@ backend/data/*.json
 !backend/data/.gitkeep
 .claude/
 backend/native/vaapi-daemon/daemon
+backend/native/vaapi-daemon/hwdec-test
