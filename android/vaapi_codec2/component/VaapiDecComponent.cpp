@@ -132,13 +132,15 @@ VaapiDecInterface::VaapiDecInterface(const std::shared_ptr<C2ReflectorHelper> &h
                          .withSetter(SizeSetter)
                          .build());
 
-    // Formato de pixel de salida. Para contenido de 10 bits el framework puede pedir P010 (o
-    // IMPLEMENTATION_DEFINED en modo superficie, para que pueda elegirlo); 420_888 es la salida de 8 bits.
+    // Formato de pixel de salida. Solo 8 bits (420_888): P010 NO se ofrece. En redroid, gralloc revienta
+    // (SIGFPE en gralloc_gbm_bo_create, dentro del servicio allocator) al asignar un buffer P010, y como el
+    // allocator es critico, Android entero se reinicia. IMPLEMENTATION_DEFINED esta para que el framework
+    // pueda distinguir el modo superficie, igual que en los decoders de software de AOSP.
     addParameter(DefineParam(mPixelFormat, C2_PARAMKEY_PIXEL_FORMAT)
                          .withDefault(new C2StreamPixelFormatInfo::output(
                                  0u, HAL_PIXEL_FORMAT_YCBCR_420_888))
                          .withFields({C2F(mPixelFormat, value).oneOf({
-                                 HAL_PIXEL_FORMAT_YCBCR_420_888, HAL_PIXEL_FORMAT_YCBCR_P010,
+                                 HAL_PIXEL_FORMAT_YCBCR_420_888,
                                  HAL_PIXEL_FORMAT_IMPLEMENTATION_DEFINED})})
                          .withSetter(Setter<decltype(*mPixelFormat)>::StrictValueWithNoDeps)
                          .build());
@@ -549,7 +551,7 @@ void VaapiDecComponent::finishFrame(Frame &frame, const std::unique_ptr<C2Work> 
     mPending.erase(index);
 
     // Tamano de salida: se informa al framework antes del primer frame y en cada cambio.
-    std::shared_ptr<C2Param> sizeUpdate, pixelFormatUpdate;
+    std::shared_ptr<C2Param> sizeUpdate;
     if (frame.width != mWidth || frame.height != mHeight) {
         C2StreamPictureSizeInfo::output size(0u, frame.width, frame.height);
         std::vector<std::unique_ptr<C2SettingResult>> failures;
@@ -563,16 +565,11 @@ void VaapiDecComponent::finishFrame(Frame &frame, const std::unique_ptr<C2Work> 
         mHeight = frame.height;
     }
 
-    // Formato de salida. 8 bits: YV12. 10 bits: P010 si el framework lo acepto Y gralloc sabe asignarlo (el
-    // daemon ya entrega P010, asi que se copia tal cual); si no, YV12 de 8 bits quedandose con los 8 bits altos
-    // (como los decoders de software de AOSP). No se intenta asignar P010 "a ver si anda": en redroid
-    // gralloc lo rechaza y un pedido fallido deja al servicio sin poder asignar ningun bloque mas, asi que
-    // se usa la misma comprobacion que AOSP.
-    uint32_t format = HAL_PIXEL_FORMAT_YV12;
-    if (frame.tenBit && mIntf->getPixelFormat_l()->value != HAL_PIXEL_FORMAT_YCBCR_420_888 &&
-        getHalPixelFormatForBitDepth10(false) == HAL_PIXEL_FORMAT_YCBCR_P010) {
-        format = HAL_PIXEL_FORMAT_YCBCR_P010;
-    }
+    // Formato de salida: siempre YV12 de 8 bits. Con 10 bits de entrada (HEVC Main10, VP9 perfil 2) se
+    // queda con los 8 bits altos de cada muestra, como los decoders de software de AOSP cuando no hay P010.
+    // NO se consulta si P010 esta soportado (getHalPixelFormatForBitDepth10 / isHalPixelFormatSupported
+    // asignan un buffer de prueba): en redroid eso mata al allocator de gralloc y reinicia Android.
+    const uint32_t format = HAL_PIXEL_FORMAT_YV12;
 
     std::shared_ptr<C2GraphicBlock> block;
     C2MemoryUsage usage = {C2MemoryUsage::CPU_READ, C2MemoryUsage::CPU_WRITE};
@@ -582,17 +579,6 @@ void VaapiDecComponent::finishFrame(Frame &frame, const std::unique_ptr<C2Work> 
         ALOGE("fetchGraphicBlock for the output failed: %d", err);
         mSignalledError = true;
         return;
-    }
-    if (mHalPixelFormat != format) {
-        C2StreamPixelFormatInfo::output pixelFormat(0u, format);
-        std::vector<std::unique_ptr<C2SettingResult>> failures;
-        if (mIntf->config({&pixelFormat}, C2_MAY_BLOCK, &failures) != C2_OK) {
-            ALOGE("cannot set the output pixel format");
-            mSignalledError = true;
-            return;
-        }
-        pixelFormatUpdate.reset(C2Param::Copy(pixelFormat).release());
-        mHalPixelFormat = format;
     }
     {
         C2GraphicView wView = block->map().get();
@@ -616,17 +602,7 @@ void VaapiDecComponent::finishFrame(Frame &frame, const std::unique_ptr<C2Work> 
         const int32_t dstUColInc = layout.planes[C2PlanarLayout::PLANE_U].colInc;
         const int32_t dstVColInc = layout.planes[C2PlanarLayout::PLANE_V].colInc;
 
-        if (format == HAL_PIXEL_FORMAT_YCBCR_P010) {
-            // P010 -> P010: mismo orden de muestras (16 bits, valor en los 10 bits altos), copia de filas.
-            const size_t rowBytes = static_cast<size_t>(w) * 2;
-            const uint8_t *srcUv = src + rowBytes * h;
-            for (uint32_t y = 0; y < h; y++) {
-                memcpy(dstY + y * dstYStride, src + y * rowBytes, rowBytes);
-            }
-            for (uint32_t y = 0; y < h / 2; y++) {
-                memcpy(dstU + y * dstUStride, srcUv + y * rowBytes, rowBytes);
-            }
-        } else if (frame.tenBit) {
+        if (frame.tenBit) {
             // 10 bits pero el consumidor pidio 8: se queda con los 8 bits altos de cada muestra.
             const uint16_t *srcY = reinterpret_cast<const uint16_t *>(src);
             const uint16_t *srcUv = srcY + static_cast<size_t>(w) * h;
@@ -668,15 +644,12 @@ void VaapiDecComponent::finishFrame(Frame &frame, const std::unique_ptr<C2Work> 
         buffer->setInfo(mIntf->getColorAspects_l());
     }
 
-    auto fillWork = [buffer, sizeUpdate, pixelFormatUpdate](const std::unique_ptr<C2Work> &w) {
+    auto fillWork = [buffer, sizeUpdate](const std::unique_ptr<C2Work> &w) {
         w->worklets.front()->output.flags = static_cast<C2FrameData::flags_t>(0);
         w->worklets.front()->output.buffers.clear();
         w->worklets.front()->output.buffers.push_back(buffer);
         w->worklets.front()->output.ordinal = w->input.ordinal;
         if (sizeUpdate) w->worklets.front()->output.configUpdate.push_back(C2Param::Copy(*sizeUpdate));
-        if (pixelFormatUpdate) {
-            w->worklets.front()->output.configUpdate.push_back(C2Param::Copy(*pixelFormatUpdate));
-        }
         w->workletsProcessed = 1u;
         w->result = C2_OK;
     };

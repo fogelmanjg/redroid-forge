@@ -164,9 +164,20 @@ conocidos (ej. el artefacto de scanline en la 4060 con el driver
    actual hace GPU→RAM→socket→copia a gralloc→compositor (que reescala a la pantalla)
    →conversión→encode, todo en un hilo por stream.
 
+   **Hallazgo crítico (06/10/2026): P010 reinicia Android entero en redroid.** El servicio allocator
+   de gralloc (`gralloc_gbm_bo_create`, gralloc.gbm.so) muere con SIGFPE (división por cero) al
+   asignar un buffer P010, y como el allocator es crítico, zygote y system_server se reinician: en la
+   instancia de n02 (Iris Xe) scrcpy quedó apuntando al sistema viejo y parecía colgado. Lo disparaba
+   `getHalPixelFormatForBitDepth10` / `isHalPixelFormatSupported`, que asignan un buffer de prueba. El
+   componente ya **no pide ni consulta P010**: la salida de 10 bits (HEVC Main10, VP9 perfil 2) se
+   entrega como YV12 de 8 bits con los 8 bits altos (verificado bit a bit contra ffmpeg en Polaris).
+   Sin HDR real ni rango de 10 bits, que scrcpy tampoco conserva. Pendiente: los decoders de software
+   de Android hacen la misma consulta con VP9 de 10 bits y probablemente tiren el sistema abajo en esta
+   imagen (sin probar); es un bug de gralloc de redroid para reportar upstream.
+
    **Siguiente tanda del hwdecode (orden decidido 06/10/2026):**
    1. Medir tiempo por etapa (decode, descarga, copia, socket, conversión).
-   2. Salida de 10 bits (P010) en el componente: HEVC Main10 y VP9 perfil 2.
+   2. ✅ Salida de 10 bits en el componente: HEVC Main10 y VP9 perfil 2, como 8 bits (ver hallazgo de arriba).
    3. **Límite de resolución anunciada = el escalón estándar (240/360/480/720/1080/1440/2160p)
       más grande que quepa en la pantalla de la instancia, redondeando hacia abajo, con piso
       en 720p**, y nunca por encima de lo que el hardware decodifique (eso lo informa el
