@@ -75,3 +75,21 @@ Lo que `hwdec_probe()` anuncia por GPU: Polaris: h264, hevc (+10), mpeg2, vc1. V
 h264, hevc (+10), vp9 (+10), mpeg2, vc1. Iris Xe (iHD 26.2): h264, hevc (+10), vp9 (+10),
 vp8, mpeg2, vc1, **av1** (+10); AV1 y VP8 están **anunciados pero sin probar** (no hay clips).
 
+### Protocolo v2 a través del daemon (paso 2a)
+
+Compilado con `make HWDEC=1 daemon`, el daemon atiende dos comandos nuevos (ver `protocol.h`):
+`VAAPI_CMD_HWDEC` (una conexión persistente por stream, un hilo por sesión) y
+`VAAPI_CMD_HWDEC_CAPS` (qué decodifica el host). El nodo DRM sale de
+`REDROID_FORGE_DRM_NODE` (por defecto `/dev/dri/renderD128`). `hwdec_client.c` es el cliente de
+referencia (mismo contrato que usará Android). Sin `HWDEC=1` el daemon se comporta igual que
+antes y no depende de FFmpeg.
+
+```sh
+# dentro del mismo contenedor de arriba, después de `make hwdec-test`:
+make HWDEC=1 daemon     # necesita además: libdrm-dev mesa-dev vulkan-headers mesa-gbm mesa-egl
+./test/hwdec-stream-verify.sh /dev/dri/renderD128 /clips/*      # capacidades, decode por socket, 2 streams a la vez
+```
+
+Resultado (06/10/2026): Polaris 3 de 3 clips soportados + VP9 rechazado; Iris Xe 4 de 4;
+Vega 8 del 5700G 4 de 4, todos idénticos al software a través del socket.
+

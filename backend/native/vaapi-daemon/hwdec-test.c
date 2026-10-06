@@ -7,8 +7,11 @@
  *
  *   hwdec-test --probe [nodo]
  *   hwdec-test <archivo> [nodo] [salida.md5]
+ *   hwdec-test --socket <ruta> <archivo> [salida.md5]   (a traves del daemon, protocolo v2)
+ *   hwdec-test --socket-probe <ruta>                     (pregunta capacidades al daemon)
  */
 #include "hwdec.h"
+#include "hwdec_client.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -45,6 +48,19 @@ static int probe(const char *node) {
     return 0;
 }
 
+/* Dos formas de hablar con el decoder: la sesion en proceso (hwdec.c) o el daemon por socket. */
+static HwDecClient *g_client;   /* != NULL: modo socket */
+
+static int be_send(HwDecSession *s, const uint8_t *d, size_t n, int64_t pts) {
+    return g_client ? hwdec_client_send(g_client, d, n, pts) : hwdec_send(s, d, n, pts);
+}
+static int be_receive(HwDecSession *s, HwDecFrame *f) {
+    return g_client ? hwdec_client_next_frame(g_client, f) : hwdec_receive(s, f);
+}
+static int be_eos(HwDecSession *s) {
+    return g_client ? hwdec_client_eos(g_client) : hwdec_send_eos(s);
+}
+
 static FILE *g_out;
 static long g_frames;
 static int g_bad;
@@ -52,7 +68,7 @@ static int g_bad;
 static int drain(HwDecSession *s) {
     HwDecFrame f;
     for (;;) {
-        int r = hwdec_receive(s, &f);
+        int r = be_receive(s, &f);
         if (r == HWDEC_AGAIN || r == HWDEC_EOF) return r;
         if (r < 0) { g_bad = 1; return r; }
         uint8_t md5[16];
@@ -69,7 +85,7 @@ static int drain(HwDecSession *s) {
 /* Entrega un access unit; si el decoder pide vaciar la salida, la vacia y reintenta. */
 static int feed(HwDecSession *s, AVPacket *p) {
     int r;
-    while ((r = hwdec_send(s, p->data, p->size, p->pts)) == HWDEC_AGAIN) {
+    while ((r = be_send(s, p->data, p->size, p->pts)) == HWDEC_AGAIN) {
         if (drain(s) < 0 && g_bad) return -1;
     }
     if (r < 0) { g_bad = 1; return -1; }
@@ -81,7 +97,17 @@ static int feed(HwDecSession *s, AVPacket *p) {
 
 int main(int argc, char **argv) {
     if (argc >= 2 && !strcmp(argv[1], "--probe")) return probe(argc > 2 ? argv[2] : DEFAULT_NODE);
-    if (argc < 2) { fprintf(stderr, "uso: %s --probe [nodo] | <archivo> [nodo] [salida.md5]\n", argv[0]); return 2; }
+    if (argc >= 3 && !strcmp(argv[1], "--socket-probe")) {
+        HwDecCaps c;
+        if (hwdec_client_caps(argv[2], &c) != 0) { fprintf(stderr, "el daemon no respondio\n"); return 1; }
+        printf("driver (segun el daemon): %s\n", c.driver);
+        for (int i = 0; i < HWDEC_NCODECS; i++)
+            printf("  %-6s %s%s\n", hwdec_codec_name(i), c.supported[i] ? "hardware" : "-", c.supported_10bit[i] ? " (+10 bits)" : "");
+        return 0;
+    }
+    const char *sock = NULL;
+    if (argc >= 4 && !strcmp(argv[1], "--socket")) { sock = argv[2]; argv += 2; argc -= 2; }
+    if (argc < 2) { fprintf(stderr, "uso: %s --probe [nodo] | [--socket ruta] <archivo> [nodo] [salida.md5]\n", argv[0]); return 2; }
     const char *path = argv[1], *node = argc > 2 ? argv[2] : DEFAULT_NODE;
     g_out = argc > 3 ? fopen(argv[3], "w") : NULL;
 
@@ -110,8 +136,10 @@ int main(int argc, char **argv) {
         if (av_bsf_init(bsf) < 0) return 1;
     }
 
-    HwDecSession *s = hwdec_open(node, codec);
-    if (!s) { fprintf(stderr, "RESULTADO: el hardware no puede decodificar este stream (%s)\n", hwdec_codec_name(codec)); return 3; }
+    HwDecSession *s = NULL;
+    if (sock) g_client = hwdec_client_open(sock, codec);
+    else s = hwdec_open(node, codec);
+    if (!s && !g_client) { fprintf(stderr, "RESULTADO: el hardware no puede decodificar este stream (%s)\n", hwdec_codec_name(codec)); return 3; }
 
     AVPacket *pkt = av_packet_alloc(), *out = av_packet_alloc();
     long units = 0;
@@ -137,9 +165,13 @@ int main(int argc, char **argv) {
             units++;
         }
     }
-    hwdec_send_eos(s);
-    while (drain(s) == HWDEC_AGAIN) {}
-    hwdec_close(s);
+    be_eos(s);
+    /* En proceso el decoder avisa HWDEC_EOF al terminar; por socket no existe ese aviso
+     * (la respuesta al EOS ya trae todos los frames), asi que se vacia la cola UNA vez:
+     * repetir hasta EOF giraria para siempre. */
+    if (g_client) drain(s);
+    else while (drain(s) == HWDEC_AGAIN) {}
+    if (g_client) hwdec_client_close(g_client); else hwdec_close(s);
 
     struct rusage ru;
     getrusage(RUSAGE_SELF, &ru);

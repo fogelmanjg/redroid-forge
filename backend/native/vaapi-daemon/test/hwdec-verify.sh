@@ -13,7 +13,13 @@ for f in "$@"; do
   rm -f /tmp/_sw.md5 /tmp/_hw.md5
   ffmpeg -v error -y -threads 1 -i "$f" -f framemd5 -pix_fmt $out_fmt /tmp/_sw.md5 2>/dev/null
   [ -s /tmp/_sw.md5 ] || { echo "ERROR         $name: no se pudo generar la referencia por software"; fail=$((fail+1)); continue; }
-  if ! ./hwdec-test "$f" "$NODE" /tmp/_hw.md5 > /tmp/_hw.out 2>&1; then
+  # HWDEC_SOCKET=<ruta>: la misma verificacion pero a traves del daemon (protocolo v2).
+  if [ -n "$HWDEC_SOCKET" ]; then
+    timeout 300 ./hwdec-test --socket "$HWDEC_SOCKET" "$f" "$NODE" /tmp/_hw.md5 > /tmp/_hw.out 2>&1; rc=$?
+  else
+    timeout 300 ./hwdec-test "$f" "$NODE" /tmp/_hw.md5 > /tmp/_hw.out 2>&1; rc=$?
+  fi
+  if [ $rc -ne 0 ]; then
     echo "SIN HARDWARE  $name: $(grep -E 'RESULTADO|no decodifica|hwdec:' /tmp/_hw.out | head -1 | cut -c1-110)"
     skip=$((skip+1)); continue
   fi

@@ -22,16 +22,29 @@ LDLIBS := -lva -lva-drm -lgbm -lEGL -ldl
 # existe con timestamp mas nuevo que los .c/.h -- confirmado en vivo el 30/09,
 # costo bastante tiempo de debugging encontrar que "make" decia
 # "'daemon' is up to date" e ignoraba el fix silenciosamente.
-daemon: daemon.c decode_h264.c decode_h264.h protocol.h Makefile
-	$(CC) $(CFLAGS) -o daemon daemon.c decode_h264.c $(LDLIBS)
+# HWDEC=1 suma el decode por hardware vendor-agnostico (hwdec.c, libavcodec + VA-API).
+# Por defecto NO: el build de produccion actual no necesita FFmpeg hasta que exista el
+# libavcodec LGPL propio de la imagen (ver docs/ROADMAP.md, Fase 2, paso 5).
+HWDEC ?= 0
+ifeq ($(HWDEC),1)
+HWDEC_CFLAGS := -DHAVE_HWDEC $(shell pkg-config --cflags libavcodec libavutil)
+HWDEC_SRCS := hwdec.c
+HWDEC_LIBS := $(shell pkg-config --libs libavcodec libavutil) -lpthread
+endif
+
+# -I de libdrm (pkg-config): ver el comentario del include de drm_fourcc.h en daemon.c.
+LIBDRM_CFLAGS := $(shell pkg-config --cflags libdrm 2>/dev/null)
+
+daemon: daemon.c decode_h264.c decode_h264.h protocol.h hwdec.c hwdec.h Makefile
+	$(CC) $(CFLAGS) $(LIBDRM_CFLAGS) $(HWDEC_CFLAGS) -o daemon daemon.c decode_h264.c $(HWDEC_SRCS) $(LDLIBS) $(HWDEC_LIBS)
 
 # Paso 1 del hwdecode (docs/ROADMAP.md, Fase 2, paso 5): sesion de decode por
 # hardware con libavcodec + VA-API, y su cliente de prueba. Aparte del target
 # `daemon` a proposito: todavia no esta cableado al daemon (eso es el paso 2) y
 # necesita las cabeceras de FFmpeg (libavcodec/libavformat/libavutil) y libva.
 FFMPEG_PKGS := libavcodec libavformat libavutil
-hwdec-test: hwdec.c hwdec.h hwdec-test.c Makefile
-	$(CC) -O2 -Wall -o hwdec-test hwdec.c hwdec-test.c \
+hwdec-test: hwdec.c hwdec.h hwdec-test.c hwdec_client.c hwdec_client.h protocol.h Makefile
+	$(CC) -O2 -Wall -o hwdec-test hwdec.c hwdec_client.c hwdec-test.c \
 	  $(shell pkg-config --cflags --libs $(FFMPEG_PKGS) libva libva-drm)
 
 clean:
