@@ -1,0 +1,271 @@
+/*
+ * Copyright 2018 The Android Open Source Project
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+/*
+ * Tier 4 registered c2.hardware.encoder.h264 (dumpsys media.c2 /
+ * IComponentStore::listComponents) without any real encoding wired in.
+ * Tier 5.5 wires it up for real: createComponent()/createInterface() now
+ * construct a VaapiEncComponent, whose process() calls the host-side
+ * VA-API encode daemon (tier5-vaapi-daemon, proven end to end against a
+ * real Android gralloc buffer in Tier 5.4) instead of returning
+ * C2_NOT_FOUND.
+ *
+ * Decoders por hardware (hwdec): c2.hardware.decoder.{h264,hevc,vp9}
+ * (VaapiDecComponent), cada uno con una sesion persistente al daemon (protocolo hwdec v2,
+ * protocol.h). Un IComponentStore, varios componentes, despachados por nombre.
+ *
+ * Adapted from AOSP's official empty-service template at
+ * frameworks/av/media/codec2/hal/services/vendor.cpp (its own header says:
+ * "make a copy of this whole directory and rename modules accordingly" --
+ * this is that copy). HIDL path removed entirely: Tier 0 already confirmed
+ * this specific redroid build only wires up a Codec2 store when
+ * media.c2.hal.selection=aidl (IsCodec2AidlHalSelected() gates on it) --
+ * the generic template's HIDL fallback doesn't apply here.
+ */
+
+//#define LOG_NDEBUG 0
+#define LOG_TAG "android.hardware.media.c2-vaapi-service"
+
+#include <android-base/logging.h>
+#include <minijail.h>
+
+#include <util/C2InterfaceHelper.h>
+#include <C2Component.h>
+#include <C2Config.h>
+
+#include <android/binder_manager.h>
+#include <android/binder_process.h>
+#include <codec2/aidl/ComponentStore.h>
+#include <codec2/aidl/ParamTypes.h>
+
+#include "VaapiEncComponent.h"
+#include "VaapiDecComponent.h"
+
+// This is the absolute on-device path of the prebuilt_etc module
+// "android.hardware.media.c2-vaapi-seccomp_policy" in Android.bp.
+static constexpr char kBaseSeccompPolicyPath[] =
+        "/vendor/etc/seccomp_policy/"
+        "android.hardware.media.c2-vaapi-seccomp_policy";
+
+// Additional seccomp permissions can be added in this file.
+// This file does not exist by default.
+static constexpr char kExtSeccompPolicyPath[] =
+        "/vendor/etc/seccomp_policy/"
+        "android.hardware.media.c2-vaapi-extended-seccomp_policy";
+
+// We want multiple threads to be running so that a blocking operation
+// on one codec does not block the other codecs.
+static constexpr int kThreadCount = 8;
+
+class StoreImpl : public C2ComponentStore {
+public:
+    StoreImpl()
+        : mReflectorHelper(std::make_shared<C2ReflectorHelper>()),
+          mInterface(mReflectorHelper) {
+    }
+
+    virtual ~StoreImpl() override = default;
+
+    virtual C2String getName() const override {
+        return "default";
+    }
+
+    virtual c2_status_t createComponent(
+            C2String name,
+            std::shared_ptr<C2Component>* const component) override {
+        if (name == "c2.hardware.encoder.h264") {
+            auto intf = std::make_shared<android::VaapiEncInterface>(mReflectorHelper);
+            *component = std::make_shared<android::VaapiEncComponent>(name.c_str(), mNextId++, intf);
+            return C2_OK;
+        }
+        if (const android::VaapiDecCodec *codec = android::findVaapiDecCodec(name)) {
+            auto intf = std::make_shared<android::VaapiDecInterface>(mReflectorHelper, codec);
+            *component = std::make_shared<android::VaapiDecComponent>(name.c_str(), mNextId++, intf, codec);
+            return C2_OK;
+        }
+        return C2_NOT_FOUND;
+    }
+
+    virtual c2_status_t createInterface(
+            C2String name,
+            std::shared_ptr<C2ComponentInterface>* const interface) override {
+        if (name == "c2.hardware.encoder.h264") {
+            auto intf = std::make_shared<android::VaapiEncInterface>(mReflectorHelper);
+            *interface = std::make_shared<
+                    android::SimpleInterface<android::VaapiEncInterface>>(
+                    name.c_str(), mNextId++, intf);
+            return C2_OK;
+        }
+        if (const android::VaapiDecCodec *codec = android::findVaapiDecCodec(name)) {
+            auto intf = std::make_shared<android::VaapiDecInterface>(mReflectorHelper, codec);
+            *interface = std::make_shared<
+                    android::SimpleInterface<android::VaapiDecInterface>>(
+                    name.c_str(), mNextId++, intf);
+            return C2_OK;
+        }
+        return C2_NOT_FOUND;
+    }
+
+    virtual std::vector<std::shared_ptr<const C2Component::Traits>>
+            listComponents() override {
+        auto encTraits = std::make_shared<C2Component::Traits>();
+        encTraits->name = "c2.hardware.encoder.h264";
+        encTraits->domain = C2Component::DOMAIN_VIDEO;
+        encTraits->kind = C2Component::KIND_ENCODER;
+        encTraits->rank = 1; // lower than the stock software encoder's rank -- prefer this one
+        encTraits->mediaType = "video/avc";
+        encTraits->owner = "vaapi";
+
+        std::vector<std::shared_ptr<const C2Component::Traits>> traits = {encTraits};
+        // Un decoder por codec (H.264, HEVC, VP9). Que el framework los ofrezca o no lo decide el
+        // media_codecs.xml de cada instancia, que el backend de redroid-forge arma segun lo que el
+        // hardware del host decodifica de verdad; aca se registran todos.
+        for (const android::VaapiDecCodec &codec : android::vaapiDecCodecs()) {
+            auto decTraits = std::make_shared<C2Component::Traits>();
+            decTraits->name = codec.name;
+            decTraits->domain = C2Component::DOMAIN_VIDEO;
+            decTraits->kind = C2Component::KIND_DECODER;
+            decTraits->rank = 1; // lower than the stock software decoder's rank -- prefer this one
+            decTraits->mediaType = codec.mediaType;
+            decTraits->owner = "vaapi";
+            traits.push_back(decTraits);
+        }
+        return traits;
+    }
+
+    virtual c2_status_t copyBuffer(
+            std::shared_ptr<C2GraphicBuffer> /* src */,
+            std::shared_ptr<C2GraphicBuffer> /* dst */) override {
+        return C2_OMITTED;
+    }
+
+    virtual c2_status_t query_sm(
+        const std::vector<C2Param*>& stackParams,
+        const std::vector<C2Param::Index>& heapParamIndices,
+        std::vector<std::unique_ptr<C2Param>>* const heapParams) const override {
+        return mInterface.query(stackParams, heapParamIndices, C2_MAY_BLOCK, heapParams);
+    }
+
+    virtual c2_status_t config_sm(
+            const std::vector<C2Param*>& params,
+            std::vector<std::unique_ptr<C2SettingResult>>* const failures) override {
+        return mInterface.config(params, C2_MAY_BLOCK, failures);
+    }
+
+    virtual std::shared_ptr<C2ParamReflector> getParamReflector() const override {
+        return mReflectorHelper;
+    }
+
+    virtual c2_status_t querySupportedParams_nb(
+            std::vector<std::shared_ptr<C2ParamDescriptor>>* const params) const override {
+        return mInterface.querySupportedParams(params);
+    }
+
+    virtual c2_status_t querySupportedValues_sm(
+            std::vector<C2FieldSupportedValuesQuery>& fields) const override {
+        return mInterface.querySupportedValues(fields, C2_MAY_BLOCK);
+    }
+
+private:
+    class Interface : public C2InterfaceHelper {
+    public:
+        Interface(const std::shared_ptr<C2ReflectorHelper> &helper)
+            : C2InterfaceHelper(helper) {
+            setDerivedInstance(this);
+
+            addParameter(
+                DefineParam(mIonUsageInfo, "ion-usage")
+                .withDefault(new C2StoreIonUsageInfo())
+                .withFields({
+                    C2F(mIonUsageInfo, usage).flags(
+                            {C2MemoryUsage::CPU_READ | C2MemoryUsage::CPU_WRITE}),
+                    C2F(mIonUsageInfo, capacity).inRange(0, UINT32_MAX, 1024),
+                    C2F(mIonUsageInfo, heapMask).any(),
+                    C2F(mIonUsageInfo, allocFlags).flags({}),
+                    C2F(mIonUsageInfo, minAlignment).equalTo(0)
+                })
+                .withSetter(SetIonUsage)
+                .build());
+
+            addParameter(
+                DefineParam(mDmaBufUsageInfo, "dmabuf-usage")
+                .withDefault(C2StoreDmaBufUsageInfo::AllocShared(128))
+                .withFields({
+                    C2F(mDmaBufUsageInfo, m.usage).flags({C2MemoryUsage::CPU_READ | C2MemoryUsage::CPU_WRITE}),
+                    C2F(mDmaBufUsageInfo, m.capacity).inRange(0, UINT32_MAX, 1024),
+                    C2F(mDmaBufUsageInfo, m.allocFlags).flags({}),
+                    C2F(mDmaBufUsageInfo, m.heapName).any(),
+                })
+                .withSetter(SetDmaBufUsage)
+                .build());
+        }
+
+        virtual ~Interface() = default;
+
+    private:
+        static C2R SetIonUsage(bool /* mayBlock */, C2P<C2StoreIonUsageInfo> &me) {
+            me.set().heapMask = ~0;
+            me.set().allocFlags = 0;
+            me.set().minAlignment = 0;
+            return C2R::Ok();
+        }
+
+        static C2R SetDmaBufUsage(bool /* mayBlock */, C2P<C2StoreDmaBufUsageInfo> &me) {
+            strncpy(me.set().m.heapName, "system", me.v.flexCount());
+            me.set().m.allocFlags = 0;
+            return C2R::Ok();
+        }
+
+        std::shared_ptr<C2StoreIonUsageInfo> mIonUsageInfo;
+        std::shared_ptr<C2StoreDmaBufUsageInfo> mDmaBufUsageInfo;
+    };
+    std::shared_ptr<C2ReflectorHelper> mReflectorHelper;
+    Interface mInterface;
+    c2_node_id_t mNextId = 0;
+};
+
+int main(int /* argc */, char** /* argv */) {
+    LOG(DEBUG) << "android.hardware.media.c2-vaapi-service starting...";
+
+    // Set up minijail to limit system calls.
+    signal(SIGPIPE, SIG_IGN);
+    android::SetUpMinijail(kBaseSeccompPolicyPath, kExtSeccompPolicyPath);
+
+    ABinderProcess_setThreadPoolMaxThreadCount(kThreadCount);
+    ABinderProcess_startThreadPool();
+
+    using namespace ::aidl::android::hardware::media::c2;
+    std::shared_ptr<IComponentStore> store = ::ndk::SharedRefBase::make<utils::ComponentStore>(
+            std::make_shared<StoreImpl>());
+
+    if (store == nullptr) {
+        LOG(ERROR) << "Cannot create Codec2's IComponentStore service.";
+    } else {
+        const std::string serviceName = std::string(IComponentStore::descriptor) + "/default";
+        binder_exception_t ex = AServiceManager_addService(
+                store->asBinder().get(), serviceName.c_str());
+        if (ex != EX_NONE) {
+            LOG(ERROR) << "Cannot register Codec2's IComponentStore service"
+                          " with instance name \"" << serviceName << "\".";
+        } else {
+            LOG(DEBUG) << "Codec2's IComponentStore service registered. "
+                          "Instance name: \"" << serviceName << "\".";
+        }
+    }
+
+    ABinderProcess_joinThreadPool();
+    return 0;
+}
