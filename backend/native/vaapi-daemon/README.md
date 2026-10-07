@@ -1,13 +1,14 @@
 # vaapi-daemon
 
-Puerto directo del daemon de [`redroid-hwenc`](https://github.com/fogelmanjg/redroid-hwenc)
-(tier5-vaapi-daemon), sin cambios de lógica — mismo binario, mismo protocolo. Ver el README
-de ese proyecto para el diseño completo (por qué un daemon host-side en vez de VA-API nativo
-dentro de Android, el protocolo del socket, y la tabla de compatibilidad por GPU).
+A direct port of the daemon of [`redroid-hwenc`](https://github.com/fogelmanjg/redroid-hwenc)
+(tier5-vaapi-daemon), with no logic changes to the encode path — same binary, same protocol. See that
+project's README for the full design (why a host-side daemon instead of native VA-API inside Android, the
+socket protocol, and the per-GPU compatibility table).
 
-Encode H.264 vía VA-API en AMD/Intel (`VAEntrypointEncSlice`) y decode H.264 vía NVDEC en
-NVIDIA (`VAEntrypointVLD`, driver `nvidia-vaapi-driver`) — un solo proceso, dos backends
-independientes, ninguno requerido para que el otro funcione.
+H.264 encode through VA-API on AMD/Intel (`VAEntrypointEncSlice`), H.264 decode through NVDEC on NVIDIA
+(`VAEntrypointVLD`, `nvidia-vaapi-driver` driver), and — new in this project — **vendor-agnostic hardware
+decode** (H.264, HEVC, VP9, ...) on AMD and Intel. One process, independent backends, none of them required
+for the others to work.
 
 ## Build
 
@@ -15,36 +16,38 @@ independientes, ninguno requerido para que el otro funcione.
 make
 ```
 
-Requiere headers de desarrollo de `libva`, `libva-drm`, `libgbm` y `libEGL` (ver Dockerfile
-del backend para los paquetes exactos en la imagen de producción).
+It requires the development headers of `libva`, `libva-drm`, `libgbm` and `libEGL` (see the backend's
+Dockerfile for the exact packages in the production image). `make HWDEC=1 daemon` adds the hardware decode
+(it needs FFmpeg's libavcodec/libavutil and libdrm too).
 
-## Quién lo levanta
+## Who starts it
 
-No se corre a mano — `backend/src/lib/hwAccel.js` lo lanza y supervisa como proceso hijo del
-backend de redroid-forge (que corre `--privileged --pid=host --network=host`, ver
-`docker-compose.yml`), y expone su socket (`/dev/vaapi-helper/socket`) bind-mounteado tanto
-en el propio contenedor del backend como en cada instancia redroid que lo necesite — mismo
-patrón que `binder.js` con `/dev/binderfs`.
+It is not run by hand — `backend/src/lib/hwAccel.js` launches and supervises it as a child process of the
+redroid-forge backend (which runs `--privileged --pid=host --network=host`, see `docker-compose.yml`), and
+exposes its socket (`/dev/vaapi-helper/socket`) bind-mounted both in the backend's own container and in
+every redroid instance that needs it — the same pattern as `binder.js` with `/dev/binderfs`. If the daemon
+dies (for example, a GPU reset aborts it with SIGABRT) the backend relaunches it by itself, waiting 1 s and
+doubling up to 30 s if it keeps dying right after starting.
 
-## hwdec: decode por hardware vendor-agnóstico (paso 1, en desarrollo)
+## hwdec: vendor-agnostic hardware decode
 
-`hwdec.c`/`hwdec.h` son una sesión de decode por hardware con **libavcodec + VA-API**
-(AMD y Intel; ver `docs/ROADMAP.md`, Fase 2, paso 5). Todavía **no está cableada al daemon**
-(eso es el paso 2): hoy es una librería con su cliente de prueba `hwdec-test`.
+`hwdec.c`/`hwdec.h` are a hardware decode session with **libavcodec + VA-API** (AMD and Intel; see
+`docs/ROADMAP.md`, Phase 2, step 5). The daemon serves it to the Android Codec2 components
+(`android/vaapi_codec2`) over the `VAAPI_CMD_HWDEC` protocol described below.
 
-Reglas de diseño:
-- **Se usa por hardware todo lo que el host ofrezca.** `hwdec_probe()` pregunta a VA-API qué
-  decodifica el nodo DRM (sin libavcodec) y `hwdec_open()` solo abre sesiones de esos códecs.
-- **Nunca hay fallback silencioso a software.** Si el hardware no puede con el stream, la
-  sesión falla y quien llama cae a su decoder por software.
-- **Sesión con estado:** un access unit por `hwdec_send()`; `hwdec_receive()` devuelve los
-  frames ya reordenados (B-frames), de a uno. Salida NV12 (8 bits) o P010 (10 bits) compacta.
+Design rules:
+- **Everything the host offers is used in hardware.** `hwdec_probe()` asks VA-API what the DRM node decodes
+  (without libavcodec) and `hwdec_open()` only opens sessions for those codecs.
+- **There is never a silent fallback to software.** If the hardware cannot handle the stream, the session
+  fails and the caller falls back to its software decoder.
+- **A stateful session:** one access unit per `hwdec_send()`; `hwdec_receive()` returns the already
+  reordered frames (B-frames), one at a time. Output is compact NV12 (8-bit) or P010 (10-bit).
 
-### Probarlo (en cualquier host con Docker y `/dev/dri`)
+### Try it (on any host with Docker and `/dev/dri`)
 
 ```sh
 cd backend/native/vaapi-daemon
-docker run --rm --device /dev/dri -v "$PWD":/src -v /ruta/a/clips:/clips:ro -w /src alpine:latest sh -c '
+docker run --rm --device /dev/dri -v "$PWD":/src -v /path/to/clips:/clips:ro -w /src alpine:latest sh -c '
   apk add -q --no-cache build-base pkgconf ffmpeg ffmpeg-dev libva-dev libva-utils \
       mesa-va-gallium intel-media-driver &&
   cp -r /src /build && cd /build && make hwdec-test &&
@@ -52,44 +55,59 @@ docker run --rm --device /dev/dri -v "$PWD":/src -v /ruta/a/clips:/clips:ro -w /
   ./test/hwdec-verify.sh /dev/dri/renderD128 /clips/*'
 ```
 
-`hwdec-verify.sh` decodifica cada clip por software (ffmpeg) y por hardware (`hwdec-test`) y
-compara frame a frame en el orden de salida. **Ojo:** el `cpu=` que imprime incluye el hash
-MD5 y la descarga de cada frame a RAM (en 4K de 10 bits son ~25 MB por frame), así que **no
-mide el costo del decode**; la medición de CPU de verdad va con el paso 2 (sin copia).
+`hwdec-verify.sh` decodes every clip in software (ffmpeg) and in hardware (`hwdec-test`) and compares frame
+by frame in output order. **Note:** the `cpu=` it prints includes the MD5 hash and the download of every
+frame to RAM (at 10-bit 4K that is ~25 MB per frame), so it **does not measure the cost of the decode**;
+the real CPU measurements are in `docs/ROADMAP.md`.
 
-Para este experimento se usa el FFmpeg de Alpine, compilado con `--enable-gpl`: sirve para
-probar, pero **no se distribuye**. La imagen del proyecto compilará su propio libavcodec LGPL.
+For this experiment Alpine's FFmpeg is used, built with `--enable-gpl`: it is fine for testing, but it is
+**not distributed**. The project's image will build its own LGPL libavcodec.
 
-### Resultados (06/10/2026)
+### Results (06/10/2026)
 
-Clips: H.264 High con B-frames y 4 referencias (720p30 y 1080p30), HEVC Main10 HDR10 2160p30,
-VP9 perfil 2 (10 bits) 2160p30. `✓` = todos los frames idénticos al software.
+Clips: H.264 High with B-frames and 4 references (720p30 and 1080p30), HEVC Main10 HDR10 2160p30, VP9
+profile 2 (10-bit) 2160p30. `✓` = all frames identical to software.
 
-| GPU (driver) | H.264 720p | H.264 1080p | HEVC 4K 10 bits | VP9 4K 10 bits |
+| GPU (driver) | H.264 720p | H.264 1080p | HEVC 4K 10-bit | VP9 4K 10-bit |
 |---|---|---|---|---|
-| Polaris RX 480 (radeonsi) | ✓ | ✓ | ✓ | rechazado: no hay hardware |
+| Polaris RX 480 (radeonsi) | ✓ | ✓ | ✓ | rejected: no hardware |
 | Iris Xe (iHD) | ✓ | ✓ | ✓ | ✓ |
-| Vega 8 del 5700G (radeonsi) | ✓ | ✓ | ✓ | ✓ |
+| Vega 8 of the 5700G (radeonsi) | ✓ | ✓ | ✓ | ✓ |
 
-Lo que `hwdec_probe()` anuncia por GPU: Polaris: h264, hevc (+10), mpeg2, vc1. Vega 8:
-h264, hevc (+10), vp9 (+10), mpeg2, vc1. Iris Xe (iHD 26.2): h264, hevc (+10), vp9 (+10),
-vp8, mpeg2, vc1, **av1** (+10); AV1 y VP8 están **anunciados pero sin probar** (no hay clips).
+What `hwdec_probe()` advertises per GPU: Polaris: h264, hevc (+10), mpeg2, vc1. Vega 8: h264, hevc (+10),
+vp9 (+10), mpeg2, vc1. Iris Xe (iHD 26.2): h264, hevc (+10), vp9 (+10), vp8, mpeg2, vc1, **av1** (+10); AV1
+and VP8 are **advertised but untested** (there are no clips).
 
-### Protocolo v2 a través del daemon (paso 2a)
+### Protocol v2 through the daemon
 
-Compilado con `make HWDEC=1 daemon`, el daemon atiende dos comandos nuevos (ver `protocol.h`):
-`VAAPI_CMD_HWDEC` (una conexión persistente por stream, un hilo por sesión) y
-`VAAPI_CMD_HWDEC_CAPS` (qué decodifica el host). El nodo DRM sale de
-`REDROID_FORGE_DRM_NODE` (por defecto `/dev/dri/renderD128`). `hwdec_client.c` es el cliente de
-referencia (mismo contrato que usará Android). Sin `HWDEC=1` el daemon se comporta igual que
-antes y no depende de FFmpeg.
+Built with `make HWDEC=1 daemon`, the daemon serves two new commands (see `protocol.h`): `VAAPI_CMD_HWDEC` (a
+persistent connection per stream, one thread per session) and `VAAPI_CMD_HWDEC_CAPS` (what the host
+decodes). The DRM node comes from `REDROID_FORGE_DRM_NODE` (by default `/dev/dri/renderD128`).
+`hwdec_client.c` is the reference client (the same contract the Android component uses). Without `HWDEC=1`
+the daemon behaves as before and does not depend on FFmpeg.
 
 ```sh
-# dentro del mismo contenedor de arriba, después de `make hwdec-test`:
-make HWDEC=1 daemon     # necesita además: libdrm-dev mesa-dev vulkan-headers mesa-gbm mesa-egl
-./test/hwdec-stream-verify.sh /dev/dri/renderD128 /clips/*      # capacidades, decode por socket, 2 streams a la vez
+# inside the same container as above, after `make hwdec-test`:
+make HWDEC=1 daemon     # it also needs: libdrm-dev mesa-dev vulkan-headers mesa-gbm mesa-egl
+./test/hwdec-stream-verify.sh /dev/dri/renderD128 /clips/*      # capabilities, decode through the socket, 2 streams at once
 ```
 
-Resultado (06/10/2026): Polaris 3 de 3 clips soportados + VP9 rechazado; Iris Xe 4 de 4;
-Vega 8 del 5700G 4 de 4, todos idénticos al software a través del socket.
+Result (06/10/2026): Polaris 3 of 3 supported clips + VP9 rejected; Iris Xe 4 of 4; Vega 8 of the 5700G
+4 of 4, all identical to software through the socket.
 
+### Frame transport: shared memory
+
+A client that sets `VAAPI_HWDEC_OPEN_SHM` in `HwDecOpenRequest.flags` receives a `memfd` (512 MiB virtual,
+only what the frames write is resident) attached to the open response through `SCM_RIGHTS`; every frame is
+downloaded straight into it and the frame headers carry no payload. The frames of one response overwrite
+those of the next, so the client copies them before its next request. Without the flag the frames travel
+inline through the socket, as before.
+
+### Runtime options (environment variables)
+
+| Variable | Effect |
+|---|---|
+| `REDROID_FORGE_DRM_NODE` | DRM render node to use (default `/dev/dri/renderD128`). |
+| `REDROID_FORGE_HWDEC_DOWNLOAD` | How a decoded frame is brought from the GPU to RAM: `derive-sse` (default: `vaDeriveImage` + SSE4.1 non-temporal loads), `derive`, `getimage` (`vaGetImage`) or `ffmpeg` (`av_hwframe_transfer_data`). The first frame of every session is also downloaded through ffmpeg and compared byte by byte; if the direct download fails or differs, that session goes back to the ffmpeg path and says so on stderr. |
+| `REDROID_FORGE_HWDEC_STATS` | If set, every session prints its average time per stage (send, GPU wait, download, copy) when it closes, and the daemon prints the wait/queue/socket averages. |
+| `REDROID_FORGE_HWDEC_DEBUG` | If set, logs the first bytes of every access unit that arrives (to see how Android delivers it). |

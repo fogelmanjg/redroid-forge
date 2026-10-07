@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Herramienta de la persona que libera la base (docs/BASE-COMBINACIONES.md
+// Herramienta de la persona que libera la base (docs/KNOWN-COMBINATIONS.md
 // 4.3). Sin dependencias: usa el ed25519 nativo de Node. Esta copia vive en
 // redroid-forge y se mantiene identica a la de tools/ en redroid-forge-db.
 //

@@ -258,7 +258,7 @@ function checkAndroidIdRegistration() {
   });
 }
 
-// Base de datos de combinaciones conocidas (docs/BASE-COMBINACIONES.md).
+// Base de datos de combinaciones conocidas (docs/KNOWN-COMBINATIONS.md).
 // Informativo: nunca 'fail' por antiguedad -- la app funciona igual sin ella,
 // solo sabe menos sobre que combinaciones estan validadas.
 function checkKnownDb() {

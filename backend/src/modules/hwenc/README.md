@@ -1,82 +1,69 @@
-# Módulo: hwenc
+# Module: hwenc
 
-Primer caso real de la convención de módulos con lógica de ejecución
-descripta en `docs/ARQUITECTURA.md` (etapas 3, 4, 5 y 6) y en la sección 5 de
-`docs/REQUIREMENTS.md`. Desde Fase 5, además, es el primer módulo que corre
-a través del runner genérico (`backend/src/lib/moduleRunner.js`) en vez de
-estar cableado a mano en `instances.js` — cualquier módulo futuro con la
-misma forma (`etapa`/`entry` en su manifest) se integra sin tocar
-`instances.js`.
+The first real case of the convention for modules with execution logic described in
+`docs/ARCHITECTURE.md` (stages 3, 4, 5 and 6) and in section 5 of `docs/REQUIREMENTS.md`. Since Phase 5, it
+is also the first module that runs through the generic runner (`backend/src/lib/moduleRunner.js`) instead of
+being wired by hand in `instances.js` — any future module with the same shape (`etapa`/`entry` in its
+manifest) integrates without touching `instances.js`.
 
-- **`manifest.json`** — contrato del módulo (qué toca, con qué es compatible),
-  mismo schema que ya valida Fase 4 (`moduleManifests.js`), más dos campos
-  que ese sistema descubre pero no interpreta: `etapa` (en qué momento del
-  ciclo de vida de la instancia opera, ver `ARQUITECTURA.md`) y `entry` (el
-  script que hace el trabajo real, resuelto relativo a esta misma carpeta).
-  Vive en `backend/src/modules/hwenc/manifest.json` (no en
-  `backend/src/modules/manifests/`) — `moduleManifests.js` escanea las dos
-  ubicaciones, ver el comentario de `loadAll()` ahí.
-- **`integrate.js`** — expone un hook por etapa, con el nombre fijo que
-  `moduleRunner.js` espera para cada una (ver `STAGE_EXPORT_NAME` ahí):
-  - `prepareCreate()` (etapa 3): qué sumarle a `binds`/`cmd` antes de
-    `docker create` — el bind del socket del daemon VA-API y el boot flag
-    `androidboot.use_redroid_c2=1`. Antes vivía hardcodeado a mano en
-    `instances.js`; `REQUIRED_BOOT_FLAGS` se exportaba pero nadie lo leía.
-  - `integrate(containerId)` (etapa 4): copia el componente Codec2 de VA-API
-    dentro de `/vendor` de una instancia recién creada (todavía sin
-    arrancar). También se puede correr suelto para debug manual
-    (`node integrate.js <containerId>`).
-  - `ensureHostInfraReady()` (etapa 5): delega en
-    `backend/src/lib/hwAccel.js` (`ensureDaemonRunning`) — la lógica real del
-    daemon sigue viviendo ahí, sin duplicarse acá. Este hook es sólo el punto
-    de enganche que el runner genérico necesita para llamarlo en el momento
-    correcto (antes de `start`/`restart`), sin que `instances.js` tenga que
-    saber que hwenc existe.
-  - `ensureRuntimeReady(containerId)` (etapa 6): el `setprop` +
-    reinicio de `mediaserver` que antes había que correr a mano después de
-    cada boot fresco (se llamaba `ensureHwencReady` antes de esta
-    convención). El runner lo agenda fire-and-forget después del `start`,
-    mismo patrón que `scheduleWifiFixes`/`hwsimWifi.js`.
+From manifest version 4 the module covers hardware video **decode** as well as encode: stage 4 also
+registers in `media_codecs.xml` the decoders (`c2.hardware.decoder.h264|hevc|vp9`) that the host's GPU
+decodes in hardware (the backend asks the daemon, see `hwAccel.queryHwdecCaps`), each with a size limit
+derived from the instance's screen (`decodeSizeLimit` in `integrate.js`: the largest standard step that fits
+the screen, rounding down, with a floor at 720p). To do that, `moduleRunner.integrate` passes stage-4 hooks a
+second argument, `{ display: { width, height } }`.
 
-## Decisión de diseño: ¿por qué la etapa 5 se expone acá si ya vive en hwAccel.js?
+- **`manifest.json`** — the module's contract (what it touches, what it is compatible with), the same schema
+  Phase 4 already validates (`moduleManifests.js`), plus two fields that system discovers but does not
+  interpret: `etapa` (at what moment of the instance's lifecycle it operates, see `ARCHITECTURE.md`) and
+  `entry` (the script that does the real work, resolved relative to this same folder). It lives in
+  `backend/src/modules/hwenc/manifest.json` (not in `backend/src/modules/manifests/`) —
+  `moduleManifests.js` scans both locations, see the comment of `loadAll()` there.
+- **`integrate.js`** — exposes one hook per stage, with the fixed name `moduleRunner.js` expects for each
+  (see `STAGE_EXPORT_NAME` there):
+  - `prepareCreate()` (stage 3): what to add to `binds`/`cmd` before `docker create` — the bind of the VA-API
+    daemon's socket and the boot flag `androidboot.use_redroid_c2=1`. It used to live hardcoded by hand in
+    `instances.js`; `REQUIRED_BOOT_FLAGS` was exported but nobody read it.
+  - `integrate(containerId, ctx)` (stage 4): copies the VA-API Codec2 component into the `/vendor` of a
+    freshly created instance (not started yet) and registers its encoder and decoders. It can also be run
+    on its own for manual debugging (`node integrate.js <containerId>`).
+  - `ensureHostInfraReady()` (stage 5): delegates to `backend/src/lib/hwAccel.js` (`ensureDaemonRunning`) —
+    the daemon's real logic keeps living there, not duplicated here. This hook is only the hook point the
+    generic runner needs to call it at the right moment (before `start`/`restart`), without `instances.js`
+    having to know that hwenc exists.
+  - `ensureRuntimeReady(containerId)` (stage 6): the `setprop` + `mediaserver` restart that used to have to
+    be run by hand after every fresh boot (it was called `ensureHwencReady` before this convention). The
+    runner schedules it fire-and-forget after `start`, the same pattern as
+    `scheduleWifiFixes`/`hwsimWifi.js`.
 
-Para que el runner genérico sea realmente genérico, no puede saber que
-"hwenc" necesita "el daemon VA-API" — sólo sabe llamar a la función que el
-manifest de un módulo declara para la etapa que corresponde. La alternativa
-(que `instances.js` siguiera llamando a `hwAccel.ensureDaemonRunning()` a
-mano, gateado por `img.hwEncCapable`) hubiera dejado a hwenc como caso
-especial para siempre. En cambio, `ensureHostInfraReady()` es un wrapper de
-una línea que delega en `hwAccel.js` — no se mueve ni se duplica lógica, sólo
-se le pone el nombre que la convención espera.
+## Design decision: why is stage 5 exposed here if it already lives in hwAccel.js?
 
-## Por qué esto no viola la política de licencias (sección 6 de REQUIREMENTS.md)
+For the generic runner to be truly generic, it cannot know that "hwenc" needs "the VA-API daemon" — it only
+knows how to call the function a module's manifest declares for the corresponding stage. The alternative
+(letting `instances.js` keep calling `hwAccel.ensureDaemonRunning()` by hand, gated by `img.hwEncCapable`)
+would have left hwenc as a special case forever. Instead, `ensureHostInfraReady()` is a one-line wrapper
+that delegates to `hwAccel.js` — no logic is moved or duplicated, it is only given the name the convention
+expects.
 
-El componente que este módulo integra es código propio (`redroid-hwenc`,
-Apache-2.0, mismo autor) — no es GApps/Magisk. La restricción de "nunca
-alojar el binario" es sobre software de terceros no libre; esto es libre y
-nuestro, así que en principio se podría empaquetar sin problema legal. La
-única razón por la que igual se baja como artefacto separado en vez de
-compilarse en el build normal de `redroid-forge` es técnica: son binarios
-Android/bionic que necesitan el toolchain completo de AOSP, no algo que un
-`docker build` de una imagen Node/Alpine pueda hacer.
+## Why this does not violate the license policy (section 6 of REQUIREMENTS.md)
 
-## Pendiente
+The component this module integrates is our own code (`redroid-hwenc`, Apache-2.0, the same author) — it is
+not GApps/Magisk. The "never host the binary" restriction is about non-free third-party software; this is
+free and ours, so in principle it could be packaged without any legal problem. The only reason it is still
+downloaded as a separate artifact instead of being built in `redroid-forge`'s normal build is technical:
+they are Android/bionic binaries that need the full AOSP toolchain, not something a `docker build` of a
+Node/Alpine image can do.
 
-- `REDROID_HWENC_ARTIFACTS_DIR` hoy apunta a una carpeta local de build de
-  AOSP (`~/aosp-out-redroid15/...`) — cuando `redroid-hwenc` publique un
-  release, este módulo debería descargarlo de ahí.
-- `integrate.js` usa el CLI de `docker` vía `child_process` — válido para
-  probar desde el host, pero el backend real de `redroid-forge` corre en una
-  imagen Alpine sin ese CLI instalado. Portar a `dockerode`'s `putArchive()`
-  (con uid/gid=0 en los headers del tar) sigue pendiente; ya está enganchado
-  al flujo real de creación de instancias (Fase 5), así que este es ahora un
-  blocker real para correrlo en producción, no una limitación teórica.
-- Ninguno de los cuatro hooks (`prepareCreate`/`integrate`/
-  `ensureHostInfraReady`/`ensureRuntimeReady`) se validó todavía contra un
-  host real con Docker/redroid corriendo — sólo hay cobertura de unit tests
-  con mocks (`backend/test/moduleRunner.test.js`). Antes de mergear a algo
-  que se vaya a usar en vivo, correr el flujo completo (crear → integrar →
-  arrancar → fixup) contra la imagen oficial de redroid en un host AMD/Intel.
-- Ninguna imagen de `backend/images.json` declara `hwEncCapable: true`
-  todavía — hasta que una lo haga, el gate nunca exige este módulo ni el
-  runner nunca lo ejecuta en la práctica.
+## Pending
+
+- `REDROID_HWENC_ARTIFACTS_DIR` today points to a local AOSP build folder (`~/aosp-out-redroid15/...`) —
+  when `redroid-hwenc` publishes a release, this module should download it from there.
+- `integrate.js` uses the `docker` CLI through `child_process`; the backend's image installs `docker-cli` for
+  exactly that reason (see the `Dockerfile`). Porting to `dockerode`'s `putArchive()` (with uid/gid=0 in the
+  tar headers) would remove that dependency; it is a cleanup, not a blocker.
+- The unit tests alone (`backend/test/`, with mocks) do not validate the four hooks
+  (`prepareCreate`/`integrate`/`ensureHostInfraReady`/`ensureRuntimeReady`); the full flow (create →
+  integrate → start → fixup) has however been exercised against the official redroid image on AMD Polaris,
+  Intel Iris Xe and AMD 5700G hosts (see `docs/ROADMAP.md`, Phase 2).
+- `android-15-official` in `backend/images.json` declares `hwEncCapable: true`, so the gate requires this
+  module for it and the runner executes it on creation; no other catalog image declares it.

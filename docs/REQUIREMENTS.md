@@ -1,388 +1,338 @@
-# redroid-forge — Documento de requerimientos y política del proyecto
+# redroid-forge — Requirements and project policy
 
-> Borrador vivo. Se ajusta a medida que surgen más decisiones. Todo lo marcado
-> **[PENDIENTE]** es una decisión abierta, no un supuesto.
+**Languages:** English | [Español](REQUIREMENTS.es.md)
 
-## 1. Objetivo
+> This project's official language is **English**. The Spanish file is provided for convenience and
+> may not be perfectly accurate or up to date — if in doubt, this file is the source of truth.
 
-Dar un cierre de punta a punta a los proyectos redroid que hoy funcionan por
-separado, consolidándolos en una única aplicación independiente
-(`redroid-forge`), con backend y frontend propios, que:
+> Living draft. It is adjusted as more decisions come up. Everything marked **[PENDING]** is an open
+> decision, not an assumption.
 
-- Reemplaza la necesidad de tocar cada proyecto por separado para gestionar
-  instancias redroid.
-- Se puede embeber o mostrarse dentro de `jg-dashboard` y de Plenum, pero no
-  depende de ninguno de los dos para funcionar standalone.
-- Aspira a ser un proyecto público y popular, no una herramienta interna.
+## 1. Goal
 
-**Por qué "forge" y no solo "manager" o "hub":** el proyecto es más que un
-punto central de gestión — personalización profunda por instancia (módulos,
-perfiles de dispositivo, aceleración por hardware) y export/import de
-instancias entre PCs distintas. Es una forja de instancias, no solo un
-tablero de control.
+To give end-to-end closure to the redroid projects that currently work separately, consolidating them
+into a single independent application (`redroid-forge`), with its own backend and frontend, that:
 
-## 2. Alcance v1
+- Replaces the need to touch each project separately to manage redroid instances.
+- Can be embedded or shown inside `jg-dashboard` and Plenum, but does not depend on either of them to
+  work standalone.
+- Aims to be a public and popular project, not an internal tool.
 
-- **Redroid 15 es la única versión con soporte oficial** (todos los módulos
-  validados: hwenc, nvidia, wifi falso, device profile). No es una
-  restricción dura de código — otras versiones no quedan bloqueadas, quedan
-  marcadas como **comunidad** (ver "Tiers de soporte por imagen" más abajo).
-- Se porta **todo lo ya probado y funcionando**, no se rehace desde cero:
-  - Encode por hardware VA-API (AMD/Intel) + decode NVDEC — de `redroid-hwenc`.
-  - Aceleración 3D (Venus-proxy) + encode NVENC para NVIDIA — de `redroid-nvidia`.
-  - Ciclo de vida de instancias (create/start/stop/restart/delete), Doctor de
-    host de solo lectura, registro de Android ID/GApps — de `redroid-manager`.
-  - WiFi falso (hwsim) y device profile spoofing — hoy repartidos entre
-    `redroid-manager` y `jg-dashboard`.
-  - Checklist de prerrequisitos de host (binder legacy/binderfs, `loop`,
-    `ext4`) documentado para Debian/btrfs.
-  - Todo lo reutilizable del módulo redroid de `plenum-redroid` (misma lógica
-    de reuso que con `jg-dashboard`, ver sección 4).
+**Why "forge" and not just "manager" or "hub":** the project is more than a central management point —
+deep per-instance customization (modules, device profiles, hardware acceleration) and export/import of
+instances between different PCs. It is an instance forge, not just a control panel.
 
-- **Objetivo adicional (no es un port): decodificación por hardware en AMD e
-  Intel** (agregado el 05/10/2026; alcance ampliado el 06/10/2026). Cada
-  instancia usa por hardware **todo lo que el hardware del host ofrezca** (H.264,
-  HEVC, VP9... según la GPU): no hay un paquete único de capacidades, y
-  hardware más nuevo irá sumando. Hoy solo existe decode por hardware en NVIDIA,
-  y limitado a un frame intra suelto. El encode se retoma después de la primera
-  versión. Detalle, mediciones y enfoque (libavcodec compilado como LGPL) en la
-  Fase 2 del `ROADMAP.md` (paso 5).
+## 2. v1 scope
 
-### Tiers de soporte por imagen (no una restricción dura)
+- **Redroid 15 is the only version with official support** (all modules validated: hwenc, nvidia, fake
+  WiFi, device profile). It is not a hard restriction in code — other versions are not blocked, they are
+  marked as **community** (see "Support tiers per image" below).
+- **Everything already tested and working is ported**, it is not redone from scratch:
+  - VA-API hardware encode (AMD/Intel) + NVDEC decode — from `redroid-hwenc`.
+  - 3D acceleration (Venus-proxy) + NVENC encode for NVIDIA — from `redroid-nvidia`.
+  - Instance lifecycle (create/start/stop/restart/delete), read-only host Doctor, Android ID/GApps
+    registration — from `redroid-manager`.
+  - Fake WiFi (hwsim) and device profile spoofing — currently spread between `redroid-manager` and
+    `jg-dashboard`.
+  - A host prerequisites checklist (legacy binder/binderfs, `loop`, `ext4`) documented for
+    Debian/btrfs.
+  - Everything reusable from the redroid module of `plenum-redroid` (the same reuse logic as with
+    `jg-dashboard`, see section 4).
 
-**Versiones mantenidas (decidido 05/10/2026):** se mantienen en el catálogo
-las **imágenes oficiales de Redroid 11, 13 y 15, y probablemente también 12 y
-14** — siempre la imagen oficial sin modificar (ver "Base de datos de
-combinaciones conocidas" más abajo), nunca imágenes armadas a mano. **Solo
-Redroid 15 tiene soporte completo** (tier "oficial"); el resto es tier
-"comunidad": se ofrecen y corren, pero sin garantía de que los módulos
-funcionen. Una versión sube de tier únicamente cuando una combinación
-validada entra en la base de datos.
+- **Additional goal (not a port): hardware decoding on AMD and Intel** (added 05/10/2026; scope
+  extended 06/10/2026). Every instance uses in hardware **everything the host's hardware offers**
+  (H.264, HEVC, VP9... depending on the GPU): there is no single capability package, and newer
+  hardware will keep adding. Today hardware decode only exists on NVIDIA, and limited to a single loose
+  intra frame. Encode is revisited after the first version. Detail, measurements and approach (libavcodec
+  built as LGPL) in Phase 2 of `ROADMAP.md` (step 5).
 
-Redroid 11 y 13 andan para algunas cosas (11 arranca y corre instancias
-básicas; 13 se probó y funciona en `gpuMode: guest`), pero sin el resto de
-los módulos (hwenc, nvidia, wifi falso) validados sobre esas versiones —
-nunca se probaron ahí. En vez de bloquear su uso, el catálogo y los módulos
-declaran esto como metadata, no como código especial por versión:
+### Support tiers per image (not a hard restriction)
 
-- Cada imagen en el catálogo (`backend/images.json`, ya tiene
-  `androidVersion`/`gpuMode` por entrada) suma un campo **`soporte`**:
-  `"oficial"` (solo Redroid 15) o `"comunidad"` (11, 13, cualquier otra que
-  se agregue), con una nota corta de qué se sabe que anda (ej. "13: solo
-  `gpuMode: guest`, sin hwenc ni wifi falso probados").
-- Cada módulo (manifest de la sección 5) declara **con qué es
-  compatible** (versión de Android, modo GPU). Si la imagen elegida no
-  cumple, el módulo simplemente no se ofrece para esa instancia — nunca se
-  rompe en silencio, se explica por qué no está disponible.
-- La UI/Doctor muestra el tier de la imagen elegida de forma visible (ej.
-  "✅ Oficial" vs "⚠️ Comunidad, sin soporte completo") — mismo criterio de
-  transparencia que rige el resto del proyecto: nunca ocultar limitaciones.
+**Maintained versions (decided 05/10/2026):** the catalog keeps the **official Redroid 11, 13 and 15
+images, and probably also 12 and 14** — always the unmodified official image (see "Known-combinations
+database" below), never hand-built images. **Only Redroid 15 has full support** ("official" tier); the
+rest is "community" tier: they are offered and they run, but with no guarantee that the modules work. A
+version moves up a tier only when a validated combination enters the database.
 
-### Base de datos de combinaciones conocidas (decidido 05/10/2026)
+Redroid 11 and 13 work for some things (11 boots and runs basic instances; 13 was tested and works with
+`gpuMode: guest`), but without the rest of the modules (hwenc, nvidia, fake WiFi) validated on those
+versions — they were never tested there. Instead of blocking their use, the catalog and the modules
+declare this as metadata, not as special per-version code:
 
-**Regla de base:** redroid-forge parte **siempre de la imagen oficial de
-Redroid 15, sin modificar**. GApps, Magisk, hwenc, wifi falso y demás se
-integran **por instancia, al crearla, solo si hace falta**, como módulos.
-No se usan imágenes prearmadas/personalizadas: atan el proyecto a un build
-host, mezclan contenido no libre (GApps) dentro de una imagen redistribuible
-y hacen imposible razonar sobre qué está realmente corriendo.
+- Every image in the catalog (`backend/images.json`, which already has `androidVersion`/`gpuMode` per
+  entry) adds a **`soporte`** field: `"oficial"` (Redroid 15 only) or `"comunidad"` (11, 13, any other
+  that gets added), with a short note of what is known to work (e.g. "13: only `gpuMode: guest`, hwenc
+  and fake WiFi not tested").
+- Every module (the manifest of section 5) declares **what it is compatible with** (Android version, GPU
+  mode). If the chosen image does not meet it, the module is simply not offered for that instance —
+  it never breaks silently, it explains why it is not available.
+- The UI/Doctor shows the tier of the chosen image prominently (e.g. "✅ Official" vs "⚠️ Community, no
+  full support") — the same transparency criterion that governs the rest of the project: never hide
+  limitations.
 
-**Soporte = combinación conocida, no "imagen".** El proyecto mantiene una
-base de datos de combinaciones **validadas**. Cada entrada fija:
+### Known-combinations database (decided 05/10/2026)
 
-- **Base:** imagen oficial identificada por **digest `sha256`**, no por tag
-  (`15.0.0-latest` es un tag móvil: dos hosts pueden bajar cosas distintas).
-- **Paquete GApps:** versión, origen y `sha256` conocidos.
-- **Versión de Magisk** (si aplica): versión y `sha256`.
-- **Módulos** y sus versiones de manifest validados sobre esa base.
-- **Hardware** sobre el que se validó (tabla estilo `redroid-hwenc`: AMD
-  Polaris/Vega, Intel Iris Xe, NVIDIA...) y fecha de validación.
+**Base rule:** redroid-forge **always starts from the official Redroid 15 image, unmodified**. GApps,
+Magisk, hwenc, fake WiFi and the rest are integrated **per instance, when creating it, only if
+needed**, as modules. Pre-built/customized images are not used: they tie the project to a build host,
+mix non-free content (GApps) inside a redistributable image, and make it impossible to reason about
+what is actually running.
 
-Consecuencias:
+**Support = known combination, not "image".** The project maintains a database of **validated**
+combinations. Every entry fixes:
 
-- Una combinación presente en la base es **tier "oficial"**: es lo que el
-  proyecto validó y a lo que responde ante un reporte de error. **No es una
-  garantía** (software libre, sin garantías): significa "validada con
-  evidencia verificable" — el usuario puede repetir los chequeos en su host
-  (ver `docs/BASE-COMBINACIONES.md` §1.1). El primer
-  filtro de cualquier reporte es "¿es una combinación conocida?".
-- Una imagen base, paquete GApps o versión de Magisk **fuera de la base** no se
-  bloquea (coherente con los tiers de arriba), pero queda **sin soporte** y
-  con advertencia visible en UI/Doctor, y se ofrecen solo los módulos que
-  puedan garantizarse sobre ella.
-- Los binarios de terceros (GApps, Magisk) se **verifican contra el `sha256`
-  de la base antes de usarse**; si no coincide, no se inyectan. Nunca se
-  descarga "la última versión" sin fijar.
-- El módulo GApps/Magisk recibe su origen y checksum **de la base**, no los
-  trae hardcodeados en su manifest.
+- **Base:** an official image identified by its **`sha256` digest**, not by tag (`15.0.0-latest` is a
+  moving tag: two hosts may pull different things).
+- **GApps package:** known version, source and `sha256`.
+- **Magisk version** (if applicable): version and `sha256`.
+- **Modules** and their manifest versions validated on that base.
+- **Hardware** it was validated on (an `redroid-hwenc`-style table: AMD Polaris/Vega, Intel Iris Xe,
+  NVIDIA...) and the validation date.
 
-**La base vive en un repositorio externo**, separado del código de
-redroid-forge, y es **actualizable** por el usuario:
+Consequences:
 
-- Cada release de redroid-forge **incluye un snapshot** de la base con lo
-  último conocido al momento de liberarla (así funciona offline y es
-  reproducible por versión).
-- Opcionalmente (acción explícita del usuario, nunca silenciosa) se puede
-  **actualizar la base** desde el repositorio externo para ver combinaciones
-  validadas después de esa release, sin esperar una versión nueva.
-- La base actualizada se **verifica** (firma o hash publicado) antes de
-  reemplazar el snapshot; si falla, se conserva el anterior.
-- **[PENDIENTE]** formato exacto (JSON/YAML), nombre y ubicación del
-  repositorio, mecanismo de verificación (firma vs. hash), y cómo se aportan
-  combinaciones nuevas (PR con evidencia de validación).
+- A combination present in the database is **"official" tier**: it is what the project validated and
+  what it answers to on a bug report. **It is not a guarantee** (free software, no warranty): it means
+  "validated with verifiable evidence" — the user can repeat the checks on their host (see
+  [`docs/KNOWN-COMBINATIONS.md`](KNOWN-COMBINATIONS.md) §1.1). The first filter of any report is "is it
+  a known combination?".
+- A base image, GApps package or Magisk version **outside the database** is not blocked (consistent with
+  the tiers above), but it is left **unsupported** with a visible warning in the UI/Doctor, and only the
+  modules that can be guaranteed on it are offered.
+- Third-party binaries (GApps, Magisk) are **verified against the database's `sha256` before being
+  used**; if it does not match, they are not injected. "The latest version" is never downloaded without
+  pinning it.
+- The GApps/Magisk module receives its source and checksum **from the database**, it does not carry them
+  hardcoded in its manifest.
 
-- **CIFI (watchdog de reapertura automática) migra de Redroid 11 a Redroid
-  15.** Se había dejado en 11 por menor consumo de recursos frente al encoder
-  por software que exigía 15 en ese momento — pero con aceleración 3D +
-  decode + encode por hardware ya resueltos en 15 (`redroid-hwenc` +
-  `redroid-nvidia`), la expectativa es que 15 consuma menos que 11 con
-  software encoding. Ya confirmado que corre bien en 15. Sirve además como
-  caso piloto real para el módulo de extensibilidad de usuario (sección 5).
+**The database lives in an external repository**, separate from the redroid-forge code, and is
+**updatable** by the user:
 
-## 3. Arquitectura
+- Every redroid-forge release **includes a snapshot** of the database with the latest known at release
+  time (so it works offline and is reproducible per version).
+- Optionally (an explicit user action, never silent) the **database can be updated** from the external
+  repository to see combinations validated after that release, without waiting for a new version.
+- The updated database is **verified** (a signature or published hash) before replacing the snapshot;
+  if that fails, the previous one is kept.
+- **[PENDING]** exact format (JSON/YAML), name and location of the repository, verification mechanism
+  (signature vs. hash), and how new combinations are contributed (a PR with validation evidence).
 
-- **Monorepo.** Todo el código de los proyectos consolidados vive junto en
-  `redroid-forge`, no como submódulos ni dependencias externas separadas.
-- **Aplicación independiente** con su propio backend y frontend — no requiere
-  Plenum ni `jg-dashboard` para operar (mismo principio que ya regía para
-  `redroid-manager`: "un `docker compose up` y andás"). Esta separación de
-  Plenum no fue nunca para evitar complejidad — es para que le sirva a
-  cualquiera, no solo a instalaciones propias. Coherente con el objetivo de
-  que el proyecto le pueda interesar a más gente, no solo al propio uso
-  personal.
-- **Integrable, no dependiente:** expone lo necesario (API, embed, SSO) para
-  que Plenum o `jg-dashboard` lo muestren/orquesten si el usuario lo quiere,
-  sin que esa integración sea obligatoria.
-- **Stack técnico: Node.js + Express**, sin framework pesado ni build step
-  obligatorio, `dockerode` para gestión de contenedores. Continuidad directa
-  con `redroid-manager` (ya probado end-to-end) — se porta el código
-  existente (`binder.js`, `hwsimWifi.js`, `androidIdentity.js`) en vez de
-  reescribirlo. Frontend vanilla HTML/CSS/JS; si el modal de contrato de
-  módulo (sección 5) necesita más interactividad, se sube un escalón liviano
-  (ej. Alpine.js/htmx) antes que saltar a un framework SPA completo.
+- **CIFI (the auto-reopen watchdog) migrates from Redroid 11 to Redroid 15.** It had been left on 11
+  because of lower resource consumption compared with the software encoder that 15 required at that
+  time — but with 3D acceleration + hardware decode + hardware encode already solved in 15
+  (`redroid-hwenc` + `redroid-nvidia`), the expectation is that 15 consumes less than 11 with software
+  encoding. It is already confirmed to run well on 15. It also serves as a real pilot case for the
+  user-extensibility module (section 5).
 
-## 4. Relación con jg-dashboard y plenum-redroid (migración y convivencia)
+## 3. Architecture
 
-- **`jg-dashboard` deja de tener redroid integrado y pasa a ser consumidor**
-  de `redroid-forge` (vía su API/embed), en vez de tener su propio
-  código de gestión de instancias redroid.
-- Al portar, **se reutiliza todo lo posible** del código real que ya tiene
-  `jg-dashboard` (ej. device profile spoofing —`DEVICE_PROFILES`,
-  `buildDeviceProfileScript`, etc. en `redroid.service.ts`) en vez de
-  reescribirlo.
-- **`plenum-redroid` sigue la misma política que `jg-dashboard`**: deja de
-  tener el módulo integrado, pasa a consumir `redroid-forge`, y se
-  reutiliza lo posible de su lógica al portar.
-- **Convivencia explícita durante la transición:** el código y las ventanas
-  actuales de redroid en `jg-dashboard` y en `plenum-redroid` **no se tocan
-  ni se quitan** hasta que `redroid-forge` esté totalmente funcional.
-  Ambos caminos conviven en paralelo mientras dura la migración — recién
-  cuando el reemplazo funciona de punta a punta se da de baja el código
-  viejo.
-- **Destino del código viejo (decidido 05/10/2026):** cuando `redroid-forge`
-  lo reemplace, **todo el código de redroid de `jg-dashboard` y de
-  `plenum-redroid` se elimina** de esos proyectos. No se mantiene ni se
-  conserva como camino de compatibilidad. El código anterior queda **en GitHub
-  como un proyecto viejo, muerto y reemplazado por `redroid-forge`** (solo como
-  historial). Antes de eliminar, hay que **asegurar que ese código esté
-  realmente en GitHub** (ver Fase 8 del `ROADMAP.md`; `plenum-redroid` ya se
-  archivó en `fogelmanjg-plenum/plenum-redroid`, privado, como proyecto que no
-  logró sus objetivos).
-- **El visor web `ws-scrcpy` no se porta.** Está deprecado desde 2026-07-02
-  (se creó cuando no se podía acceder a scrcpy desde Android; hoy se usa scrcpy
-  directo y el visor ya no tiene sentido). Ninguna instancia del dashboard lo
-  usa y su infraestructura (redis, secretos OAuth) ya no existe.
-- `jg-escritorio` (xpra + Docker) **no es relevante para este proyecto por
-  ahora** — queda fuera del alcance.
+- **Monorepo.** All the code of the consolidated projects lives together in `redroid-forge`, not as
+  submodules or separate external dependencies.
+- **Independent application** with its own backend and frontend — it does not require Plenum or
+  `jg-dashboard` to operate (the same principle that already governed `redroid-manager`: "one `docker
+  compose up` and you're running"). This separation from Plenum was never to avoid complexity — it is
+  so that it is useful to anyone, not just to our own installations. Consistent with the goal that the
+  project can interest more people, not just personal use.
+- **Integrable, not dependent:** it exposes what is needed (API, embed, SSO) so that Plenum or
+  `jg-dashboard` can show/orchestrate it if the user wants, without that integration being mandatory.
+- **Technical stack: Node.js + Express**, with no heavy framework or mandatory build step, `dockerode`
+  for container management. Direct continuity with `redroid-manager` (already tested end to end) — the
+  existing code (`binder.js`, `hwsimWifi.js`, `androidIdentity.js`) is ported instead of rewritten.
+  Vanilla HTML/CSS/JS frontend; if the module contract modal (section 5) needs more interactivity, a
+  light step up (e.g. Alpine.js/htmx) is taken before jumping to a full SPA framework.
 
-## 5. Modularidad y consentimiento explícito
+## 4. Relationship with jg-dashboard and plenum-redroid (migration and coexistence)
 
-Todo componente que no sea 100% software libre, o que dependa de una elección
-del host, se trata como **módulo externo**, nunca como parte fija del core:
+- **`jg-dashboard` stops having redroid integrated and becomes a consumer** of `redroid-forge` (through
+  its API/embed), instead of having its own redroid instance-management code.
+- When porting, **as much as possible is reused** of the real code `jg-dashboard` already has (e.g.
+  device profile spoofing —`DEVICE_PROFILES`, `buildDeviceProfileScript`, etc. in
+  `redroid.service.ts`) instead of rewriting it.
+- **`plenum-redroid` follows the same policy as `jg-dashboard`**: it stops having the integrated module,
+  becomes a consumer of `redroid-forge`, and what is possible of its logic is reused when porting.
+- **Explicit coexistence during the transition:** the current redroid code and windows in
+  `jg-dashboard` and in `plenum-redroid` **are neither touched nor removed** until `redroid-forge` is
+  fully functional. Both paths coexist in parallel for the duration of the migration — only when the
+  replacement works end to end is the old code retired.
+- **Fate of the old code (decided 05/10/2026):** when `redroid-forge` replaces it, **all the redroid
+  code of `jg-dashboard` and `plenum-redroid` is removed** from those projects. It is not maintained or
+  kept as a compatibility path. The previous code stays **on GitHub as an old project, dead and
+  replaced by `redroid-forge`** (as history only). Before removing it, it must be **made sure that code
+  is really on GitHub** (see Phase 8 of `ROADMAP.md`; `plenum-redroid` was already archived at
+  `fogelmanjg-plenum/plenum-redroid`, private, as a project that did not achieve its goals).
+- **The `ws-scrcpy` web viewer is not ported.** It has been deprecated since 2026-07-02 (it was created
+  when scrcpy could not be accessed from Android; today scrcpy is used directly and the viewer no longer
+  makes sense). No dashboard instance uses it and its infrastructure (redis, OAuth secrets) no longer
+  exists.
+- `jg-escritorio` (xpra + Docker) **is not relevant to this project for now** — it is out of scope.
 
-- CPU/RAM asignados a la instancia.
-- Modo GPU: host vs soft (guest).
-- WiFi falso (hwsim) sí/no.
-- GApps sí/no.
-- Magisk sí/no.
+## 5. Modularity and explicit consent
 
-**Flujo obligatorio para cualquier módulo no libre o de terceros:**
+Every component that is not 100% free software, or that depends on a choice of the host, is treated as
+an **external module**, never as a fixed part of the core:
 
-1. El frontend muestra el **contrato** del módulo antes de activarlo: qué es,
-   qué hace, qué permisos/recursos toca, y que **no es parte del proyecto**
-   (aviso explícito).
-2. El usuario acepta explícitamente.
-3. Recién ahí el backend ejecuta el script o descarga/integra el componente.
+- CPU/RAM assigned to the instance.
+- GPU mode: host vs soft (guest).
+- Fake WiFi (hwsim) yes/no.
+- GApps yes/no.
+- Magisk yes/no.
 
-Nada de esto se salta por usabilidad — la usabilidad se resuelve haciendo el
-flujo fácil de aceptar, no haciéndolo invisible.
+**Mandatory flow for any non-free or third-party module:**
 
-### Dos niveles de módulo
+1. The frontend shows the module's **contract** before enabling it: what it is, what it does, which
+   permissions/resources it touches, and that it **is not part of the project** (an explicit notice).
+2. The user accepts explicitly.
+3. Only then does the backend run the script or download/integrate the component.
 
-- **Módulos propios** (WiFi falso, device profile spoofing, elección de
-  CPU/RAM, modo GPU host/soft) — código del proyecto, no de terceros. El
-  contrato es puramente informativo: qué implica técnicamente y qué riesgos
-  tiene, sin el disclaimer de "no es parte del proyecto".
-- **Módulos de terceros no libres** (GApps, Magisk) — mismo contenido
-  informativo, más el disclaimer obligatorio de la sección 6: licencia real,
-  origen, y que no es parte de `redroid-forge`.
+None of this is skipped for usability — usability is solved by making the flow easy to accept, not by
+making it invisible.
 
-### Formato del contrato: manifest por módulo
+### Two module levels
 
-Cada módulo se describe con un manifest estructurado (JSON/YAML), versionado,
-leído genéricamente por el frontend para renderizar el mismo modal de
-contrato sin programar una pantalla especial por módulo:
+- **Own modules** (fake WiFi, device profile spoofing, CPU/RAM choice, host/soft GPU mode) — project
+  code, not third-party. The contract is purely informative: what it implies technically and what risks
+  it has, without the "it is not part of the project" disclaimer.
+- **Non-free third-party modules** (GApps, Magisk) — the same informative content, plus the mandatory
+  disclaimer of section 6: the real license, the source, and that it is not part of `redroid-forge`.
+
+### Contract format: a manifest per module
+
+Every module is described with a structured (JSON/YAML), versioned manifest, read generically by the
+frontend to render the same contract modal without programming a special screen per module. (The field
+names are the real format, which is why they stay in the project's original Spanish: `nombre` = name,
+`esTerceroNoLibre` = is a non-free third party, `licencia` = license, `origen` = source,
+`descripcion` = description, `queToca` = what it touches, `compatibleCon` = compatible with.)
 
 ```yaml
 id: gapps
 nombre: "Google Apps (GApps)"
 esTerceroNoLibre: true
-licencia: "Propietaria (Google)"
+licencia: "Proprietary (Google)"
 origen: "https://opengapps.org"
-descripcion: "Instala servicios de Google Play en la instancia."
+descripcion: "Installs Google Play services on the instance."
 queToca:
-  - "modifica /system dentro del contenedor"
-  - "descarga un paquete de un servidor externo (no controlado por este proyecto)"
+  - "modifies /system inside the container"
+  - "downloads a package from an external server (not controlled by this project)"
 compatibleCon:
   androidVersion: [15]
   gpuMode: ["host", "guest"]
 version: 1
 ```
 
-El backend solo ejecuta la integración del módulo si existe un registro de
-"usuario aceptó manifest versión N"; si el manifest sube de versión (cambia
-el disclaimer o lo que toca), se pide aceptación de nuevo. `compatibleCon`
-es lo que decide si el módulo se ofrece o no para la imagen elegida (ver
-"Tiers de soporte por imagen" en la sección 2) — si la imagen no cumple, el
-módulo no aparece como opción, con una explicación de por qué.
+The backend only runs the module's integration if there is a record of "user accepted manifest version
+N"; if the manifest goes up a version (the disclaimer or what it touches changes), acceptance is asked
+for again. `compatibleCon` is what decides whether or not the module is offered for the chosen image
+(see "Support tiers per image" in section 2) — if the image does not meet it, the module does not
+appear as an option, with an explanation of why.
 
-### Extensibilidad: módulos definidos por el usuario
+### Extensibility: user-defined modules
 
-El catálogo de módulos **no es una lista cerrada** (GApps/Magisk/wifi/GPU/
-CPU-RAM) — tiene que existir una convención genérica para que cualquiera
-agregue su propio módulo sin tocar el core, del mismo tipo que un watchdog o
-cualquier script de automatización por instancia.
+The module catalog **is not a closed list** (GApps/Magisk/wifi/GPU/CPU-RAM) — there has to be a generic
+convention so that anyone can add their own module without touching the core, of the same kind as a
+watchdog or any per-instance automation script.
 
-**Caso de referencia real:** el watchdog de CIFI (reabre un juego que
-crashea, taps por ADB, corre cada 15 min) hoy vive como script de cron +
-`flock` suelto en el host, completamente afuera de cualquier app — exacto el
-tipo de cosa que debería declararse como módulo en vez de vivir como
-infraestructura ad hoc:
+**Real reference case:** the CIFI watchdog (it reopens a game that crashes, ADB taps, runs every 15 min)
+currently lives as a loose cron script + `flock` on the host, completely outside any app — exactly the
+kind of thing that should be declared as a module instead of living as ad hoc infrastructure:
 
-- Mismo manifest de la sección anterior (nombre, descripción, qué toca) más
-  un **script/binario de entrada** que el backend invoca con contexto de la
-  instancia (puerto ADB, serial, etc.).
-- Ciclo de vida esperado: programable (periódico, como el cron actual) y
-  expone al menos pause/resume/status — igual que ya tiene
-  `cifi-watchdogctl.sh` hoy a mano.
-- Al ser código del propio usuario (no del proyecto), pasa igual por el
-  contrato de consentimiento — corre bajo su responsabilidad.
+- The same manifest as the previous section (name, description, what it touches) plus an **entry
+  script/binary** that the backend invokes with the instance's context (ADB port, serial, etc.).
+- Expected lifecycle: schedulable (periodic, like the current cron) and it exposes at least
+  pause/resume/status — just like `cifi-watchdogctl.sh` already has by hand today.
+- Being the user's own code (not the project's), it still goes through the consent contract — it runs
+  under their responsibility.
 
-**[PENDIENTE]** convención exacta: qué variables de entorno/argumentos recibe
-el script, cómo se registra el scheduling, si corre dentro del contenedor de
-la instancia o fuera, en el proceso del backend. CIFI watchdog es el caso
-piloto para validar esto en la práctica al portarlo.
+**[PENDING]** exact convention: which environment variables/arguments the script receives, how the
+scheduling is registered, whether it runs inside the instance's container or outside, in the backend
+process. The CIFI watchdog is the pilot case to validate this in practice when porting it.
 
-**Referencias de otros proyectos, para cuando se retome (sin decisión tomada
-todavía):** Home Assistant Add-ons (manifest + schema tipado de opciones +
-declaración explícita de capacidades/permisos, UI de config auto-generada);
-convención drop-in tipo `cron.d`/`sites-enabled` (carpeta autocontenida por
-módulo, sin instalación); Docker CLI plugins (binario descubierto por
-convención de nombre, contexto por flags/env); labels de Docker estilo
-Traefik/Watchtower (módulo se engancha leyendo labels del propio contenedor).
-Un "app store" comunitario estilo HACS queda para cuando haya comunidad, no
-para v1.
+**References from other projects, for when this is picked up again (no decision taken yet):** Home
+Assistant Add-ons (manifest + typed options schema + explicit declaration of capabilities/permissions,
+auto-generated config UI); the drop-in convention of the `cron.d`/`sites-enabled` kind (a self-contained
+folder per module, no installation); Docker CLI plugins (a binary discovered by naming convention,
+context via flags/env); Docker labels in the Traefik/Watchtower style (a module hooks in by reading the
+labels of the container itself). A community "app store" in the HACS style is left for when there is a
+community, not for v1.
 
-## 6. Política de licencias y contenido de terceros
+## 6. License policy and third-party content
 
-- **Nada de software de terceros dentro del código o las imágenes**, salvo que
-  sea 100% libre (licencia FOSS real, no "gratis" ni "freeware").
-- GApps, Magisk, y cualquier otro componente no libre **nunca se empaquetan**
-  — se integran en runtime como módulo externo (ver sección 5), bajo
-  consentimiento explícito del usuario, corriendo en su propia infraestructura.
-- Ningún atajo legal por comodidad: si un módulo no es libre, pasa por el
-  flujo de contrato + consentimiento sin excepción, sin importar cuánto
-  complique la UX.
-- **La regla es sobre el origen del binario, no sobre el empaquetado.** No
-  alcanza con "no lo metemos en una imagen Docker" si el binario de todas
-  formas sale de algo que aloja `redroid-forge` (un tarball propio, una
-  imagen derivada, o — el caso real encontrado el 28/09 — el propio árbol
-  fuente de AOSP que compilamos). El componente no libre siempre tiene que
-  descargarse de su fuente oficial real, en el momento en que el usuario lo
-  pide. Ver `ARQUITECTURA.md` para el modelo completo (las 6 etapas del
-  ciclo de vida de una instancia) y el caso concreto de `vendor/gapps`
-  mezclado en el source de AOSP que motivó esta aclaración.
+- **No third-party software inside the code or the images**, unless it is 100% free (a real FOSS
+  license, not "gratis" or "freeware").
+- GApps, Magisk, and any other non-free component are **never packaged** — they are integrated at
+  runtime as an external module (see section 5), under the user's explicit consent, running on their own
+  infrastructure.
+- No legal shortcut for convenience: if a module is not free, it goes through the contract + consent flow
+  without exception, no matter how much it complicates the UX.
+- **The rule is about the origin of the binary, not about the packaging.** "We don't put it in a Docker
+  image" is not enough if the binary still comes from something `redroid-forge` hosts (our own tarball,
+  a derived image, or — the real case found on 28/09 — the very AOSP source tree we compile). The
+  non-free component always has to be downloaded from its real official source, at the moment the user
+  asks for it. See [`ARCHITECTURE.md`](ARCHITECTURE.md) for the complete model (the 6 stages of an
+  instance's lifecycle) and the concrete case of `vendor/gapps` mixed into the AOSP source that
+  motivated this clarification.
 
-## 7. Autenticación e integración con Plenum / jg-dashboard
+## 7. Authentication and integration with Plenum / jg-dashboard
 
-- **Seguridad opcional** — el core funciona sin auth (para uso standalone
-  simple), igual que `redroid-manager` hoy.
-- Cuando se activa, puede consumir:
-  - Keycloak directamente.
-  - Keycloak a través de Plenum o `jg-dashboard` (SSO delegado).
-  - O el reemplazo que se elija en el futuro (no atado a Keycloak por diseño).
-- Es un *bolt-on* activado por configuración, no una dependencia oculta del
-  core (mismo principio ya acordado para `redroid-manager` con Plenum).
+- **Optional security** — the core works without auth (for simple standalone use), just like
+  `redroid-manager` today.
+- When activated, it can consume:
+  - Keycloak directly.
+  - Keycloak through Plenum or `jg-dashboard` (delegated SSO).
+  - Or whatever replacement is chosen in the future (not tied to Keycloak by design).
+- It is a *bolt-on* enabled by configuration, not a hidden dependency of the core (the same principle
+  already agreed for `redroid-manager` with Plenum).
 
-## 8. Monetización
+## 8. Monetization
 
-- **100% código abierto, licencia Apache License 2.0** — objetivo es
-  adopción/popularidad, no proteger el código. Misma familia que usa redroid
-  para su proyecto principal (consistencia con el upstream) y
-  con grant de patentes explícito, relevante por el encode/decode de video
-  por hardware (VA-API, NVENC) que toca el proyecto.
-- **Nada oculto ni necesario-pero-no-disponible**: todo lo que hace falta
-  para que el proyecto funcione completo está en el repo público.
-- Monetización vía **donaciones** y **venta de soporte** (para lo difícil o lo
-  que alguien no quiera hacer por su cuenta) — nunca features pagas, nunca
-  código premium separado.
-  - **No se avanza sobre esto todavía.** Se retoma recién en una beta 0.9,
-    cuando el proyecto esté en un punto en que se pueda decir que es
-    "razonablemente seguro" descargarlo e instalarlo.
-- Ningún flujo hace sentir al usuario "usado" — sin telemetría oculta, sin
-  fricción artificial para empujar a pagar.
-- **Tampoco se puede sentir usado/atacado ningún proyecto upstream** (redroid
-  y cualquier otro proyecto del que se use código o funcionalidad):
-  - `redroid-forge` se posiciona explícitamente como **frontend/manager
-    cómodo sobre lo que esos proyectos ya construyeron**, no como reemplazo
-    ni competencia.
-  - Reconocimiento y atribución clara y visible (README, créditos en la app,
-    licencias originales preservadas) a cada proyecto de origen.
-  - Colaborar con esos proyectos cuando tenga sentido (reportar bugs, mandar
-    PRs, avisar del proyecto) en vez de solo consumir en silencio.
+- **100% open source, Apache License 2.0** — the goal is adoption/popularity, not protecting the code.
+  The same family redroid uses for its main project (consistency with upstream) and with an explicit
+  patent grant, relevant for the hardware video encode/decode (VA-API, NVENC) the project touches.
+- **Nothing hidden or necessary-but-unavailable**: everything needed for the project to work completely
+  is in the public repo.
+- Monetization through **donations** and **selling support** (for the hard stuff or what someone does not
+  want to do on their own) — never paid features, never separate premium code.
+  - **No progress on this yet.** It is picked up only in a 0.9 beta, when the project is at a point where
+    it can be said that it is "reasonably safe" to download and install.
+- No flow makes the user feel "used" — no hidden telemetry, no artificial friction to push toward paying.
+- **No upstream project can feel used/attacked either** (redroid and any other project whose code or
+  functionality is used):
+  - `redroid-forge` is explicitly positioned as a **convenient frontend/manager on top of what those
+    projects already built**, not as a replacement or a competitor.
+  - Clear and visible recognition and attribution (README, credits in the app, original licenses
+    preserved) to every project of origin.
+  - Collaborating with those projects when it makes sense (reporting bugs, sending PRs, letting them know
+    about the project) instead of only consuming in silence.
 
-## 9. Decisiones ya tomadas
+## 9. Decisions already taken
 
-| Tema | Decisión |
+| Topic | Decision |
 |---|---|
-| Estructura de código | Monorepo |
-| Nombre | `redroid-forge` (verificado libre en GitHub, npm y Docker Hub — se descartó `jg-redroid-manager` por demasiado personal, y `redroid-manager` a secas por estar tomado y ser un espacio ya poblado) |
-| Ubicación | Repo nuevo standalone en GitHub (no dentro de Plenum) |
-| Visibilidad | **Público** (implicado por el objetivo de popularidad — ver sección 8) |
-| Versión de Android objetivo | Imágenes oficiales 11, 13 y 15 (probablemente 12 y 14); soporte completo solo en 15 = tier "oficial"; el resto "comunidad", no bloqueadas (sección 2) |
-| `jg-dashboard` | Deja de tener redroid integrado, pasa a consumir `redroid-forge`; código viejo convive hasta que el nuevo esté completo |
-| `plenum-redroid` | Misma política que `jg-dashboard` |
-| `jg-escritorio` | Fuera de alcance, no relevante para este proyecto |
-| Donaciones/soporte | Se retoma en beta 0.9, no ahora |
-| Licencia | Apache License 2.0 |
-| Contrato de módulo | Manifest estructurado (JSON/YAML) versionado por módulo, ver sección 5 |
-| Stack técnico | Node.js + Express + `dockerode`, sin build step; frontend vanilla HTML/CSS/JS |
-| CIFI | Migra de Redroid 11 a 15; entra como caso piloto de módulo de extensibilidad de usuario |
-| Imágenes base | Solo la imagen oficial de Redroid 15, sin modificar; GApps/Magisk/etc. se integran por instancia. Soporte = combinación conocida (base por digest + GApps + Magisk + módulos) en una base de datos en repo externo, actualizable, con snapshot por release (sección 2) |
-| Catálogo de módulos | No es cerrado — existe convención para módulos definidos por el usuario, ver sección 5 |
+| Code structure | Monorepo |
+| Name | `redroid-forge` (verified free on GitHub, npm and Docker Hub — `jg-redroid-manager` was discarded as too personal, and plain `redroid-manager` for being taken and an already-populated space) |
+| Location | A new standalone repo on GitHub (not inside Plenum) |
+| Visibility | **Public** (implied by the popularity goal — see section 8) |
+| Target Android version | Official images 11, 13 and 15 (probably 12 and 14); full support only on 15 = "official" tier; the rest "community", not blocked (section 2) |
+| `jg-dashboard` | Stops having redroid integrated, becomes a consumer of `redroid-forge`; the old code coexists until the new one is complete |
+| `plenum-redroid` | The same policy as `jg-dashboard` |
+| `jg-escritorio` | Out of scope, not relevant to this project |
+| Donations/support | Picked up in the 0.9 beta, not now |
+| License | Apache License 2.0 |
+| Module contract | A structured (JSON/YAML) manifest versioned per module, see section 5 |
+| Technical stack | Node.js + Express + `dockerode`, no build step; vanilla HTML/CSS/JS frontend |
+| CIFI | Migrates from Redroid 11 to 15; enters as the pilot case for the user-extensibility module |
+| Base images | Only the official Redroid 15 image, unmodified; GApps/Magisk/etc. are integrated per instance. Support = known combination (base by digest + GApps + Magisk + modules) in a database in an external repo, updatable, with a snapshot per release (section 2) |
+| Module catalog | Not closed — there is a convention for user-defined modules, see section 5 |
 
-## 10. Pendiente / abierto
+## 10. Pending / open
 
-- **[PENDIENTE] Base de datos de combinaciones conocidas** (sección 2, diseño
-  en `docs/BASE-COMBINACIONES.md`). Decidido: repo externo `redroid-forge-db`,
-  firma ed25519 (primera firma al liberar la primera versión usable
-  completa), chequeo diario y al abrir la app (aplicar es explícito). Falta:
-  formato final del archivo y el modelo de mantenimiento a escala (§6.1 del
-  doc) cuando haya más colaboradores.
-- **[PENDIENTE] Mecanismo de donaciones/soporte** — recién se decide en beta
-  0.9 (GitHub Sponsors, Open Collective, contrato de soporte directo, etc.).
-- **[PENDIENTE] Convención exacta de módulos definidos por el usuario**
-  (sección 5) — contrato de script, scheduling, contexto de instancia.
-- **[PENDIENTE] Otros proyectos "grandes" a leer más allá de los ya
-  confirmados** (fake-wifi/android-identity, host prerequisites/doctor,
-  `jg-dashboard`, `plenum-redroid`, CIFI watchdog).
+- **[PENDING] Known-combinations database** (section 2, design in
+  [`docs/KNOWN-COMBINATIONS.md`](KNOWN-COMBINATIONS.md)). Decided: external repo `redroid-forge-db`,
+  ed25519 signature (first signing when releasing the first complete usable version), a daily check and
+  on opening the app (applying is explicit). Missing: the final file format and the model of maintenance
+  at scale (§6.1 of the doc) when there are more collaborators.
+- **[PENDING] Donations/support mechanism** — decided only in the 0.9 beta (GitHub Sponsors, Open
+  Collective, a direct support contract, etc.).
+- **[PENDING] Exact convention of user-defined modules** (section 5) — script contract, scheduling,
+  instance context.
+- **[PENDING] Other "large" projects to read beyond those already confirmed** (fake-wifi/android-identity,
+  host prerequisites/doctor, `jg-dashboard`, `plenum-redroid`, the CIFI watchdog).

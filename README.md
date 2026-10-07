@@ -1,155 +1,163 @@
 # redroid-forge
 
-App standalone (frontend + backend en un solo contenedor) para manejar instancias
-[redroid](https://github.com/remote-android/redroid-doc) en cualquier PC que solo tenga Docker,
-sin depender de ninguna otra infraestructura.
+**Languages:** English | [Español](README.es.md)
 
-> Proyecto en construcción — consolida en un solo lugar varios proyectos separados
-> (`redroid-manager`, `redroid-hwenc`, `redroid-nvidia`, y lo que hoy vive repartido en
-> `jg-dashboard`/`plenum-redroid`). Ver [`docs/REQUIREMENTS.md`](docs/REQUIREMENTS.md) (qué y por
-> qué), [`docs/ARQUITECTURA.md`](docs/ARQUITECTURA.md) (cómo encajan las piezas — imagen base,
-> módulos, y en qué momento del ciclo de vida de una instancia se toca cada uno) y
-> [`docs/ROADMAP.md`](docs/ROADMAP.md) (en qué orden) para el panorama completo. Lo que
-> hay hoy corresponde a las **Fases 0, 1, 2 y 4** del roadmap: el port íntegro de
-> `redroid-manager`, tiers de soporte por imagen, el primer módulo real (hwenc) y el
-> sistema de contrato de módulo genérico.
+> This project's official language is **English**. The Spanish file is provided for convenience and
+> may not be perfectly accurate or up to date — if in doubt, this file is the source of truth.
 
-Resuelve dos cosas:
+A standalone app (frontend + backend in a single container) to manage
+[redroid](https://github.com/remote-android/redroid-doc) instances on any PC that only has Docker,
+without depending on any other infrastructure.
 
-1. **Ciclo de vida de instancias**: crear, arrancar, parar, reiniciar y borrar contenedores
-   redroid desde una UI web, incluyendo lo que no viaja con la imagen (dispositivos `binderfs`
-   por instancia, y el wiring de `mac80211_hwsim` para las imágenes con WiFi falso).
-2. **Doctor**: diagnóstico del host — muestra qué falta configurar y el comando exacto para
-   arreglarlo. Nunca ejecuta nada solo, solo diagnostica.
+> Work in progress — it consolidates several separate projects in one place (`redroid-manager`,
+> `redroid-hwenc`, `redroid-nvidia`, and what currently lives spread across
+> `jg-dashboard`/`plenum-redroid`). See [`docs/REQUIREMENTS.md`](docs/REQUIREMENTS.md) (what and
+> why), [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) (how the pieces fit together — base image,
+> modules, and at which point of an instance's lifecycle each one is touched) and
+> [`docs/ROADMAP.md`](docs/ROADMAP.md) (in what order) for the full picture. What exists today
+> covers **Phases 0, 1, 2 and 4** of the roadmap: the full port of `redroid-manager`, support tiers
+> per image, the first real module (hwenc, with hardware video **encode and decode** on AMD and
+> Intel), the generic module-contract system, and the signed known-combinations database
+> ([`docs/KNOWN-COMBINATIONS.md`](docs/KNOWN-COMBINATIONS.md)).
 
-## ⚠️ Imágenes con GApps: registrar el Android ID dentro de las 48hs
+It solves two things:
 
-Las imágenes con Google Apps (`hasGapps: true` en el catálogo) reciben un Android ID (GSF) de
-Google apenas bootean. **Si ese ID no se registra a mano en
-[google.com/android/uncertified](https://www.google.com/android/uncertified) dentro de las 48hs
-del primer boot, Google bloquea el acceso a GApps en esa instancia** — es un dispositivo no
-certificado (redroid + Magisk), y ese registro es la forma de evitar el bloqueo. No es algo que
-el código pueda hacer solo, es un paso humano.
+1. **Instance lifecycle**: create, start, stop, restart and delete redroid containers from a web
+   UI, including what does not travel with the image (per-instance `binderfs` devices, and the
+   `mac80211_hwsim` wiring for the images with fake WiFi).
+2. **Doctor**: host diagnostics — shows what is missing to configure and the exact command to fix
+   it. It never runs anything by itself, it only diagnoses.
 
-La app ayuda a que no se pase por alto:
-- La tab **Instancias** muestra el Android ID de cada instancia con GApps, con un link directo
-  para registrarlo y un botón "Ya lo registré" una vez hecho.
-- La tab **Doctor** lista como pendiente (⚠️, y ❌ si ya venció el plazo) cualquier instancia con
-  GApps sin registrar.
+## ⚠️ Images with GApps: register the Android ID within 48 hours
 
-## Módulos de terceros / no libres: contrato antes de activarlos
+Images with Google Apps (`hasGapps: true` in the catalog) receive an Android ID (GSF) from Google
+as soon as they boot. **If that ID is not registered by hand at
+[google.com/android/uncertified](https://www.google.com/android/uncertified) within 48 hours of
+the first boot, Google blocks GApps access on that instance** — it is an uncertified device
+(redroid + Magisk), and that registration is the way to avoid the block. It is not something the
+code can do on its own, it is a human step.
 
-Todo lo que no es 100% software libre (GApps, Magisk) o depende de una elección del host
-(WiFi falso, y a futuro device profile/modo GPU/CPU-RAM) se declara con un **manifest**
-versionado (`backend/src/modules/manifests/*.json`) en vez de tener su propia lógica de
-habilitación. El backend nunca crea ni arranca una instancia que requiera un módulo sin una
-aceptación vigente de su manifest — si falta, responde `428` con el contrato pendiente, el
-frontend lo muestra (mismo diálogo genérico para todos, `frontend/contracts.js`), y solo tras
-aceptarlo se reintenta. Ver la tab **Módulos** en la UI y la sección 5 de
-[`docs/REQUIREMENTS.md`](docs/REQUIREMENTS.md) para el detalle completo (incluye
-`compatibleCon`: un módulo no se ofrece si la imagen elegida no lo soporta).
+The app helps make sure it does not get overlooked:
+- The **Instances** tab shows the Android ID of every instance with GApps, with a direct link to
+  register it and an "I already registered it" button once done.
+- The **Doctor** tab lists as pending (⚠️, and ❌ if the deadline has passed) any GApps instance
+  that is not registered.
 
-## Requisitos del host
+## Third-party / non-free modules: a contract before enabling them
 
-- Docker instalado y el daemon corriendo.
-- Kernel con soporte de `binder` (estándar en kernels de Ubuntu recientes) y `binderfs`
-  montable en `/dev/binderfs`.
-- Si vas a usar imágenes con WiFi falso (`needsHwsimWifi`): módulo `mac80211_hwsim` cargable.
-- Si querés aceleración de GPU (`gpuMode=host`): drivers de GPU instalados en el host.
+Everything that is not 100% free software (GApps, Magisk) or that depends on a choice of the host
+(fake WiFi and, in the future, device profile/GPU mode/CPU-RAM) is declared with a versioned
+**manifest** (`backend/src/modules/manifests/*.json`) instead of having its own enablement logic.
+The backend never creates or starts an instance that requires a module without a current
+acceptance of its manifest — if it is missing, it answers `428` with the pending contract, the
+frontend shows it (the same generic dialog for all of them, `frontend/contracts.js`), and only
+after it is accepted is the request retried. See the **Modules** tab in the UI and section 5 of
+[`docs/REQUIREMENTS.md`](docs/REQUIREMENTS.md) for the full detail (it includes `compatibleCon`:
+a module is not offered if the chosen image does not support it).
 
-No hace falta instalar Node, sudoers especiales, ni nada más en el host — el propio contenedor
-de `redroid-forge` corre `--privileged --pid=host --network=host` y hace todo desde ahí.
+## Host requirements
 
-## Llevar la imagen redroid a esta PC
+- Docker installed and its daemon running.
+- A kernel with `binder` support (standard in recent Ubuntu kernels) and `binderfs` mountable at
+  `/dev/binderfs`.
+- If you will use images with fake WiFi (`needsHwsimWifi`): a loadable `mac80211_hwsim` module.
+- If you want GPU acceleration (`gpuMode=host`): GPU drivers installed on the host.
 
-Si la imagen se armó en otra máquina:
+There is no need to install Node, special sudoers entries, or anything else on the host — the
+`redroid-forge` container itself runs `--privileged --pid=host --network=host` and does everything
+from there.
+
+## Bringing the redroid image to this PC
+
+If the image was built on another machine:
 
 ```bash
-docker save <imagen> | gzip > imagen.tar.gz
-# copiar el archivo a esta PC, después:
-gunzip -c imagen.tar.gz | docker load
+docker save <image> | gzip > image.tar.gz
+# copy the file to this PC, then:
+gunzip -c image.tar.gz | docker load
 ```
 
-Si está pusheada a un registry propio:
+If it is pushed to your own registry:
 
 ```bash
-docker pull <tu-registry>/<imagen>
+docker pull <your-registry>/<image>
 ```
 
-El catálogo de imágenes conocidas vive en [`backend/images.json`](backend/images.json) —
-agregar ahí cualquier imagen nueva (id, tag Docker, label, `gpuMode`, `needsHwsimWifi`).
+The catalog of known images lives in [`backend/images.json`](backend/images.json) — add any new
+image there (id, Docker tag, label, `gpuMode`, `needsHwsimWifi`).
 
-## Levantar la app
+## Starting the app
 
 ```bash
 docker compose up -d --build
 ```
 
-La UI queda en `http://<ip-de-esta-pc>:8080` (o el puerto que pongas en `PORT`, ya que corre en
-`network_mode: host`). Entrar a la tab **Doctor** primero: te dice exactamente qué falta en este
-host y el comando para resolverlo antes de crear la primera instancia.
+The UI is available at `http://<this-pc-ip>:8080` (or the port you set in `PORT`, since it runs in
+`network_mode: host`). Go to the **Doctor** tab first: it tells you exactly what is missing on this
+host and the command to fix it before creating the first instance.
 
-## Ver la pantalla desde otra PC (scrcpy) — ej. una TV con una notebook vieja
+## Viewing the screen from another PC (scrcpy) — e.g. a TV with an old laptop
 
-Repo de scrcpy: https://github.com/Genymobile/scrcpy
+scrcpy repository: https://github.com/Genymobile/scrcpy
 
-Cada instancia expone su puerto ADB en el host (`adbPort` en la respuesta de
-`GET /api/instances`, el mismo que se ve en la columna "ADB" de la UI). Desde cualquier otra
-máquina en la red que tenga scrcpy y `adb`:
+Every instance exposes its ADB port on the host (`adbPort` in the `GET /api/instances` response,
+the same one shown in the "ADB" column of the UI). From any other machine on the network that has
+scrcpy and `adb`:
 
 ```bash
-adb connect <ip-del-server>:<adbPort>
-scrcpy -s <ip-del-server>:<adbPort> --audio-codec=aac
+adb connect <server-ip>:<adbPort>
+scrcpy -s <server-ip>:<adbPort> --audio-codec=aac
 ```
 
-Esto sirve para el caso de reusar una notebook vieja + TV como "cliente" liviano: la notebook
-solo corre `scrcpy` (mucho menos exigente que correr Android localmente), mientras la
-instancia real corre en un servidor con más recursos. Si la notebook es vieja y su distro trae
-una versión desactualizada de `scrcpy` en los repos (Debian, por ejemplo, solo tiene una versión
-vieja en `backports`), bajar el binario oficial más nuevo desde
-[GitHub Releases](https://github.com/Genymobile/scrcpy/releases) suele ser más simple que
-compilarlo — ojo que la versión de `scrcpy-server` tiene que coincidir exacto con la del
-cliente `scrcpy`.
+This is useful for reusing an old laptop + TV as a light "client": the laptop only runs `scrcpy`
+(far less demanding than running Android locally), while the real instance runs on a server with
+more resources. If the laptop is old and its distro ships an outdated `scrcpy` in its repositories
+(Debian, for example, only has an old version in `backports`), downloading the newest official
+binary from [GitHub Releases](https://github.com/Genymobile/scrcpy/releases) is usually simpler
+than compiling it — note that the `scrcpy-server` version must match the `scrcpy` client's version
+exactly.
 
-### Desde un celular/tablet Android en vez de una PC
+### From an Android phone/tablet instead of a PC
 
-Si el cliente que tenés a mano es un dispositivo Android (no una PC/notebook), existe un puerto
-de scrcpy que corre como app Android: **ScrcpyForAndroid**
-(https://github.com/Miuzarte/ScrcpyForAndroid). Conceptualmente es lo mismo: la app se conecta
-por red al puerto ADB de la instancia (`<ip-del-server>:<adbPort>`) y decodifica el video ahí,
-sin necesitar una PC de por medio.
+If the client you have at hand is an Android device (not a PC/laptop), there is a scrcpy port that
+runs as an Android app: **ScrcpyForAndroid** (https://github.com/Miuzarte/ScrcpyForAndroid).
+Conceptually it is the same: the app connects over the network to the instance's ADB port
+(`<server-ip>:<adbPort>`) and decodes the video there, without needing a PC in between.
 
-## Estructura
+## Layout
 
 ```
-backend/src/server.js    Express, sirve /api/* y el frontend estático
+backend/src/server.js    Express, serves /api/* and the static frontend
 backend/src/lib/          dockerRuntime, binder, hwsimWifi, androidIdentity, doctor, store,
-                           portAllocator, moduleManifests, moduleAcceptance, moduleGate, hwAccel
-backend/src/routes/       instances, doctor, images, modules
-backend/src/modules/      manifests/*.json (contrato de cada módulo, sección 5 de REQUIREMENTS.md)
-                           + hwenc/ (primer módulo real: script de integración, no solo manifest)
-backend/native/           vaapi-daemon — daemon host del módulo hwenc (ver docs/ARQUITECTURA.md)
-backend/images.json       catálogo de imágenes redroid disponibles
-backend/data/             estado persistente (instances.json, module-acceptances.json)
-backend/test/             tests del sistema de contrato de módulo (node --test, sin deps nuevas)
-frontend/                 frontend vanilla (sin build step); contracts.js = modal de contrato genérico
-docs/                     REQUIREMENTS.md (qué y por qué), ARQUITECTURA.md (cómo encajan
-                          las piezas) y ROADMAP.md (en qué orden)
+                           portAllocator, moduleManifests, moduleAcceptance, moduleGate, hwAccel,
+                           knownDb*
+backend/src/routes/       instances, doctor, images, modules, db
+backend/src/modules/      manifests/*.json (each module's contract, section 5 of REQUIREMENTS.md)
+                           + hwenc/ (first real module: integration script, not just a manifest)
+backend/native/           vaapi-daemon — host daemon of the hwenc module (see docs/ARCHITECTURE.md)
+backend/db/               bundled seed of the known-combinations database + trusted signing keys
+backend/images.json       catalog of the available redroid images
+backend/data/             persistent state (instances.json, module-acceptances.json)
+backend/test/             tests (node --test, no new dependencies)
+android/                  Codec2 components (hardware encoder/decoders) and their test tools
+frontend/                 vanilla frontend (no build step); contracts.js = generic contract modal
+docs/                     REQUIREMENTS.md (what and why), ARCHITECTURE.md (how the pieces fit
+                          together), KNOWN-COMBINATIONS.md and ROADMAP.md (in what order)
 ```
 
-## Créditos y atribución
+## Credits and attribution
 
-Este proyecto es un frontend/manager sobre lo que otros proyectos ya construyeron — no un
-reemplazo ni una competencia. Reconocimiento explícito:
+This project is a frontend/manager on top of what other projects have already built — not a
+replacement or a competitor. Explicit acknowledgement:
 
-- **[redroid](https://github.com/remote-android/redroid-doc)** (remote-android) — el propio
-  Android-en-Docker sobre el que corre todo esto. Licencia Apache License 2.0 (módulos de
-  kernel bajo GPL v2).
-- La lógica de `binder.js` y `hwsimWifi.js` está portada de `plenum-redroid`
-  (`host-resource-allocator.service.ts` y `fake-wifi-networking.service.ts`), simplificada: sin
-  los supuestos de convivencia con `jg-dashboard v1` (offset de puertos fijo, fallback de hwsim
-  deshabilitado) que no aplican en un deploy de un solo propósito como este.
+- **[redroid](https://github.com/remote-android/redroid-doc)** (remote-android) — the
+  Android-in-Docker itself that all of this runs on. Apache License 2.0 (kernel modules under
+  GPL v2).
+- The logic of `binder.js` and `hwsimWifi.js` is ported from `plenum-redroid`
+  (`host-resource-allocator.service.ts` and `fake-wifi-networking.service.ts`), simplified:
+  without the coexistence assumptions with `jg-dashboard v1` (fixed port offset, hwsim fallback
+  disabled) that do not apply in a single-purpose deploy like this one.
 
-## Licencia
+## License
 
-Apache License 2.0 — ver [`LICENSE`](LICENSE).
+Apache License 2.0 — see [`LICENSE`](LICENSE).

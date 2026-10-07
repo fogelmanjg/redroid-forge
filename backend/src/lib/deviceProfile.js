@@ -105,7 +105,7 @@ function resolveProfile(profileKey) {
 // Aplica (perfil nombrado) o revierte (profileKey=undefined/'redroid') un
 // perfil de dispositivo dentro de una instancia YA CORRIENDO -- "mount -o
 // remount,rw /" necesita el overlay que arma el init de Android, no se puede
-// hacer con el contenedor todavia detenido (etapa 4 de ARQUITECTURA.md no
+// hacer con el contenedor todavia detenido (etapa 4 de ARCHITECTURE.md no
 // aplica aca). Sigue el mismo patron que ensureWifiConnected/
 // ensureEth0Routing en hwsimWifi.js: 'su -c' para actuar como root dentro del
 // contenedor privilegiado.

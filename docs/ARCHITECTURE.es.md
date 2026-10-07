@@ -1,6 +1,12 @@
 # redroid-forge — Cómo encajan las piezas
 
-> Complementa `REQUIREMENTS.md` (qué y por qué) y `ROADMAP.md` (en qué
+**Idiomas:** [English](ARCHITECTURE.md) | Español
+
+> El idioma oficial de este proyecto es el **inglés**. Este archivo se ofrece por comodidad y puede
+> no estar perfectamente actualizado o traducido — ante cualquier duda, [ARCHITECTURE.md](ARCHITECTURE.md)
+> (inglés) es la fuente de verdad.
+
+> Complementa [`REQUIREMENTS.es.md`](REQUIREMENTS.es.md) (qué y por qué) y `ROADMAP.md` (en qué
 > orden). Este documento es el modelo mental: qué es cada pieza, dónde vive
 > físicamente, y en qué momento del ciclo de vida de una instancia se toca.
 > Pensado para cualquiera que llegue al proyecto sin el contexto de cómo se
