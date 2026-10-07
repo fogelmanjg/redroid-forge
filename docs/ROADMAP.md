@@ -260,6 +260,21 @@ conocidos (ej. el artefacto de scanline en la 4060 con el driver
    software de VP9 gana (116 contra 93 fps a 1080p) y el de HEVC empata. n02 usa un CPU de notebook y tenía su
    pila de desarrollo corriendo de fondo.
 
+   **AMD 5700G / Vega (server01, 07/10/2026): todo verificado, sin tocar producción.** Una instancia de prueba
+   (backend en el puerto 8099, adb 5700, slot de binder 5, contenedores y volumen propios) conviviendo con las 6
+   instancias del dashboard, que quedaron **idénticas** (mismos contenedores y fechas, mismo binderfs, mismos
+   puertos); al terminar se desmontó todo, incluidos los nodos de binderfs y la imagen oficial que se había
+   bajado. La 5700G registra H.264, HEVC y VP9: los tres códecs, en 8 y 10 bits, dan 0 frames distintos contra la
+   referencia, con memoria compartida y descarga directa (sin caer a ffmpeg). Solo decode, clips cortos, sin
+   scrcpy, para no cargar la GPU que comparten las instancias de producción (un reset de GPU las afectaría a
+   todas); no se midió CPU por el ruido de fondo de producción. Para convivir con otro orquestador se agregó
+   `REDROID_FORGE_BINDER_RESERVED` (lista de slots de binder a no reutilizar): el backend solo conoce los slots
+   de su propio registro y, con el registro vacío, habría elegido el slot 1 y reutilizado el binder de una
+   instancia ajena. Incidental: en esta máquina los decoders de software de Android dan 1080p distinto de la
+   referencia (los de hardware, idénticos).
+   **Plataformas verificadas: AMD Polaris (jgustavo46), Intel Iris Xe (n02) y AMD 5700G (server01).** NVIDIA
+   queda para el final, como se decidió.
+
    **Siguiente tanda del hwdecode (orden decidido 06/10/2026):**
    1. ✅ Medir tiempo por etapa (tabla de arriba). Falta el lado Android y Intel.
    2. ✅ Salida de 10 bits en el componente: HEVC Main10 y VP9 perfil 2, como 8 bits (ver hallazgo de arriba).

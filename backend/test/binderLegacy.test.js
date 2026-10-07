@@ -60,3 +60,21 @@ test('nextFreeSlot legacy: slot 0 ocupado y nada mas -> error claro', () => {
 test('nextFreeSlot binderfs: sigue siendo el proximo entero >= 1 (el 0 cuenta como usado)', () => {
   withInstances([{ binderSlot: 1 }, { binderSlot: 0 }], () => assert.strictEqual(nextFreeSlot({ legacy: false }), 2));
 });
+
+// Slots reservados para convivir con otro orquestador en el mismo host (REDROID_FORGE_BINDER_RESERVED).
+const { reservedSlots } = require('../src/lib/binder');
+
+test('reservedSlots: lee una lista separada por comas e ignora lo que no es un numero', () => {
+  assert.deepStrictEqual(reservedSlots({ REDROID_FORGE_BINDER_RESERVED: '1, 2,3,x,50,,-4' }), [1, 2, 3, 50]);
+  assert.deepStrictEqual(reservedSlots({}), []);
+});
+
+test('nextFreeSlot binderfs: salta los slots reservados por otro orquestador', () => {
+  const slot = nextFreeSlot({ legacy: false, reserved: [1, 2, 3, 4] });
+  assert.strictEqual(slot, 5);
+});
+
+test('nextFreeSlot legacy: tambien respeta los reservados', () => {
+  const slot = nextFreeSlot({ legacy: true, exists: () => true, reserved: [1, 2] });
+  assert.strictEqual(slot, 3);
+});

@@ -35,8 +35,18 @@ function ensureBinderDevice(name) {
 // numerados (1, 2, ...) y se cae al slot 0 (/dev/binder, sin sufijo) si no
 // hay otro -- caso de un host con el default `devices=binder,hwbinder,
 // vndbinder` del modulo (confirmado en n02).
-function nextFreeSlot({ legacy = useLegacyBinder(), exists = fs.existsSync } = {}) {
+// REDROID_FORGE_BINDER_RESERVED="1,2,3,50": slots que ya usa OTRO orquestador en el mismo host (ej. el dashboard
+// anterior, durante la migracion). El store de redroid-forge solo conoce sus propias instancias: sin esto, con el
+// registro vacio elegiria el slot 1 y reutilizaria el nodo binder1 de una instancia ajena, dejando dos Android
+// sobre el mismo binder.
+function reservedSlots(env = process.env) {
+  return String(env.REDROID_FORGE_BINDER_RESERVED || '')
+    .split(',').map((x) => x.trim()).filter((x) => /^\d+$/.test(x)).map(Number);
+}
+
+function nextFreeSlot({ legacy = useLegacyBinder(), exists = fs.existsSync, reserved = reservedSlots() } = {}) {
   const used = new Set(store.readAll().map((i) => i.binderSlot).filter((s) => s != null));
+  for (const r of reserved) used.add(r);
   if (!legacy) {
     let slot = 1;
     while (used.has(slot)) slot++;
@@ -91,4 +101,4 @@ function binderBinds(slot, { legacy = useLegacyBinder(), exists = fs.existsSync 
   return names.map((n, i) => `${BINDERFS_ROOT}/${n}:${targets[i]}`);
 }
 
-module.exports = { nextFreeSlot, binderBinds, useLegacyBinder, BINDERFS_ROOT };
+module.exports = { nextFreeSlot, binderBinds, useLegacyBinder, reservedSlots, BINDERFS_ROOT };
