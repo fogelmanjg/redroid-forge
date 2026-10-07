@@ -1,15 +1,15 @@
 /*
- * Cliente de prueba del paso 1 (solo para desarrollo, NO forma parte del daemon):
- * lee un archivo con libavformat, le entrega a la sesion hwdec un access unit por
- * vez (en Annex-B para H.264/HEVC, como lo hara Android), y escribe el MD5 de cada
- * frame en el orden de salida, en el mismo formato que `ffmpeg -f framemd5`
- * (la columna de md5 es comparable con la de la decodificacion por software).
+ * Test client of step 1 (for development only, NOT part of the daemon):
+ * it reads a file with libavformat, hands the hwdec session one access unit at a
+ * time (in Annex-B for H.264/HEVC, as Android will), and writes the MD5 of every
+ * frame in output order, in the same format as `ffmpeg -f framemd5`
+ * (the md5 column is comparable with that of software decoding).
  *
- *   hwdec-test --probe [nodo]
- *   hwdec-test <archivo> [nodo] [salida.md5]
- *   hwdec-test --socket <ruta> <archivo> [salida.md5]   (a traves del daemon, protocolo v2)
- *   hwdec-test --socket-probe <ruta>                     (pregunta capacidades al daemon)
- *   --twice (antes del archivo): lo decodifica dos veces en la misma sesion, con un fin de stream en el medio
+ *   hwdec-test --probe [node]
+ *   hwdec-test <file> [node] [output.md5]
+ *   hwdec-test --socket <path> <file> [output.md5]   (through the daemon, protocol v2)
+ *   hwdec-test --socket-probe <path>                  (asks the daemon for its capabilities)
+ *   --twice (before the file): decodes it twice in the same session, with an end of stream in between
  */
 #include "hwdec.h"
 #include "hwdec_client.h"
@@ -49,7 +49,7 @@ static int probe(const char *node) {
     return 0;
 }
 
-/* Dos formas de hablar con el decoder: la sesion en proceso (hwdec.c) o el daemon por socket. */
+/* Two ways of talking to the decoder: the in-process session (hwdec.c) or the daemon through a socket. */
 static HwDecClient *g_client;   /* != NULL: modo socket */
 
 static int be_send(HwDecSession *s, const uint8_t *d, size_t n, int64_t pts) {
@@ -85,7 +85,7 @@ static int drain(HwDecSession *s) {
     }
 }
 
-/* Entrega un access unit; si el decoder pide vaciar la salida, la vacia y reintenta. */
+/* Delivers one access unit; if the decoder asks to drain the output, it drains it and retries. */
 static int feed(HwDecSession *s, AVPacket *p) {
     int r;
     while ((r = be_send(s, p->data, p->size, p->pts)) == HWDEC_AGAIN) {
@@ -102,8 +102,8 @@ int main(int argc, char **argv) {
     if (argc >= 2 && !strcmp(argv[1], "--probe")) return probe(argc > 2 ? argv[2] : DEFAULT_NODE);
     if (argc >= 3 && !strcmp(argv[1], "--socket-probe")) {
         HwDecCaps c;
-        if (hwdec_client_caps(argv[2], &c) != 0) { fprintf(stderr, "el daemon no respondio\n"); return 1; }
-        printf("driver (segun el daemon): %s\n", c.driver);
+        if (hwdec_client_caps(argv[2], &c) != 0) { fprintf(stderr, "the daemon did not answer\n"); return 1; }
+        printf("driver (according to the daemon): %s\n", c.driver);
         for (int i = 0; i < HWDEC_NCODECS; i++)
             printf("  %-6s %s%s\n", hwdec_codec_name(i), c.supported[i] ? "hardware" : "-", c.supported_10bit[i] ? " (+10 bits)" : "");
         return 0;
@@ -118,19 +118,19 @@ int main(int argc, char **argv) {
 
     AVFormatContext *fmt = NULL;
     if (avformat_open_input(&fmt, path, NULL, NULL) < 0 || avformat_find_stream_info(fmt, NULL) < 0) {
-        fprintf(stderr, "no se pudo abrir %s\n", path);
+        fprintf(stderr, "could not open %s\n", path);
         return 1;
     }
     int vi = av_find_best_stream(fmt, AVMEDIA_TYPE_VIDEO, -1, -1, NULL, 0);
-    if (vi < 0) { fprintf(stderr, "sin stream de video\n"); return 1; }
+    if (vi < 0) { fprintf(stderr, "no video stream\n"); return 1; }
     AVStream *st = fmt->streams[vi];
     HwDecCodec codec;
     if (map_codec(st->codecpar->codec_id, &codec) != 0) {
-        fprintf(stderr, "codec %s sin mapeo\n", avcodec_get_name(st->codecpar->codec_id));
+        fprintf(stderr, "codec %s has no mapping\n", avcodec_get_name(st->codecpar->codec_id));
         return 1;
     }
 
-    /* H.264/HEVC en mp4 viajan en formato AVCC/HVCC: Android los entrega en Annex-B. */
+    /* H.264/HEVC in mp4 travel in AVCC/HVCC format: Android delivers them in Annex-B. */
     AVBSFContext *bsf = NULL;
     const char *bsf_name = codec == HWDEC_H264 ? "h264_mp4toannexb" : codec == HWDEC_HEVC ? "hevc_mp4toannexb" : NULL;
     if (bsf_name) {
@@ -144,13 +144,13 @@ int main(int argc, char **argv) {
     HwDecSession *s = NULL;
     if (sock) g_client = hwdec_client_open(sock, codec);
     else s = hwdec_open(node, codec);
-    if (!s && !g_client) { fprintf(stderr, "RESULTADO: el hardware no puede decodificar este stream (%s)\n", hwdec_codec_name(codec)); return 3; }
+    if (!s && !g_client) { fprintf(stderr, "RESULT: the hardware cannot decode this stream (%s)\n", hwdec_codec_name(codec)); return 3; }
 
     AVPacket *pkt = av_packet_alloc(), *out = av_packet_alloc();
     long units = 0;
-    /* --twice: se decodifica el archivo dos veces en la MISMA sesion, con un fin de stream (vaciado) en
-     * el medio. Es lo que hace Android cuando pide vaciar a mitad de video: despues del vaciado el
-     * decoder tiene que poder seguir con un stream nuevo. */
+    /* --twice: the file is decoded twice in the SAME session, with an end of stream (drain) in
+     * the middle. It is what Android does when it asks to drain halfway through a video: after the drain the
+     * decoder has to be able to continue with a new stream. */
     for (int pass = 0; pass < (g_twice ? 2 : 1); pass++) {
         if (pass > 0) {
             av_seek_frame(fmt, vi, 0, AVSEEK_FLAG_BACKWARD);
@@ -179,12 +179,12 @@ int main(int argc, char **argv) {
             }
         }
         be_eos(s);
-        /* En proceso el decoder avisa HWDEC_EOF al terminar; por socket no existe ese aviso (la respuesta
-         * al EOS ya trae todos los frames), asi que se vacia la cola UNA vez. */
+        /* In-process the decoder signals HWDEC_EOF when it finishes; through the socket that signal does not exist (the response
+         * to the EOS already carries all the frames), so the queue is drained ONCE. */
         if (g_client) drain(s);
         else while (drain(s) == HWDEC_AGAIN) {}
         if (pass == 0 && g_twice) {
-            if (g_client) { /* el daemon reinicia el decoder solo tras el EOS */ }
+            if (g_client) { /* the daemon restarts the decoder by itself after the EOS */ }
             else hwdec_flush(s);
             if (g_out) fprintf(g_out, "# --- segunda pasada ---\n");
             g_pass1_frames = g_frames;

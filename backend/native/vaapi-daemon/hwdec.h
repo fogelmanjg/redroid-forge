@@ -1,20 +1,21 @@
 /*
- * Decode por hardware vendor-agnostico (AMD/Intel via VA-API) con libavcodec.
- * Paso 1 del objetivo hwdecode (docs/ROADMAP.md, Fase 2, paso 5).
+ * Vendor-agnostic hardware decode (AMD/Intel via VA-API) with libavcodec.
+ * Step 1 of the hwdecode goal (docs/ROADMAP.md, Phase 2, step 5).
  *
- * Principios (decididos el 06/10/2026):
- *  - Se usa por hardware TODO lo que el hardware del host ofrezca: hwdec_probe()
- *    pregunta a VA-API que codecs decodifica esta GPU, y hwdec_open() solo
- *    abre sesiones para esos.
- *  - NUNCA hay fallback silencioso a software: si el hardware no puede con el
- *    stream, hwdec_open()/hwdec_receive() fallan, y quien llama (el componente
- *    Codec2 de Android) decide caer a su decoder por software.
- *  - Una sesion = un stream, con estado (referencias, reordenamiento de B-frames).
- *    Cada hwdec_send() entrega UN access unit; hwdec_receive() devuelve los
- *    frames ya reordenados, de a uno, cuando el decoder los libera.
+ * Principles (decided on 06/10/2026):
+ *  - EVERYTHING the host's hardware offers is used in hardware: hwdec_probe()
+ *    asks VA-API which codecs this GPU decodes, and hwdec_open() only opens
+ *    sessions for those.
+ *  - There is NEVER a silent fallback to software: if the hardware cannot handle
+ *    the stream, hwdec_open()/hwdec_receive() fail, and the caller (Android's
+ *    Codec2 component) decides to fall back to its software decoder.
+ *  - One session = one stream, with state (references, B-frame reordering).
+ *    Every hwdec_send() delivers ONE access unit; hwdec_receive() returns the
+ *    already reordered frames, one at a time, when the decoder releases them.
  *
- * En este paso los frames se descargan a memoria de CPU (NV12 / P010 sin padding).
- * El paso 2 sumara la exportacion sin copia (dma-buf) que hace falta para 1080p/4K.
+ * The frames are downloaded to CPU memory (compact NV12 / P010, no padding) and
+ * handed over either inline or through shared memory (see protocol.h). Zero-copy
+ * export (dma-buf), which 4K would need, is a future improvement (docs/ROADMAP.md).
  */
 #ifndef REDROID_FORGE_HWDEC_H
 #define REDROID_FORGE_HWDEC_H
@@ -33,48 +34,48 @@ typedef enum {
     HWDEC_NCODECS
 } HwDecCodec;
 
-enum { HWDEC_OK = 0, HWDEC_AGAIN = 1, HWDEC_EOF = 2 };  /* negativo = error */
-enum { HWDEC_NOSPACE = -1000 };  /* hwdec_receive_to: el frame no entra en el destino dado (se pierde) */
+enum { HWDEC_OK = 0, HWDEC_AGAIN = 1, HWDEC_EOF = 2 };  /* negative = error */
+enum { HWDEC_NOSPACE = -1000 };  /* hwdec_receive_to: the frame does not fit in the given destination (it is lost) */
 
 typedef struct {
-    int supported[HWDEC_NCODECS];  /* el hardware decodifica este codec (8 bits como minimo) */
-    int supported_10bit[HWDEC_NCODECS]; /* ademas decodifica la variante de 10 bits */
-    char driver[160];              /* cadena del driver VA-API, solo informativa */
+    int supported[HWDEC_NCODECS];  /* the hardware decodes this codec (8 bits at least) */
+    int supported_10bit[HWDEC_NCODECS]; /* it also decodes the 10-bit variant */
+    char driver[160];              /* the VA-API driver string, informative only */
 } HwDecCaps;
 
 const char *hwdec_codec_name(HwDecCodec c);
 
-/* Pregunta a VA-API (sin libavcodec) que decodifica el nodo DRM dado. 0 = ok. */
+/* Asks VA-API (without libavcodec) what the given DRM node decodes. 0 = ok. */
 int hwdec_probe(const char *drm_node, HwDecCaps *caps);
 
 typedef struct HwDecSession HwDecSession;
 
 typedef struct {
     uint32_t width, height;
-    int is_10bit;       /* 0: NV12 (8 bits), 1: P010 (10 bits en 16) */
-    int64_t pts;        /* el pts del access unit de entrada que origino este frame */
-    const uint8_t *data; /* NV12/P010 compacto; valido hasta la proxima llamada a hwdec_receive/close */
+    int is_10bit;       /* 0: NV12 (8 bits), 1: P010 (10 bits in 16) */
+    int64_t pts;        /* the pts of the input access unit that originated this frame */
+    const uint8_t *data; /* compact NV12/P010; valid until the next call to hwdec_receive/close */
     size_t size;
 } HwDecFrame;
 
-/* NULL si el hardware no soporta el codec o falla algo (el motivo va a stderr). */
+/* NULL if the hardware does not support the codec or something fails (the reason goes to stderr). */
 HwDecSession *hwdec_open(const char *drm_node, HwDecCodec codec);
 
-/* Un access unit. HWDEC_OK; HWDEC_AGAIN = hay que vaciar con hwdec_receive() y reintentar; <0 error. */
+/* One access unit. HWDEC_OK; HWDEC_AGAIN = drain with hwdec_receive() and retry; <0 error. */
 int hwdec_send(HwDecSession *s, const uint8_t *data, size_t size, int64_t pts);
 
-/* Fin de stream: despues hay que seguir llamando hwdec_receive() hasta HWDEC_EOF. */
+/* End of stream: afterwards keep calling hwdec_receive() until HWDEC_EOF. */
 int hwdec_send_eos(HwDecSession *s);
 
-/* HWDEC_OK (frame en *out), HWDEC_AGAIN (hace falta mas entrada), HWDEC_EOF, o <0. */
+/* HWDEC_OK (frame in *out), HWDEC_AGAIN (more input is needed), HWDEC_EOF, or <0. */
 int hwdec_receive(HwDecSession *s, HwDecFrame *out);
 
-/* Igual, pero el frame (NV12/P010 compacto) se escribe directamente en `dst` (de `dstcap` bytes) en vez de en el
- * buffer interno de la sesion: out->data == dst. Si no entra devuelve HWDEC_NOSPACE (el frame se pierde). Es lo
- * que permite entregar frames por memoria compartida sin una copia intermedia. */
+/* The same, but the frame (compact NV12/P010) is written directly into `dst` (of `dstcap` bytes) instead of into
+ * the session's internal buffer: out->data == dst. If it does not fit it returns HWDEC_NOSPACE (the frame is
+ * lost). It is what allows delivering frames through shared memory without an intermediate copy. */
 int hwdec_receive_to(HwDecSession *s, HwDecFrame *out, uint8_t *dst, size_t dstcap);
 
-/* Descarta referencias y salida pendiente (seek / reinicio del stream). */
+/* Discards references and pending output (seek / stream restart). */
 void hwdec_flush(HwDecSession *s);
 
 void hwdec_close(HwDecSession *s);

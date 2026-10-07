@@ -37,7 +37,7 @@ static enum AVCodecID codec_id(HwDecCodec c) {
     }
 }
 
-/* ---------------------------- probe (solo libva) ---------------------------- */
+/* ---------------------------- probe (libva only) ---------------------------- */
 
 int hwdec_probe(const char *drm_node, HwDecCaps *caps) {
     memset(caps, 0, sizeof(*caps));
@@ -46,7 +46,7 @@ int hwdec_probe(const char *drm_node, HwDecCaps *caps) {
     VADisplay dpy = vaGetDisplayDRM(fd);
     int major, minor;
     if (!dpy || vaInitialize(dpy, &major, &minor) != VA_STATUS_SUCCESS) {
-        fprintf(stderr, "hwdec_probe: vaInitialize fallo en %s\n", drm_node);
+        fprintf(stderr, "hwdec_probe: vaInitialize failed on %s\n", drm_node);
         close(fd);
         return -1;
     }
@@ -99,11 +99,11 @@ struct HwDecSession {
     AVFrame *sw;
     uint8_t *buf;
     size_t cap;
-    /* Tiempos por etapa (REDROID_FORGE_HWDEC_STATS=1), en ns. */
-    /* Como se baja el frame del GPU a RAM (REDROID_FORGE_HWDEC_DOWNLOAD): ffmpeg | getimage | derive | derive-sse */
+    /* Time per stage (REDROID_FORGE_HWDEC_STATS=1), in ns. */
+    /* How the frame is brought from the GPU to RAM (REDROID_FORGE_HWDEC_DOWNLOAD): ffmpeg | getimage | derive | derive-sse */
     int dl_mode;
-    int dl_checked;    /* el primer frame ya se comparo contra la descarga de ffmpeg */
-    VAImage img;       /* imagen de sistema reutilizada por el modo getimage */
+    int dl_checked;    /* the first frame has already been compared against ffmpeg's download */
+    VAImage img;       /* a system image reused by the getimage mode */
     int img_ok;
     int img_w, img_h;
     int stats;
@@ -119,8 +119,8 @@ static uint64_t now_ns(void) {
 
 enum { DL_FFMPEG = 0, DL_GETIMAGE, DL_DERIVE, DL_DERIVE_SSE };
 
-/* Copia filas de `rowbytes` bytes. `sse`: lectura con cargas no temporales (movntdqa), la forma de leer
- * memoria write-combining/de video sin pasar por la cache; exige origen alineado a 16 bytes. */
+/* Copies rows of `rowbytes` bytes. `sse`: reading with non-temporal loads (movntdqa), the way to read
+ * write-combining/video memory without going through the cache; it requires a 16-byte aligned source. */
 __attribute__((target("sse4.1")))
 static void copy_rows_sse(uint8_t *dst, size_t dpitch, const uint8_t *src, size_t spitch, size_t rowbytes,
                           int rows) {
@@ -149,7 +149,7 @@ static void copy_rows_plain(uint8_t *dst, size_t dpitch, const uint8_t *src, siz
     for (int y = 0; y < rows; y++) memcpy(dst + (size_t)y * dpitch, src + (size_t)y * spitch, rowbytes);
 }
 
-/* Baja la superficie a `dst` ya compacta (NV12 o P010 sin padding) con la API de VA-API directa, sin pasar por
+/* Downloads the surface into `dst`, already compact (NV12 or P010 without padding), with the direct VA-API API, without going through
  * av_hwframe_transfer_data. 0 = ok. */
 static int va_download(HwDecSession *s, VADisplay dpy, VASurfaceID surf, enum AVPixelFormat swfmt, int w, int h,
                        uint8_t *dst) {
@@ -209,7 +209,7 @@ static enum AVPixelFormat pick_vaapi(AVCodecContext *ctx, const enum AVPixelForm
     (void)ctx;
     for (const enum AVPixelFormat *p = fmts; *p != AV_PIX_FMT_NONE; p++)
         if (*p == AV_PIX_FMT_VAAPI) return *p;
-    /* Sin VAAPI no hay decode: NO se cae a software en silencio. */
+    /* Without VAAPI there is no decode: it does NOT fall back to software silently. */
     return AV_PIX_FMT_NONE;
 }
 
@@ -223,11 +223,11 @@ HwDecSession *hwdec_open(const char *drm_node, HwDecCodec codec) {
     HwDecCaps caps;
     if (hwdec_probe(drm_node, &caps) != 0) return NULL;
     if (codec < 0 || codec >= HWDEC_NCODECS || !caps.supported[codec]) {
-        fprintf(stderr, "hwdec: este hardware no decodifica %s (%s)\n", hwdec_codec_name(codec), caps.driver);
+        fprintf(stderr, "hwdec: this hardware does not decode %s (%s)\n", hwdec_codec_name(codec), caps.driver);
         return NULL;
     }
     const AVCodec *dec = avcodec_find_decoder(codec_id(codec));
-    if (!dec) { fprintf(stderr, "hwdec: libavcodec sin decoder para %s\n", hwdec_codec_name(codec)); return NULL; }
+    if (!dec) { fprintf(stderr, "hwdec: libavcodec has no decoder for %s\n", hwdec_codec_name(codec)); return NULL; }
 
     HwDecSession *s = calloc(1, sizeof(*s));
     if (!s) return NULL;
@@ -244,7 +244,7 @@ HwDecSession *hwdec_open(const char *drm_node, HwDecCodec codec) {
     if (!s->ctx) goto fail;
     s->ctx->hw_device_ctx = av_buffer_ref(s->hw_dev);
     s->ctx->get_format = pick_vaapi;
-    s->ctx->thread_count = 1; /* el trabajo pesado lo hace la GPU */
+    s->ctx->thread_count = 1; /* the GPU does the heavy lifting */
     r = avcodec_open2(s->ctx, dec, NULL);
     if (r < 0) { averr("avcodec_open2", r); goto fail; }
     s->pkt = av_packet_alloc();
@@ -260,7 +260,7 @@ fail:
 int hwdec_send(HwDecSession *s, const uint8_t *data, size_t size, int64_t pts) {
     const uint64_t t0 = s->stats ? now_ns() : 0;
     av_packet_unref(s->pkt);
-    int r = av_new_packet(s->pkt, (int)size);  /* agrega el padding que exige libavcodec */
+    int r = av_new_packet(s->pkt, (int)size);  /* adds the padding libavcodec requires */
     if (r < 0) return r;
     memcpy(s->pkt->data, data, size);
     s->pkt->pts = pts;
@@ -293,14 +293,14 @@ int hwdec_receive_to(HwDecSession *s, HwDecFrame *out, uint8_t *dst, size_t dstc
     if (r < 0) { averr("avcodec_receive_frame", r); return r; }
 
     if (s->frame->format != AV_PIX_FMT_VAAPI || !s->frame->hw_frames_ctx) {
-        fprintf(stderr, "hwdec: el frame NO vino de VA-API (formato %d): se rechaza, no hay fallback a software\n",
+        fprintf(stderr, "hwdec: the frame did NOT come from VA-API (format %d): it is rejected, there is no fallback to software\n",
                 s->frame->format);
         return -1;
     }
     AVHWFramesContext *fc = (AVHWFramesContext *)s->frame->hw_frames_ctx->data;
     enum AVPixelFormat swfmt = fc->sw_format;  /* NV12 u P010 */
     if (swfmt != AV_PIX_FMT_NV12 && swfmt != AV_PIX_FMT_P010LE) {
-        fprintf(stderr, "hwdec: formato de superficie no soportado todavia: %s\n", av_get_pix_fmt_name(swfmt));
+        fprintf(stderr, "hwdec: surface format not supported yet: %s\n", av_get_pix_fmt_name(swfmt));
         return -1;
     }
     s->sw->format = swfmt;
@@ -308,7 +308,7 @@ int hwdec_receive_to(HwDecSession *s, HwDecFrame *out, uint8_t *dst, size_t dstc
     AVVAAPIDeviceContext *vctx = hfc->device_ctx->hwctx;
     const VASurfaceID surf = (VASurfaceID)(uintptr_t)s->frame->data[3];
     if (s->stats) {
-        /* Separa la espera al GPU (el decode es asincrono) de la descarga a RAM. */
+        /* Separates the wait for the GPU (decode is asynchronous) from the download to RAM. */
         t0 = now_ns();
         vaSyncSurface(vctx->display, surf);
         s->ns_sync += now_ns() - t0;
@@ -340,13 +340,13 @@ int hwdec_receive_to(HwDecSession *s, HwDecFrame *out, uint8_t *dst, size_t dstc
         if (s->stats) s->ns_copy += now_ns() - t0;
         if (r < 0) return r;
     } else {
-        /* Descarga directa con VA-API: baja y compacta en un solo paso (cuenta como "descarga"). */
+        /* Direct download with VA-API: it downloads and compacts in a single step (it counts as "download"). */
         t0 = s->stats ? now_ns() : 0;
         r = va_download(s, vctx->display, surf, swfmt, w, h, dstbuf);
         if (s->stats) s->ns_transfer += now_ns() - t0;
-        /* Autoverificacion: el primer frame de la sesion se baja tambien por ffmpeg y se compara byte a byte.
-         * Si la descarga directa falla o difiere (driver con superficies en tiling, etc.), esta sesion vuelve al
-         * camino de ffmpeg, que es el de referencia. */
+        /* Self-check: the first frame of the session is also downloaded through ffmpeg and compared byte by byte.
+         * If the direct download fails or differs (a driver with tiled surfaces, etc.), this session goes back to the
+         * ffmpeg path, which is the reference one. */
         int ok = (r == 0);
         if (ok && !s->dl_checked) {
             s->dl_checked = 1;
@@ -356,7 +356,7 @@ int hwdec_receive_to(HwDecSession *s, HwDecFrame *out, uint8_t *dst, size_t dstc
                 rr = av_image_copy_to_buffer(ref, need, (const uint8_t *const *)s->sw->data, s->sw->linesize,
                                              swfmt, w, h, 1);
             if (rr < 0 || memcmp(ref, dstbuf, (size_t)need) != 0) {
-                fprintf(stderr, "hwdec: la descarga directa (%s) no coincide con la de ffmpeg: se usa ffmpeg\n",
+                fprintf(stderr, "hwdec: the direct download (%s) does not match ffmpeg's: ffmpeg is used\n",
                         s->dl_mode == DL_GETIMAGE ? "getimage" : s->dl_mode == DL_DERIVE ? "derive" : "derive-sse");
                 ok = 0;
                 if (rr >= 0) memcpy(dstbuf, ref, (size_t)need);
@@ -364,7 +364,7 @@ int hwdec_receive_to(HwDecSession *s, HwDecFrame *out, uint8_t *dst, size_t dstc
             free(ref);
         }
         if (!ok) {
-            fprintf(stderr, "hwdec: descarga directa no disponible: se usa av_hwframe_transfer_data\n");
+            fprintf(stderr, "hwdec: direct download not available: av_hwframe_transfer_data is used\n");
             s->dl_mode = DL_FFMPEG;
             r = av_hwframe_transfer_data(s->sw, s->frame, 0);
             if (r < 0) { averr("av_hwframe_transfer_data", r); return r; }
