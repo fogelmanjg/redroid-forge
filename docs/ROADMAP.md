@@ -1,606 +1,514 @@
-# redroid-forge — Roadmap de fases
+# redroid-forge — Phase roadmap
 
-> Complementa `REQUIREMENTS.md` (qué y por qué). Este documento es el cómo y
-> en qué orden — sin tiempos estimados, cada fase con sus pasos concretos y
-> una dificultad relativa. El **gate** es la condición para pasar a la
-> siguiente fase, no una fecha.
+**Languages:** English only. This document is the project's working log and is kept in English like the
+`DEVLOG` of `redroid-hwenc`; the stable specifications also have a Spanish copy (see the README).
 
-## Fase 0 — Bootstrap del repo
+> Complements `REQUIREMENTS.md` (what and why). This document is the how and in what order — with no
+> estimated times, every phase with its concrete steps and a relative difficulty. The **gate** is the
+> condition to move on to the next phase, not a date.
 
-**Dificultad: Baja** — todo el código ya existe y funciona, es reacomodo.
+## Phase 0 — Repo bootstrap
 
-**Pasos:**
-1. Crear el repo público en GitHub como `redroid-forge` (nombre confirmado —
-   verificado libre en GitHub, npm y Docker Hub; ya alojado en
-   `~/redroid-forge` localmente).
-2. Agregar `LICENSE` (Apache-2.0), README mínimo, sección de créditos/
-   atribución a redroid y a los proyectos de origen.
-3. Armar la estructura de monorepo (`backend/`, `frontend/`, `docs/`).
-4. Portar `redroid-manager` tal cual a esa estructura, sin reescribir
-   lógica: ciclo de vida de instancias, Doctor, registro Android ID/GApps,
-   `binder.js`/`hwsimWifi.js`/`androidIdentity.js`.
+**Difficulty: Low** — all the code already exists and works, it is rearranging.
 
-**Gate:** `docker compose up` en el repo nuevo da el mismo comportamiento
-que `redroid-manager` hoy, corriendo desde la nueva ubicación.
+**Steps:**
+1. Create the public repo on GitHub as `redroid-forge` (name confirmed — verified free on GitHub, npm
+   and Docker Hub; already hosted locally at `~/redroid-forge`).
+2. Add `LICENSE` (Apache-2.0), a minimal README, a credits/attribution section for redroid and the
+   projects of origin.
+3. Set up the monorepo structure (`backend/`, `frontend/`, `docs/`).
+4. Port `redroid-manager` as is into that structure, without rewriting logic: instance lifecycle,
+   Doctor, Android ID/GApps registration, `binder.js`/`hwsimWifi.js`/`androidIdentity.js`.
 
-## Fase 1 — Redroid 15 como tier oficial + tiers de soporte
+**Gate:** `docker compose up` in the new repo gives the same behavior as `redroid-manager` today,
+running from the new location.
 
-**Dificultad: Baja** — es sumar un campo de metadata y checks ya
-documentados, no descubrir nada nuevo. Ya no es "restringir", es declarar.
+## Phase 1 — Redroid 15 as the official tier + support tiers
 
-**Pasos:**
-1. Agregar el campo `soporte` (`oficial`/`comunidad`) a cada entrada de
-   `backend/images.json`. ✅ hecho.
-2. Portar el checklist de prerrequisitos de host (binder legacy/binderfs,
-   `loop`, `ext4`) como checks nuevos del Doctor. ✅ hecho (ext4 nuevo; el
-   fix de binderfs ahora también documenta el fallback de binder legacy).
-3. Mostrar el tier de la imagen elegida en la UI (badge oficial/comunidad).
-   ✅ hecho, en el selector de creación de instancia.
-4. Validar que el catálogo y el Doctor devuelven el tier correcto contra
-   Docker real, y que ninguna imagen queda bloqueada por versión. ✅ hecho.
-5. `compatibleCon` en el manifest de módulo (versión de Android, modo GPU)
-   **se difiere a la Fase 4** — no tiene sentido construirlo antes de que
-   exista el propio sistema de manifest/contrato que va a leerlo.
+**Difficulty: Low** — it is adding a metadata field and already-documented checks, not discovering
+anything new. It is no longer "restricting", it is declaring.
 
-**Gate:** ciclo de vida completo de una instancia Redroid 15 (tier oficial)
-funcionando de punta a punta solo con la nueva app; una instancia de
-Redroid 11/13 (tier comunidad) se puede seguir creando sin bloqueo, con el
-tier visible en la UI.
+**Steps:**
+1. Add the `soporte` field (`oficial`/`comunidad`) to every entry of `backend/images.json`. ✅ done.
+2. Port the host prerequisites checklist (legacy binder/binderfs, `loop`, `ext4`) as new Doctor checks.
+   ✅ done (ext4 is new; the binderfs fix now also documents the legacy binder fallback).
+3. Show the tier of the chosen image in the UI (official/community badge). ✅ done, in the instance
+   creation selector.
+4. Validate that the catalog and the Doctor return the right tier against real Docker, and that no image
+   is blocked by version. ✅ done.
+5. `compatibleCon` in the module manifest (Android version, GPU mode) **is deferred to Phase 4** — it
+   makes no sense to build it before the manifest/contract system that will read it exists.
 
-## Fase 2 — Aceleración por hardware (hwenc + nvidia)
+**Gate:** a complete lifecycle of a Redroid 15 instance (official tier) working end to end with only the
+new app; a Redroid 11/13 instance (community tier) can still be created without blocking, with the tier
+visible in the UI.
 
-**Dificultad: Alta** — dos daemons nativos ya complejos de por sí
-(VA-API multi-vendor, Venus-proxy, NVENC), con quirks de driver ya
-conocidos (ej. el artefacto de scanline en la 4060 con el driver
-595.91.07) que hay que preservar/no reintroducir al integrar.
+## Phase 2 — Hardware acceleration (hwenc + nvidia)
 
-**Pasos:**
-1. Portar `redroid-hwenc` (encode VA-API AMD/Intel + decode NVDEC) como
-   componente que el backend puede lanzar/monitorear por instancia.
-2. Portar `redroid-nvidia` (Venus-proxy 3D + NVENC) de la misma forma.
-3. Sumar selección de modo GPU (host/soft) y detección de vendor al flujo
-   de creación de instancia.
-4. Validar en un host AMD/Intel real y en un host NVIDIA real.
-   - ✅ **AMD Polaris (RX 480, jgustavo46) validado el 05/10/2026** con la
-     imagen oficial `redroid/redroid:15.0.0-latest` + módulo hwenc: Doctor
-     verde (binder legacy), daemon elige solo el import VA-API pre-modificador
-     (Tier 5.12), encoder `c2.hardware.encoder.h264` registrado, `screenrecord`
-     5 s = 74 frames H.264 con imagen correcta.
-   - ✅ **Intel Iris Xe (TigerLake-LP, n02) validado el 05/10/2026**, misma
-     imagen oficial + hwenc, binder legacy slot 0, instancia 1000x600 con tope
-     de 3 GB (uso real ~1,6 GB): daemon con `iHD`, `screenrecord` a MP4 = 209
-     frames H.264 válidos. Dos bugs reales encontrados y corregidos acá:
-     (1) la imagen del backend no traía `intel-media-driver` (solo
-     `mesa-va-gallium`, que cubre AMD/nouveau) y el daemon moría en
-     `vaInitialize`; (2) `iHD` emite start codes Annex-B de **3 bytes** y
-     radeonsi de 4, y el parser de CSD de `MPEG4Writer` exige 4 (abortaba con
-     `FORTIFY: write: count -1`); el daemon ahora normaliza a 4 bytes. Falta NVIDIA.
-5. **Decodificación por hardware (VA-API) en AMD e Intel** — objetivo
-   agregado el 05/10/2026 (no es un port: es trabajo nuevo), con el alcance
-   ampliado el 06/10/2026.
+**Difficulty: High** — two native daemons that are already complex on their own (multi-vendor VA-API,
+Venus-proxy, NVENC), with already-known driver quirks (e.g. the scanline artifact on the 4060 with driver
+595.91.07) that have to be preserved/not reintroduced when integrating.
 
-   **Principio (decidido 06/10/2026): cada instancia usa por hardware todo lo
-   que el hardware del host ofrezca.** No hay un paquete único de capacidades:
-   un host con Iris Xe decodifica H.264, HEVC (8/10/12 bits), VP9 y VP8; uno con
-   Polaris, H.264 y HEVC; uno con Vega/Cezanne, H.264, HEVC y VP9; hardware más
-   nuevo irá sumando (AV1, etc.). Eso es normal y se declara, no se oculta: el
-   Doctor muestra qué códecs decodifica el host por hardware, y solo se
-   registran en Android los decoders que el host soporta de verdad (mismo
-   criterio que `compatibleCon` de los módulos). **El encode no se toca por
-   ahora: se retoma después de terminar la primera versión.**
+**Steps:**
+1. Port `redroid-hwenc` (AMD/Intel VA-API encode + NVDEC decode) as a component the backend can
+   launch/monitor per instance.
+2. Port `redroid-nvidia` (Venus-proxy 3D + NVENC) the same way.
+3. Add GPU mode selection (host/soft) and vendor detection to the instance creation flow.
+4. Validate on a real AMD/Intel host and on a real NVIDIA host.
+   - ✅ **AMD Polaris (RX 480, jgustavo46) validated on 05/10/2026** with the official image
+     `redroid/redroid:15.0.0-latest` + the hwenc module: green Doctor (legacy binder), the daemon picks
+     the pre-modifier VA-API import on its own (Tier 5.12), `c2.hardware.encoder.h264` encoder
+     registered, `screenrecord` 5 s = 74 H.264 frames with a correct image.
+   - ✅ **Intel Iris Xe (TigerLake-LP, n02) validated on 05/10/2026**, the same official image + hwenc,
+     legacy binder slot 0, a 1000x600 instance capped at 3 GB (real use ~1.6 GB): daemon with `iHD`,
+     `screenrecord` to MP4 = 209 valid H.264 frames. Two real bugs found and fixed here: (1) the
+     backend's image did not ship `intel-media-driver` (only `mesa-va-gallium`, which covers
+     AMD/nouveau) and the daemon died in `vaInitialize`; (2) `iHD` emits Annex-B start codes of **3
+     bytes** and radeonsi of 4, and `MPEG4Writer`'s CSD parser requires 4 (it aborted with `FORTIFY:
+     write: count -1`); the daemon now normalizes to 4 bytes. NVIDIA is still missing.
+5. **Hardware decoding (VA-API) on AMD and Intel** — a goal added on 05/10/2026 (not a port: it is new
+   work), with the scope extended on 06/10/2026.
 
-   Hoy el daemon en AMD/Intel **solo codifica**; el único decode que existe es
-   el de NVIDIA (NVDEC vía `nvidia-vaapi-driver`, validado bit a bit solo en una
-   GTX 1050 Ti) y solo decodifica **un frame intra suelto** (SPS + PPS + un slice
-   IDR por pedido: sin referencias ni B-frames), o sea que es una prueba del
-   mecanismo, no un decoder. Punto de partida, verificado leyendo el código:
-   - `decode_h264_init()` fuerza `LIBVA_DRIVER_NAME=nvidia` y abre
-     `/dev/dri/renderD128` fijo: en AMD/Intel nunca inicializa.
-   - El módulo `hwenc` solo registra el encoder en `media_codecs.xml`, y su
-     manifest solo se ofrece para hosts `amd`/`intel` (el componente
-     `VaapiDecComponent` existe en el proyecto viejo, pero forge no lo conecta).
+   **Principle (decided 06/10/2026): every instance uses in hardware everything the host's hardware
+   offers.** There is no single capability package: a host with Iris Xe decodes H.264, HEVC (8/10/12
+   bits), VP9 and VP8; one with Polaris, H.264 and HEVC; one with Vega/Cezanne, H.264, HEVC and VP9;
+   newer hardware will keep adding (AV1, etc.). That is normal and it is declared, not hidden: the Doctor
+   shows which codecs the host decodes in hardware, and only the decoders the host really supports are
+   registered in Android (the same criterion as the modules' `compatibleCon`). **Encode is not touched
+   for now: it is picked up after finishing the first version.**
 
-   **Medido el 06/10/2026** (ffmpeg + VA-API, decode puro, `-threads 1` en
-   software; 0 frames distintos contra software en todos los casos):
-   720p30 High con B-frames: Polaris 1,77 s de CPU por software contra 0,33 s por
-   hardware; Iris Xe 4,56 s contra 0,49 s. 2160p30 10 bits (5 s): HEVC Main10 HDR10
-   Polaris ×14, Iris Xe ×22, 5700G ×7,5 (server01 cargado); VP9 perfil 2 Iris Xe
-   ×17, 5700G ×10; **VP9 no soportado en Polaris** (sin bloque de hardware). Por
-   software, 4K necesita 2 a 2,7 núcleos para ir en tiempo real; por hardware,
-   0,1 a 0,26.
+   Today the daemon on AMD/Intel **only encodes**; the only decode that exists is NVIDIA's (NVDEC via
+   `nvidia-vaapi-driver`, validated bit by bit only on a GTX 1050 Ti) and it only decodes **a single
+   loose intra frame** (SPS + PPS + one IDR slice per request: no references or B-frames), so it is a
+   proof of the mechanism, not a decoder. Starting point, verified by reading the code:
+   - `decode_h264_init()` forces `LIBVA_DRIVER_NAME=nvidia` and opens `/dev/dri/renderD128` hardcoded: on
+     AMD/Intel it never initializes.
+   - The `hwenc` module only registers the encoder in `media_codecs.xml`, and its manifest is only offered
+     for `amd`/`intel` hosts (the `VaapiDecComponent` component exists in the old project, but forge does
+     not wire it).
 
-   **Enfoque (decidido 06/10/2026): libavcodec con hwaccel VA-API dentro del
-   daemon**, no un parser H.264 propio. Cubre High, B-frames, varios slices y,
-   donde el hardware lo soporta, HEVC y VP9, sin escribir un parser por códec
-   (extender el parser propio habría sido ~1.500–2.500 líneas y solo H.264).
-   **Licencia:** el FFmpeg de Alpine se compila con `--enable-gpl
-   --enable-version3`; enlazarlo haría de la imagen una obra GPLv3, incompatible
-   con publicar una imagen Apache-2.0. Por eso el `Dockerfile` **compila su
-   propio libavcodec mínimo (LGPL, `--disable-gpl`)**, solo con los decoders y el
-   hwaccel VA-API necesarios, desde un tarball fijado por versión y `sha256`.
+   **Measured on 06/10/2026** (ffmpeg + VA-API, pure decode, `-threads 1` in software; 0 frames
+   different from software in all cases): 720p30 High with B-frames: Polaris 1.77 s of CPU in software
+   against 0.33 s in hardware; Iris Xe 4.56 s against 0.49 s. 2160p30 10-bit (5 s): HEVC Main10 HDR10
+   Polaris ×14, Iris Xe ×22, 5700G ×7.5 (server01 loaded); VP9 profile 2 Iris Xe ×17, 5700G ×10; **VP9
+   not supported on Polaris** (no hardware block). In software, 4K needs 2 to 2.7 cores to run in real
+   time; in hardware, 0.1 to 0.26.
 
-   Sub-pasos: (1) ✅ **hecho el 06/10/2026**: sesión de decode vendor-agnóstica con
-   libavcodec (`backend/native/vaapi-daemon/hwdec.c`, aún sin cablear al daemon),
-   probada solo en el host con un cliente de línea de comandos. **12 de 12 casos
-   soportados dan frames idénticos al software** (H.264 High con B-frames en 720p y
-   1080p, HEVC Main10 4K HDR10 y VP9 perfil 2 4K, en Polaris, Iris Xe y el 5700G), y
-   el único caso sin hardware (VP9 en Polaris) se rechaza sin caer a software.
-   Detalle y cómo repetirlo en el README del daemon. Pendiente de este sub-paso:
-   probar AV1 y VP8 (Iris Xe los anuncia) y medir el CPU real del decode; (2) protocolo v2 con una sesión por stream (conexión persistente atendida en su
-   propio hilo del daemon, para no bloquear al encode), un access unit por pedido, salida de
-   0 a N frames ya reordenados, flush y fin de stream, más un comando para que el backend
-   pregunte qué decodifica el host. **(2a) ✅ hecho el 06/10/2026**, solo en el host:
-   `protocol.h` (`VAAPI_CMD_HWDEC`, `VAAPI_CMD_HWDEC_CAPS`), el daemon compilado con
-   `HWDEC=1` y un cliente de referencia en C (`hwdec_client.c`) que sirve de guía para el
-   componente de Android. Verificado en Polaris, Iris Xe y el 5700G: todos los clips
-   soportados dan frames idénticos al software **a través del daemon**, dos streams
-   simultáneos corren a la vez, y un códec sin hardware (VP9 en Polaris) se rechaza.
-   **(2b) frames sin copia: pendiente, y solo si hace falta.** Los frames hoy viajan como
-   bytes (NV12/P010 compactos): hasta 1080p es barato (~93 MB/s en NV12, unos pocos % de un
-   núcleo); el copiado solo duele en 4K de 10 bits (~25 MB por frame, ~750 MB/s a 30 fps).
-   Con una pantalla de 720p o 1080p, YouTube pocas veces pide 4K, así que se mide antes de
-   construirlo. La vía natural es la inversa de la del encoder: que Android asigne el
-   buffer de salida y le pase su fd al daemon, que decodifica y blitea con VPP ahí;
-   (3) del lado de Android, componente Codec2 con salida demorada para
-   los B-frames, recompilado con AOSP, y registro dinámico en `media_codecs.xml`
-   según lo que el host soporte; (4) validar bit a bit contra software y medir
-   CPU en Polaris, Iris Xe y 5700G, con contenido real (SmartTube); (5) anotar
-   las capacidades por códec en la base de combinaciones (un `chequeo` por
-   códec, p. ej. `hwdec.h264`, `hwdec.hevc10`, `hwdec.vp9`).
+   **Approach (decided 06/10/2026): libavcodec with the VA-API hwaccel inside the daemon**, not an own
+   H.264 parser. It covers High, B-frames, multiple slices and, where the hardware supports it, HEVC and
+   VP9, without writing a parser per codec (extending the own parser would have been ~1,500–2,500 lines
+   and H.264 only). **License:** Alpine's FFmpeg is built with `--enable-gpl --enable-version3`; linking it
+   would make the image a GPLv3 work, incompatible with publishing an Apache-2.0 image. That is why the
+   `Dockerfile` **builds its own minimal libavcodec (LGPL, `--disable-gpl`)**, only with the necessary
+   decoders and the VA-API hwaccel, from a tarball pinned by version and `sha256`.
 
-   **Dificultad: Alta** — con VA-API quien decodifica tiene que armar los
-   buffers de cada frame y manejar referencias y reordenamiento, y el componente
-   Codec2 pasa de un pedido-un frame a salida demorada. **Gate propio** (no
-   bloquea el de abajo): reproducir H.264 High de 720p/1080p, y VP9/HEVC donde
-   el hardware lo soporte, en una instancia sobre AMD y sobre Intel con decode
-   por hardware, con salida equivalente a la de software y un uso de CPU
-   claramente menor.
+   Sub-steps: (1) ✅ **done on 06/10/2026**: a vendor-agnostic decode session with libavcodec
+   (`backend/native/vaapi-daemon/hwdec.c`, not wired to the daemon yet), tested only on the host with a
+   command-line client. **12 of 12 supported cases give frames identical to software** (H.264 High with
+   B-frames at 720p and 1080p, HEVC Main10 4K HDR10 and VP9 profile 2 4K, on Polaris, Iris Xe and the
+   5700G), and the only case without hardware (VP9 on Polaris) is rejected without falling back to
+   software. Detail and how to repeat it in the daemon's README. Pending in this sub-step: testing AV1
+   and VP8 (Iris Xe advertises them) and measuring the real decode CPU; (2) protocol v2 with one session
+   per stream (a persistent connection served in its own thread of the daemon, so as not to block the
+   encode), one access unit per request, output of 0 to N frames already reordered, flush and end of
+   stream, plus a command for the backend to ask what the host decodes. **(2a) ✅ done on 06/10/2026**,
+   host only: `protocol.h` (`VAAPI_CMD_HWDEC`, `VAAPI_CMD_HWDEC_CAPS`), the daemon built with `HWDEC=1`
+   and a reference client in C (`hwdec_client.c`) that serves as a guide for the Android component.
+   Verified on Polaris, Iris Xe and the 5700G: all supported clips give frames identical to software
+   **through the daemon**, two simultaneous streams run at once, and a codec without hardware (VP9 on
+   Polaris) is rejected. **(2b) zero-copy frames: pending, and only if needed.** Frames currently travel
+   as bytes (compact NV12/P010): up to 1080p it is cheap (~93 MB/s in NV12, a few % of one core); the
+   copying only hurts at 10-bit 4K (~25 MB per frame, ~750 MB/s at 30 fps). With a 720p or 1080p screen,
+   YouTube rarely asks for 4K, so it is measured before building it. The natural route is the inverse of
+   the encoder's: Android allocates the output buffer and passes its fd to the daemon, which decodes and
+   blits with VPP there; (3) on the Android side, a Codec2 component with delayed output for the
+   B-frames, rebuilt with AOSP, and dynamic registration in `media_codecs.xml` according to what the host
+   supports; (4) validate bit by bit against software and measure CPU on Polaris, Iris Xe and 5700G, with
+   real content (SmartTube); (5) record the per-codec capabilities in the combinations database (one
+   `chequeo` per codec, e.g. `hwdec.h264`, `hwdec.hevc10`, `hwdec.vp9`).
 
-   **Resultados en n02 (Iris Xe) con SmartTube, 06/10/2026** (decoders por hardware en la
-   instancia, pantalla 1280x720, scrcpy conectado a la vez): 720p y 1080p a 24 fps fluidos
-   (0 frames descartados), 720p a 60 fps AVC fluido, un H.264 a 60 fps de mayor resolución con
-   tirones (más de la mitad de los frames descartados), 2160p VP9 no llega, y **HDR (VP9
-   perfil 2, 10 bits) falla** porque el componente rechaza salida de 10 bits. El camino
-   actual hace GPU→RAM→socket→copia a gralloc→compositor (que reescala a la pantalla)
-   →conversión→encode, todo en un hilo por stream.
+   **Difficulty: High** — with VA-API, whoever decodes has to build the buffers of every frame and handle
+   references and reordering, and the Codec2 component goes from one-request-one-frame to delayed output.
+   **Its own gate** (it does not block the one below): play H.264 High at 720p/1080p, and VP9/HEVC where
+   the hardware supports it, on an instance on AMD and on Intel with hardware decode, with output
+   equivalent to software's and a clearly lower CPU use.
 
-   **Hallazgo crítico (06/10/2026): P010 reinicia Android entero en redroid.** El servicio allocator
-   de gralloc (`gralloc_gbm_bo_create`, gralloc.gbm.so) muere con SIGFPE (división por cero) al
-   asignar un buffer P010, y como el allocator es crítico, zygote y system_server se reinician: en la
-   instancia de n02 (Iris Xe) scrcpy quedó apuntando al sistema viejo y parecía colgado. Lo disparaba
-   `getHalPixelFormatForBitDepth10` / `isHalPixelFormatSupported`, que asignan un buffer de prueba. El
-   componente ya **no pide ni consulta P010**: la salida de 10 bits (HEVC Main10, VP9 perfil 2) se
-   entrega como YV12 de 8 bits con los 8 bits altos (verificado bit a bit contra ffmpeg en Polaris).
-   Sin HDR real ni rango de 10 bits, que scrcpy tampoco conserva. Pendiente: los decoders de software
-   de Android hacen la misma consulta con VP9 de 10 bits y probablemente tiren el sistema abajo en esta
-   imagen (sin probar); es un bug de gralloc de redroid para reportar upstream.
+   **Results on n02 (Iris Xe) with SmartTube, 06/10/2026** (hardware decoders in the instance, a
+   1280x720 screen, scrcpy connected at the same time): 720p and 1080p at 24 fps smooth (0 dropped
+   frames), 720p at 60 fps AVC smooth, a higher-resolution 60 fps H.264 with stutter (more than half the
+   frames dropped), 2160p VP9 does not keep up, and **HDR (VP9 profile 2, 10-bit) fails** because the
+   component rejects 10-bit output. The current path does GPU→RAM→socket→copy to
+   gralloc→compositor (which rescales to the screen)→conversion→encode, all in one thread per stream.
 
-   **Limitación conocida de esta etapa (decidida 06/10/2026):** SmartTube sigue ofreciendo en su menú
-   formatos UHD y HDR aunque la pantalla de la instancia sea de 720p y no declare HDR (no filtra por
-   pantalla). Solución provisoria: fijar en SmartTube la calidad máxima por defecto (p. ej. 1080p 60 fps
-   VP9 sin HDR), que el reproductor respeta. El HDR no se oculta a propósito: el decoder lo acepta y lo
-   entrega como 8 bits, mientras que quitar esos perfiles mandaría el video a decoders de software que
-   probablemente reinicien Android. Se revisa cuando esté el límite de resolución anunciada (punto 3).
+   **Critical finding (06/10/2026): P010 restarts the whole of Android in redroid.** Gralloc's allocator
+   service (`gralloc_gbm_bo_create`, gralloc.gbm.so) dies with SIGFPE (division by zero) when allocating
+   a P010 buffer, and since the allocator is critical, zygote and system_server restart: on the n02
+   instance (Iris Xe) scrcpy was left pointing at the old system and looked hung. It was triggered by
+   `getHalPixelFormatForBitDepth10` / `isHalPixelFormatSupported`, which allocate a test buffer. The
+   component now **neither requests nor queries P010**: 10-bit output (HEVC Main10, VP9 profile 2) is
+   delivered as 8-bit YV12 with the high 8 bits (verified bit by bit against ffmpeg on Polaris). No real
+   HDR or 10-bit range, which scrcpy does not preserve either. Pending: Android's software decoders make
+   the same query with 10-bit VP9 and will probably bring the system down on this image (untested); it
+   is a redroid gralloc bug to report upstream.
 
-   **Medición por etapa (06/10/2026, Polaris en jgustavo46, por la ruta completa de Android;
-   `REDROID_FORGE_HWDEC_STATS=1` imprime estos promedios al cerrar cada sesión).** Milisegundos por frame, lado daemon:
+   **Known limitation of this stage (decided 06/10/2026):** SmartTube keeps offering UHD and HDR formats
+   in its menu even though the instance's screen is 720p and does not declare HDR (it does not filter by
+   screen). Provisional solution: set the default maximum quality in SmartTube (e.g. 1080p 60 fps VP9
+   without HDR), which the player respects. HDR is deliberately not hidden: the decoder accepts it and
+   delivers it as 8-bit, whereas removing those profiles would send the video to software decoders that
+   would probably restart Android. It is reviewed once the advertised-resolution limit exists (point 3).
 
-   | clip | MB/frame | espera GPU (decode) | descarga GPU→RAM | copia compacta | armar cola | escritura al socket | total daemon |
+   **Per-stage measurement (06/10/2026, Polaris on jgustavo46, through the full Android path;
+   `REDROID_FORGE_HWDEC_STATS=1` prints these averages when each session closes).** Milliseconds per
+   frame, daemon side:
+
+   | clip | MB/frame | GPU wait (decode) | GPU→RAM download | compact copy | build queue | socket write | daemon total |
    |---|---|---|---|---|---|---|---|
-   | H.264 720p60 | 1,4 | 0,5 | 2,5 | 0,1 | 0,6 | 1,2 | ~5,2 (31 % de un core a 60 fps) |
-   | H.264 1080p | 3,1 | 0,7 | 4,3 | 0,2 | 0,9 | 3,2 | ~9,6 |
-   | HEVC 4K | 12,4 | 2,6 | 13,6 | 1,6 | 2,9 | 4,6 | ~26 (techo ~38 fps) |
+   | H.264 720p60 | 1.4 | 0.5 | 2.5 | 0.1 | 0.6 | 1.2 | ~5.2 (31 % of a core at 60 fps) |
+   | H.264 1080p | 3.1 | 0.7 | 4.3 | 0.2 | 0.9 | 3.2 | ~9.6 |
+   | HEVC 4K | 12.4 | 2.6 | 13.6 | 1.6 | 2.9 | 4.6 | ~26 (ceiling ~38 fps) |
 
-   **Lo que domina es la descarga GPU→RAM (50-55 %), no el decode** (0,5-2,6 ms, el GPU va sobrado). 12,4 MB en
-   13,6 ms son ~0,9 GB/s: lectura lenta de memoria de video, típica de mapear la superficie con
-   `vaDeriveImage` en una GPU discreta (la ruta de `av_hwframe_transfer_data`). Siguen las copias en CPU
-   (cola + socket + conversión en Android, en serie en un hilo) y, por último, el decode. A 60 fps el
-   presupuesto es 16,7 ms por frame: 720p y 1080p entran, 4K no. No se midió Intel (n02 pausada por RAM) ni
-   el lado Android (lectura del socket y copia al bloque), que suma al total.
+   **What dominates is the GPU→RAM download (50-55 %), not the decode** (0.5-2.6 ms, the GPU has plenty of
+   headroom). 12.4 MB in 13.6 ms is ~0.9 GB/s: slow video-memory reads, typical of mapping the surface
+   with `vaDeriveImage` on a discrete GPU (the `av_hwframe_transfer_data` route). Next come the CPU copies
+   (queue + socket + conversion in Android, serial in one thread) and, last, the decode. At 60 fps the
+   budget is 16.7 ms per frame: 720p and 1080p fit, 4K does not. Intel was not measured (n02 paused for
+   RAM) nor the Android side (socket read and copy into the block), which adds to the total.
 
-   **Descarga GPU→RAM mejorada (06/10/2026, Polaris).** Se comparó `av_hwframe_transfer_data` (ffmpeg) contra
-   `vaGetImage`, `vaDeriveImage` + copia normal y `vaDeriveImage` + cargas no temporales SSE4.1
-   (`REDROID_FORGE_HWDEC_DOWNLOAD=ffmpeg|getimage|derive|derive-sse`). Los tres modos directos dan frames
-   idénticos a ffmpeg. Descarga + copia compacta por frame y fps de punta a punta por Android:
-   720p60 2,4→1,0 ms (160→188 fps), 1080p 4,3→1,9 ms (82→134 fps), 4K 14,6→8,3 ms (31→37 fps).
-   **`derive-sse` queda por defecto**, con una autoverificación: el primer frame de cada sesión se baja
-   también por ffmpeg y se compara byte a byte; si la descarga directa falla o difiere (tiling de Intel,
-   otro driver) la sesión vuelve al camino de ffmpeg y lo avisa por stderr. **Sin probar en Intel (Iris Xe)
-   ni en el 5700G**: ahí puede caer a ffmpeg, o ganar menos, y hay que medirlo.
-   Con esto lo que queda más caro del daemon son la cola y el socket (~3 ms por frame a 1080p).
+   **Improved GPU→RAM download (06/10/2026, Polaris).** `av_hwframe_transfer_data` (ffmpeg) was compared
+   against `vaGetImage`, `vaDeriveImage` + a normal copy and `vaDeriveImage` + SSE4.1 non-temporal loads
+   (`REDROID_FORGE_HWDEC_DOWNLOAD=ffmpeg|getimage|derive|derive-sse`). The three direct modes give frames
+   identical to ffmpeg. Download + compact copy per frame and end-to-end fps through Android: 720p60
+   2.4→1.0 ms (160→188 fps), 1080p 4.3→1.9 ms (82→134 fps), 4K 14.6→8.3 ms (31→37 fps). **`derive-sse` is
+   the default**, with a self-check: the first frame of each session is also downloaded through ffmpeg and
+   compared byte by byte; if the direct download fails or differs (Intel tiling, another driver) the
+   session goes back to the ffmpeg path and reports it on stderr. **Not tested on Intel (Iris Xe) or the
+   5700G**: it may fall back to ffmpeg there, or gain less, and it has to be measured. With this, what is
+   left as the daemon's most expensive parts are the queue and the socket (~3 ms per frame at 1080p).
 
-   **Frames por memoria compartida (06/10/2026, Polaris).** El daemon crea un memfd por sesión (512 MiB
-   virtuales, solo ocupa lo que escriben los frames), lo manda por SCM_RIGHTS en la respuesta de apertura
-   (`HwDecOpenRequest.flags = VAAPI_HWDEC_OPEN_SHM`) y baja cada frame directamente ahí; el componente lo mapea
-   de solo lectura y copia de ahí al bloque de gralloc. Quedan dos copias menos por frame (la cola del daemon y
-   el `write`/`read` por el socket) y el tiempo de cola + socket pasa de ~3 ms a ~0. Sin el flag el protocolo
-   sigue siendo el inline de antes. Frames idénticos a la referencia en todos los clips (8 y 10 bits).
-   Rendimiento puro (`NO_HASH=1`, sin verificar píxeles), hardware contra el decoder de software de Android en
-   la misma máquina: H.264 720p60 431 vs 298 fps, H.264 1080p 222 vs 125, HEVC 1080p 196 vs 196, HEVC 4K 55 vs 70.
-   **El valor es el CPU que deja libre, no los fps:** CPU total del host por cada 100 frames (incluye la
-   herramienta y el framework en los dos casos): H.264 1080p 0,64 s con hardware contra 2,44 s con software
-   (3,8x menos), HEVC 1080p 0,72 contra 2,14 (3,0x menos), HEVC 4K 1,69 contra 5,62 (3,3x menos).
-   Pendiente: el `.policy` de seccomp ahora lleva `recvmsg` (no se aplica en redroid, pero sí en un dispositivo
-   real); y medir Intel y el 5700G.
+   **Frames through shared memory (06/10/2026, Polaris).** The daemon creates one memfd per session (512 MiB
+   virtual, it only occupies what the frames write), sends it through SCM_RIGHTS in the open response
+   (`HwDecOpenRequest.flags = VAAPI_HWDEC_OPEN_SHM`) and downloads every frame directly there; the component
+   maps it read-only and copies from there into the gralloc block. Two copies fewer per frame remain (the
+   daemon's queue and the `write`/`read` through the socket) and the queue + socket time goes from ~3 ms to
+   ~0. Without the flag the protocol is still the inline one as before. Frames identical to the reference in
+   all clips (8 and 10 bits). Pure performance (`NO_HASH=1`, without verifying pixels), hardware against
+   Android's software decoder on the same machine: H.264 720p60 431 vs 298 fps, H.264 1080p 222 vs 125,
+   HEVC 1080p 196 vs 196, HEVC 4K 55 vs 70. **The value is the CPU it leaves free, not the fps:** total host
+   CPU per 100 frames (it includes the tool and the framework in both cases): H.264 1080p 0.64 s with
+   hardware against 2.44 s with software (3.8x less), HEVC 1080p 0.72 against 2.14 (3.0x less), HEVC 4K 1.69
+   against 5.62 (3.3x less). Pending: the seccomp `.policy` now carries `recvmsg` (it is not enforced in
+   redroid, but it is on a real device); and measuring Intel and the 5700G.
 
-   **Validación en uso real (06/10/2026): éxito.** SmartTube en una instancia de jgustavo46 (Polaris, El Cóndor),
-   visto por scrcpy desde Patagones (dos ciudades, dos ISP, sin conexión directa de Tailscale: pasa por un relay
-   DERP), reproduciendo un video 1080p a 60 fps AVC de 7,7 Mbps de un canal de pruebas 16K: decode y encode
-   por hardware a la vez, 0 frames descartados por el reproductor, daemon con 10-20 % de un núcleo, calidad
-   impecable y un tironeo muy leve en scrcpy. Lo que queda anotado como mejora, no como bloqueo:
-   - **El encoder ignora el bitrate** (QP fijo 26, sin control de tasa; `EncodeRequest` no lo trae y el
-     componente Android no lo lee). scrcpy pide 8 Mbps y el daemon codifica a ~50 Mbps a 720p60: explica la
-     calidad tan alta y el tironeo leve por la subida remota. Solución: control CBR/VBR en el daemon (campo de
-     bitrate y fps en el protocolo, atributo de control de tasa en `vaCreateConfig`, buffers de parámetros
-     misceláneos de VA-API). Fase de encode, después de la primera versión. Prueba rápida posible: variable
-     de entorno para subir el QP.
-   - **Cuelgue intermitente del VCE de la Polaris** (`ring vce0 timeout`, atribuido a `daemon:cs0`, reset del GPU
-     con `VRAM is lost`), **2 veces en ~16 min** de reproducción 1080p60 + scrcpy (22:33 y 22:49): tras el
-     reset, surfaceflinger y systemui abortan en Mesa y Android se reinicia. En la segunda, el daemon llevaba
-     ~10 s inactivo (0 % de CPU) y se colgó con el primer frame al reanudar: sospecha de reactivación del VCE
-     tras estar inactivo (power gating) o del salto de reloj de memoria 300→2000 MHz, sin verificar. El reloj
-     bajo (300 MHz) es estable en esa GPU. Si se repite: cruzar con `pp_dpm_mclk`, probar deshabilitar el
-     power gating del VCE (`amdgpu.ppfeaturemask`) o fijar el estado de energía. Sin repro con solo decode.
-   - **El daemon no se relanzaba** tras morir (el reset del GPU lo aborta con SIGABRT: "The CS has cancelled
-     because the context is lost"), dejando sin encode ni decode a todas las instancias hasta el próximo
-     `ensureDaemonRunning()`. ✅ Hecho: supervisor en `hwAccel.js` que lo relanza con espera creciente (1 s,
-     doblando hasta 30 s; vuelve a 1 s si vivió más de un minuto). Probado matándolo con SIGKILL: vuelve en 1 s.
+   **Validation in real use (06/10/2026): success.** SmartTube on an instance of jgustavo46 (Polaris, El
+   Cóndor), viewed through scrcpy from Patagones (two cities, two ISPs, no direct Tailscale connection: it
+   goes through a DERP relay), playing a 1080p 60 fps AVC 7.7 Mbps video from a 16K test channel: hardware
+   decode and encode at the same time, 0 frames dropped by the player, the daemon at 10-20 % of a core,
+   impeccable quality and a very slight stutter in scrcpy. What is recorded as an improvement, not as a
+   blocker:
+   - **The encoder ignores the bitrate** (fixed QP 26, no rate control; `EncodeRequest` does not carry it
+     and the Android component does not read it). scrcpy asks for 8 Mbps and the daemon encodes at ~50 Mbps
+     at 720p60: it explains the very high quality and the slight stutter on the remote upload. Solution:
+     CBR/VBR control in the daemon (bitrate and fps field in the protocol, a rate-control attribute in
+     `vaCreateConfig`, VA-API miscellaneous parameter buffers). Encode phase, after the first version. A
+     possible quick test: an environment variable to raise the QP.
+   - **Intermittent hang of the Polaris VCE** (`ring vce0 timeout`, attributed to `daemon:cs0`, GPU reset with
+     `VRAM is lost`), **2 times in ~16 min** of 1080p60 playback + scrcpy (22:33 and 22:49): after the reset,
+     surfaceflinger and systemui abort in Mesa and Android restarts. On the second, the daemon had been idle
+     for ~10 s (0 % CPU) and hung with the first frame on resuming: suspected VCE reactivation after idling
+     (power gating) or the 300→2000 MHz memory clock jump, unverified. The low clock (300 MHz) is stable on
+     that GPU. If it repeats: cross-check with `pp_dpm_mclk`, try disabling the VCE power gating
+     (`amdgpu.ppfeaturemask`) or pinning the power state. No repro with decode alone.
+   - **The daemon was not relaunched** after dying (the GPU reset aborts it with SIGABRT: "The CS has
+     cancelled because the context is lost"), leaving all instances without encode or decode until the next
+     `ensureDaemonRunning()`. ✅ Done: a supervisor in `hwAccel.js` that relaunches it with increasing wait
+     (1 s, doubling up to 30 s; back to 1 s if it lived more than a minute). Tested by killing it with
+     SIGKILL: it comes back in 1 s.
 
-   **Intel Iris Xe (n02, 07/10/2026): todo verificado.** H.264 720p/1080p, HEVC 1080p, HEVC Main10, VP9 y VP9
-   perfil 2 (10 bits): frames idénticos a la referencia (0 distintos) en los tres códecs, con la memoria
-   compartida y la descarga directa por `vaDeriveImage`+SSE: **en Intel no cayó al camino de ffmpeg** (la
-   autoverificación del primer frame pasó). Bug corregido en esta prueba: el CSD de VP9 que entrega Android
-   (el `CodecPrivate` del WebM, empieza con 0x01) se anteponía al primer frame como si fueran SPS/PPS y
-   libavcodec lo rechazaba (`frame_sync_byte_0 out of range`); ahora solo H.264 y HEVC reciben la configuración
-   antepuesta. CPU total del host por 100 frames (herramienta de prueba, que además copia cada frame a un
-   ByteBuffer: un reproductor con superficie no paga eso), hardware contra el decoder de software de Android:
-   H.264 1080p 1,99 s contra 5,32 s (2,7x menos), HEVC 1080p 1,80 contra 4,87 (2,7x menos), VP9 1080p 1,72
-   contra 2,46 (1,4x menos), VP9 720p 1,02 contra 1,26 (1,2x menos). **El ahorro de VP9 es modesto**: libvpx es muy
-   eficiente y el costo fijo del camino (copiar 1,4-3 MB por frame a gralloc y el framework) pesa. En fps, el
-   software de VP9 gana (116 contra 93 fps a 1080p) y el de HEVC empata. n02 usa un CPU de notebook y tenía su
-   pila de desarrollo corriendo de fondo.
+   **Intel Iris Xe (n02, 07/10/2026): all verified.** H.264 720p/1080p, HEVC 1080p, HEVC Main10, VP9 and VP9
+   profile 2 (10-bit): frames identical to the reference (0 different) in the three codecs, with shared
+   memory and the direct download through `vaDeriveImage`+SSE: **on Intel it did not fall back to the ffmpeg
+   path** (the first-frame self-check passed). Bug fixed in this test: the VP9 CSD that Android delivers (the
+   WebM `CodecPrivate`, which starts with 0x01) was being prepended to the first frame as if it were
+   SPS/PPS and libavcodec rejected it (`frame_sync_byte_0 out of range`); now only H.264 and HEVC get the
+   configuration prepended. Total host CPU per 100 frames (test tool, which also copies every frame into a
+   ByteBuffer: a player with a surface does not pay that), hardware against Android's software decoder:
+   H.264 1080p 1.99 s against 5.32 s (2.7x less), HEVC 1080p 1.80 against 4.87 (2.7x less), VP9 1080p 1.72
+   against 2.46 (1.4x less), VP9 720p 1.02 against 1.26 (1.2x less). **The VP9 saving is modest**: libvpx is
+   very efficient and the fixed cost of the path (copying 1.4-3 MB per frame into gralloc, and the
+   framework) weighs. In fps, VP9 software wins (116 against 93 fps at 1080p) and HEVC ties. n02 uses a
+   laptop CPU and had its development stack running in the background.
 
-   **AMD 5700G / Vega (server01, 07/10/2026): todo verificado, sin tocar producción.** Una instancia de prueba
-   (backend en el puerto 8099, adb 5700, slot de binder 5, contenedores y volumen propios) conviviendo con las 6
-   instancias del dashboard, que quedaron **idénticas** (mismos contenedores y fechas, mismo binderfs, mismos
-   puertos); al terminar se desmontó todo, incluidos los nodos de binderfs y la imagen oficial que se había
-   bajado. La 5700G registra H.264, HEVC y VP9: los tres códecs, en 8 y 10 bits, dan 0 frames distintos contra la
-   referencia, con memoria compartida y descarga directa (sin caer a ffmpeg). Solo decode, clips cortos, sin
-   scrcpy, para no cargar la GPU que comparten las instancias de producción (un reset de GPU las afectaría a
-   todas); no se midió CPU por el ruido de fondo de producción. Para convivir con otro orquestador se agregó
-   `REDROID_FORGE_BINDER_RESERVED` (lista de slots de binder a no reutilizar): el backend solo conoce los slots
-   de su propio registro y, con el registro vacío, habría elegido el slot 1 y reutilizado el binder de una
-   instancia ajena. Incidental: en esta máquina los decoders de software de Android dan 1080p distinto de la
-   referencia (los de hardware, idénticos).
-   **Plataformas verificadas: AMD Polaris (jgustavo46), Intel Iris Xe (n02) y AMD 5700G (server01).** NVIDIA
-   queda para el final, como se decidió.
+   **AMD 5700G / Vega (server01, 07/10/2026): all verified, without touching production.** A test instance
+   (backend on port 8099, adb 5700, binder slot 5, its own containers and volume) coexisting with the 6
+   dashboard instances, which stayed **identical** (the same containers and dates, the same binderfs, the same
+   ports); when finished, everything was dismantled, including the binderfs nodes and the official image that
+   had been pulled. The 5700G registers H.264, HEVC and VP9: the three codecs, in 8 and 10 bits, give 0
+   frames different from the reference, with shared memory and direct download (without falling back to
+   ffmpeg). Decode only, short clips, no scrcpy, so as not to load the GPU shared with the production
+   instances (a GPU reset would affect all of them); CPU was not measured because of production's background
+   noise. To coexist with another orchestrator `REDROID_FORGE_BINDER_RESERVED` was added (a list of binder
+   slots not to reuse): the backend only knows the slots of its own registry and, with an empty registry, it
+   would have picked slot 1 and reused the binder of a foreign instance. Incidental: on this machine
+   Android's software decoders give a 1080p different from the reference (the hardware ones, identical).
+   **Verified platforms: AMD Polaris (jgustavo46), Intel Iris Xe (n02) and AMD 5700G (server01).** NVIDIA is
+   left for last, as decided.
 
-   **Siguiente tanda del hwdecode (orden decidido 06/10/2026):**
-   1. ✅ Medir tiempo por etapa (tabla de arriba). Falta el lado Android y Intel.
-   2. ✅ Salida de 10 bits en el componente: HEVC Main10 y VP9 perfil 2, como 8 bits (ver hallazgo de arriba).
-   3. **Límite de resolución anunciada = el escalón estándar (240/360/480/720/1080/1440/2160p)
-      más grande que quepa en la pantalla de la instancia, redondeando hacia abajo, con piso
-      en 720p**, y nunca por encima de lo que el hardware decodifique (eso lo informa el
-      daemon). Se aplica al crear la instancia (`media_codecs.xml` y límite de tamaño de la
-      interfaz Codec2); un cambio de pantalla pide recrear o reparchear. A comprobar con
-      SmartTube: los decoders de software siguen declarando 4K y un player que mire el
-      máximo entre todos podría seguir ofreciendo UHD.
-   4. Ganancias baratas según la medición (✅ descarga por `vaDeriveImage`+SSE hecha; ✅ memoria compartida hecha; faltan los hilos
-      en etapas y SIMD en U/V): etapas en hilos (decodificar el N+1 mientras se
-      baja y envía el N), `vaCopy` en vez de leer memoria de video con la CPU, memoria
-      compartida (memfd) en vez de socket, SIMD en la separación de U/V.
-   5. Si no alcanza, 2b (zero-copy): mantiene el frame en el GPU de punta a punta; el
-      compositor lo reescala sin pasar por la CPU. Riesgo: que el gralloc de redroid acepte el
-      formato y modificador de tiling.
-   Escalar dentro del daemon antes de bajar el frame ahorra copia pero cambia el tamaño que
-   ve la app: solo como opción explícita, nunca por defecto.
+   **Next batch of hwdecode (order decided 06/10/2026):**
+   1. ✅ Measure time per stage (table above). The Android side and Intel are missing.
+   2. ✅ 10-bit output in the component: HEVC Main10 and VP9 profile 2, as 8-bit (see the finding above).
+   3. **Advertised-resolution limit = the largest standard step (240/360/480/720/1080/1440/2160p) that fits
+      in the instance's screen, rounding down, with a floor at 720p**, and never above what the hardware
+      decodes (the daemon reports that). It is applied when the instance is created (`media_codecs.xml` and
+      the size limit of the Codec2 interface); a screen change requires recreating or re-patching. To check
+      with SmartTube: the software decoders keep declaring 4K and a player that looks at the maximum across
+      all of them could keep offering UHD.
+   4. Cheap gains according to the measurement (✅ download through `vaDeriveImage`+SSE done; ✅ shared memory
+      done; the staged threads and SIMD on U/V are missing): staged threads (decode N+1 while N is downloaded
+      and sent), `vaCopy` instead of reading video memory with the CPU, shared memory (memfd) instead of a
+      socket, SIMD in the U/V separation.
+   5. If that is not enough, 2b (zero-copy): it keeps the frame on the GPU end to end; the compositor
+      rescales it without going through the CPU. Risk: whether redroid's gralloc accepts the format and
+      tiling modifier.
+   Scaling inside the daemon before downloading the frame saves a copy but changes the size the app sees:
+   only as an explicit option, never by default.
 
-   **HDR (anotado 06/10/2026): no se conserva por scrcpy hoy, y no bloquea nada.**
-   La pantalla de redroid no declara HDR (`supportedHdrTypes=[]`, sin wide color),
-   scrcpy 4.1 no tiene opciones de HDR/10 bits, y el encoder es H.264 de 8 bits:
-   el video HDR llega como SDR. Conservarlo de punta a punta sería otro proyecto
-   (display con HDR en Android, encode HEVC Main10, un scrcpy y un cliente que lo
-   manejen). **scrcpy cambia rápido:** es un punto a **revisar periódicamente**,
-   porque una versión nueva podría cubrir parte de esto. El valor de este
-   objetivo es el ahorro de CPU y la compatibilidad de códecs, no la fidelidad HDR.
+   **HDR (noted 06/10/2026): it is not preserved through scrcpy today, and it blocks nothing.** Redroid's
+   screen does not declare HDR (`supportedHdrTypes=[]`, no wide color), scrcpy 4.1 has no HDR/10-bit
+   options, and the encoder is 8-bit H.264: HDR video arrives as SDR. Preserving it end to end would be
+   another project (an HDR display in Android, HEVC Main10 encode, a scrcpy and a client that handle it).
+   **scrcpy changes fast:** it is a point to **review periodically**, because a new version could cover part
+   of this. The value of this goal is the CPU saving and codec compatibility, not HDR fidelity.
 
-**Gate:** una instancia creada desde `redroid-forge` reproduce el mismo
-comportamiento de aceleración ya validado por separado, en al menos un host
-AMD/Intel y uno NVIDIA reales.
+**Gate:** an instance created from `redroid-forge` reproduces the same acceleration behavior already
+validated separately, on at least one real AMD/Intel host and one real NVIDIA host.
 
-## Fase 3 — WiFi falso + device profile spoofing
+## Phase 3 — Fake WiFi + device profile spoofing
 
-**Dificultad: Media** — código ya escrito y probado en otro lado
-(`jg-dashboard`), el trabajo es portarlo y adaptar las rutas de
-`build.prop` que ya se sabe que varían por imagen.
+**Difficulty: Medium** — code already written and tested elsewhere (`jg-dashboard`); the work is porting it
+and adapting the `build.prop` paths that are already known to vary per image.
 
-**Pasos:**
-1. Portar `DEVICE_PROFILES`/`buildDeviceProfileScript` de `jg-dashboard`
-   (`redroid.service.ts`) al nuevo backend. ✅ hecho —
-   `backend/src/lib/deviceProfile.js` (perfil `samsung`, revert a `redroid`
-   restaurando desde backup), cableado en
-   `POST /instances/:id/device-profile` (gateado por su manifest, ver
-   `assertDeviceProfileReady` en `routes/instances.js` — es opt-in por
-   request, no un modulo requerido por ninguna imagen, así que no pasa por
-   `moduleGate.check` sino por `moduleAcceptance.isAccepted` directo).
-   Cobertura en `backend/test/deviceProfile.test.js`.
-2. Confirmar que el WiFi falso portado en la Fase 0 sigue íntegro. ✅ hecho —
-   mismo comportamiento y mensajes de log que antes, cubierto por los tests
-   existentes de `hwsimWifi.js` más los nuevos de concurrencia (paso 4).
-3. Validar aplicar/revertir un perfil (ej. `samsung`) desde la UI nueva.
-   **[PENDIENTE]** — no se sumó UI todavía (esta ronda de trabajo se limitó
-   al endpoint HTTP), y de cualquier forma esto necesita un host con Docker
-   real para validarse, no disponible en el entorno donde se hizo este
-   port.
-4. **Arreglar la race condition conocida de `ensureHwsimWifi`**. ✅ hecho en
-   código — `hwsimWifi.js` ahora serializa cada reclamo de par phy/iface a
-   través de una cola de promesas a nivel de módulo (`hwsimClaimTail`/
-   `runHwsimClaim`), con la misma nuance de "no recargar `mac80211_hwsim` si
-   otra instancia todavía tiene phys en uso". **Corrección sobre esta misma
-   entrada:** al escribir el código se buscó el método de referencia
-   `claimHwsimPhyPair`/`hwsimClaimTail` que esta entrada decía que ya existía
-   en `jg-dashboard/redroid.service.ts` — **no existe ahí** (se clonó el repo
-   y se revisó el archivo completo). Lo que sí existe en ese archivo es la
-   nuance de "0 phys libres, ¿alguna otra instancia los está usando?" dentro
-   de `ensureHwsimWifi` (sin cola/serialización — ese archivo tiene la misma
-   race hoy) y el patrón general de cola-de-promesas a nivel de servicio
-   (`bootQueueTail`, usado para otra cosa, el orden de arranque). El fix acá
-   se diseñó aplicando ese mismo patrón al problema de hwsim, no copiando un
-   método que no existe. **Validado solo con test unitario mockeado**
-   (`backend/test/hwsimWifiConcurrency.test.js` — mockea
-   `child_process.execFile`/`dockerRuntime`, simula 2 llamadas concurrentes
-   contra un estado de host compartido y verifica reclamos disjuntos);
-   **todavía no probado contra una race real de arranque dual de instancias
-   en hardware**, eso queda pendiente antes de confiar en esto en producción.
+**Steps:**
+1. Port `DEVICE_PROFILES`/`buildDeviceProfileScript` from `jg-dashboard` (`redroid.service.ts`) to the new
+   backend. ✅ done — `backend/src/lib/deviceProfile.js` (`samsung` profile, revert to `redroid` restoring
+   from backup), wired into `POST /instances/:id/device-profile` (gated by its manifest, see
+   `assertDeviceProfileReady` in `routes/instances.js` — it is opt-in per request, not a module required by
+   any image, so it does not go through `moduleGate.check` but through `moduleAcceptance.isAccepted`
+   directly). Coverage in `backend/test/deviceProfile.test.js`.
+2. Confirm that the fake WiFi ported in Phase 0 remains intact. ✅ done — the same behavior and log messages
+   as before, covered by the existing `hwsimWifi.js` tests plus the new concurrency ones (step 4).
+3. Validate applying/reverting a profile (e.g. `samsung`) from the new UI. **[PENDING]** — no UI has been
+   added yet (this round of work was limited to the HTTP endpoint), and in any case this needs a host with
+   real Docker to be validated, not available in the environment where this port was done.
+4. **Fix the known race condition of `ensureHwsimWifi`**. ✅ done in code — `hwsimWifi.js` now serializes
+   every claim of a phy/iface pair through a module-level promise queue (`hwsimClaimTail`/`runHwsimClaim`),
+   with the same nuance of "do not reload `mac80211_hwsim` if another instance still has phys in use".
+   **Correction to this very entry:** when writing the code, the reference method
+   `claimHwsimPhyPair`/`hwsimClaimTail` that this entry said already existed in
+   `jg-dashboard/redroid.service.ts` was looked for — **it does not exist there** (the repo was cloned and
+   the whole file reviewed). What does exist in that file is the nuance of "0 free phys, is any other
+   instance using them?" inside `ensureHwsimWifi` (with no queue/serialization — that file has the same
+   race today) and the general promise-queue pattern at service level (`bootQueueTail`, used for something
+   else, the startup order). The fix here was designed by applying that same pattern to the hwsim problem,
+   not by copying a method that does not exist. **Validated only with a mocked unit test**
+   (`backend/test/hwsimWifiConcurrency.test.js` — it mocks `child_process.execFile`/`dockerRuntime`,
+   simulates 2 concurrent calls against a shared host state and verifies disjoint claims); **not yet tested
+   against a real dual-instance startup race on hardware**, which remains pending before trusting this in
+   production.
 
-**Gate:** el spoof de perfil se puede aplicar/revertir desde la UI nueva,
-con los archivos de `build.prop` correctos según la imagen, y reiniciar dos
-o más instancias con WiFi falso al mismo tiempo no deja ninguna sin radios.
-**Parcial:** el fix de concurrencia y el spoof de perfil (vía API) están
-hechos y con test unitario; falta la UI (paso 3) y la validación en
-hardware real con dos instancias arrancando/reiniciando a la vez para poder
-cerrar el gate por completo.
+**Gate:** the profile spoof can be applied/reverted from the new UI, with the correct `build.prop` files
+according to the image, and restarting two or more instances with fake WiFi at the same time leaves none
+without radios. **Partial:** the concurrency fix and the profile spoof (via API) are done and have a unit
+test; the UI (step 3) and the validation on real hardware with two instances starting/restarting at once
+are missing to close the gate completely.
 
-## Fase 4 — Sistema de contrato de módulo (genérico)
+## Phase 4 — Generic module contract system
 
-**Dificultad: Media** — diseño nuevo, pero acotado: un schema de manifest,
-un modal genérico, y un registro de versión aceptada. No hay ambigüedad de
-alcance, solo hay que construirlo.
+**Difficulty: Medium** — new design, but bounded: a manifest schema, a generic modal, and a record of the
+accepted version. There is no ambiguity of scope, it only has to be built.
 
-**Pasos:**
-1. Definir el schema del manifest (sección 5 de `REQUIREMENTS.md`). ✅ hecho
-   — validador a mano (sin sumar dependencia de JSON Schema) en
-   `backend/src/lib/moduleManifests.js`, un manifest JSON por módulo en
+**Steps:**
+1. Define the manifest schema (section 5 of `REQUIREMENTS.md`). ✅ done — a hand-written validator (without
+   adding a JSON Schema dependency) in `backend/src/lib/moduleManifests.js`, one JSON manifest per module in
    `backend/src/modules/manifests/`.
-2. Construir el modal de contrato genérico que lo renderiza (frontend). ✅
-   hecho — `frontend/contracts.js`, un solo diálogo para los 6 módulos.
-3. Implementar el registro de aceptación por versión en el backend, y el
-   bloqueo de ejecución sin aceptación vigente. ✅ hecho —
-   `backend/src/lib/moduleAcceptance.js` (registro) +
-   `backend/src/lib/moduleGate.js` (bloqueo), enganchado en
-   create/start/restart de `routes/instances.js`. Sin auth todavía (Fase 6),
-   la aceptación vale para toda la instalación, no por usuario.
-4. Retrofit: pasar GApps, Magisk, WiFi falso, device profile, modo GPU,
-   CPU/RAM a este contrato genérico en vez de toggles ad hoc. ⚠️ parcial —
-   GApps y WiFi falso (que sí tenían lógica de habilitación ad hoc atada a
-   flags de imagen) están retrofiteados y gateados; Magisk suma su flag
-   (`hasMagisk`) y pasa por el mismo gate por primera vez. Device profile,
-   modo GPU y CPU/RAM **no tenían ninguna lógica de ejecución portada
-   todavía** (siguen pendientes de las Fases 2/3) — tienen su manifest y ya
-   son consultables via `GET /api/modules` (incluyendo `compatibleCon`),
-   listos para engancharse a `moduleGate` en cuanto exista su ejecución real.
-5. Implementar `compatibleCon` (diferido de la Fase 1): el manifest declara
-   versión de Android/modo GPU compatible, y el backend no ofrece el módulo
-   si la imagen elegida no cumple. ✅ hecho —
-   `moduleManifests.isCompatible`/`incompatibilityReason`, reutilizando los
-   campos `androidVersion`/`gpuMode` que el catálogo ya tiene desde la Fase
-   1 (sin duplicar esa metadata). `moduleGate.check` lo aplica antes de
-   crear/arrancar; `GET /api/modules?imageId=` lo expone para que un futuro
-   selector de módulos opcionales lo consulte.
+2. Build the generic contract modal that renders it (frontend). ✅ done — `frontend/contracts.js`, a single
+   dialog for the 6 modules.
+3. Implement the per-version acceptance record in the backend, and the blocking of execution without a
+   current acceptance. ✅ done — `backend/src/lib/moduleAcceptance.js` (record) +
+   `backend/src/lib/moduleGate.js` (blocking), hooked into create/start/restart of `routes/instances.js`.
+   With no auth yet (Phase 6), the acceptance holds for the whole installation, not per user.
+4. Retrofit: move GApps, Magisk, fake WiFi, device profile, GPU mode, CPU/RAM to this generic contract
+   instead of ad hoc toggles. ⚠️ partial — GApps and fake WiFi (which did have ad hoc enablement logic tied
+   to image flags) are retrofitted and gated; Magisk adds its flag (`hasMagisk`) and goes through the same
+   gate for the first time. Device profile, GPU mode and CPU/RAM **had no execution logic ported yet**
+   (they remain pending from Phases 2/3) — they have their manifest and can already be queried via `GET
+   /api/modules` (including `compatibleCon`), ready to be hooked to `moduleGate` as soon as their real
+   execution exists.
+5. Implement `compatibleCon` (deferred from Phase 1): the manifest declares the compatible Android
+   version/GPU mode, and the backend does not offer the module if the chosen image does not meet it. ✅ done
+   — `moduleManifests.isCompatible`/`incompatibilityReason`, reusing the `androidVersion`/`gpuMode` fields
+   the catalog has had since Phase 1 (without duplicating that metadata). `moduleGate.check` applies it
+   before creating/starting; `GET /api/modules?imageId=` exposes it so that a future optional-module
+   selector can query it.
 
-**Gate:** activar GApps (caso de referencia no libre) exige leer y aceptar
-un contrato generado desde manifest antes de que el backend ejecute nada.
+**Gate:** activating GApps (the non-free reference case) requires reading and accepting a contract generated
+from a manifest before the backend runs anything.
 
-## Fase 5 — Módulos definidos por el usuario + piloto CIFI
+## Phase 5 — User-defined modules + CIFI pilot
 
-**Dificultad: Alta** — no hay convención previa dentro del proyecto para
-esto (es diseño desde cero, aunque con referencias externas), y el caso
-piloto (CIFI) es un script con bugs sutiles ya conocidos (herencia de lock
-de `adb` tras reboot) que hay que no reintroducir al migrarlo.
+**Difficulty: High** — there is no prior convention inside the project for this (it is design from
+scratch, although with external references), and the pilot case (CIFI) is a script with known subtle bugs
+(inheritance of the `adb` lock after reboot) that must not be reintroduced when migrating it.
 
-**Pasos:**
-0. ⬜ Abierto — **Base de datos de combinaciones conocidas + módulos
-   GApps/Magisk sobre la imagen oficial** (decisión 05/10/2026, ver
-   `REQUIREMENTS.md` sección 2). Reemplaza a las imágenes custom del catálogo
-   (`gapps-official`, `wifi-v3`): la base es la imagen oficial fijada por
-   digest, y GApps/Magisk se inyectan por instancia desde paquetes con
-   versión y `sha256` conocidos, verificados antes de usarse. Incluye: formato
-   de la base, snapshot incluido en cada release, actualización opcional desde
-   el repo externo con verificación, y tier "sin soporte" para lo que no esté
-   en la base.
-   Diseño en `docs/BASE-COMBINACIONES.md` (plan de 7 sub-pasos). Sub-paso 1
-   ✅ hecho: núcleo puro `backend/src/lib/knownDb.js` (validación, resolución
-   de soporte, `serial` anti-rollback, firma ed25519) + snapshot semilla
-   `backend/db/snapshot.json` + tests. **Todavía no está cableado** a la
-   creación de instancias. Sub-paso 2 ✅ hecho: API de solo lectura
-   (`/api/db`, `/api/db/combinaciones`), carga por `serial` con fallback
-   (`knownDbStore.js`) y check en el Doctor; snapshot en `serial` 2 con la
-   validación de Intel Iris Xe. Sub-paso 3 ✅ hecho: descarga + verificación de firma
-   ed25519 + anti-rollback + actualización atómica (`knownDbUpdate.js`) y
-   herramienta de firma `backend/scripts/db-sign.js`. Clave del mantenedor
-   generada el 05/10/2026 (`backend/db/trusted-keys.json`) y repo
-   `fogelmanjg/redroid-forge-db` creado; sin claves de confianza no se consulta
-   ni aplica nada. Las imágenes que usa el redroid de `jg-dashboard` se siguen
-   manteniendo allá, pero no son relevantes para `redroid-forge`: son
-   proyectos separados y no tienen que ser compatibles entre sí.
-1. ✅ **Hecho, parcial** — Diseñada e implementada la convención para
-   módulos con lógica de ejecución ligada al **ciclo de vida de una
-   instancia** (etapas 3-6, ver `docs/ARQUITECTURA.md` sección "Fase 5: el
-   runner genérico y la convención `etapa`/`entry`"): manifest con
-   `etapa`/`entry`, `entry` resuelto relativo a la carpeta del módulo, un
-   nombre de export fijo por etapa (`prepareCreate`/`integrate`/
-   `ensureHostInfraReady`/`ensureRuntimeReady`). **No** es todavía la
-   convención de "módulo de usuario" que pide este paso originalmente
-   (schedule periódico tipo cron + pause/resume/status, referencia CIFI) —
-   esa sigue sin diseñarse. Lo que se resolvió es el caso más urgente y ya
-   real del proyecto: `hwenc` (Fase 2) tenía lógica de integración escrita
-   pero cableada a mano en `instances.js`, sin ningún punto de enganche
-   genérico.
-2. ✅ **Hecho para el mecanismo de ciclo de vida, abierto para scheduling
-   persistente** — `backend/src/lib/moduleRunner.js` orquesta las etapas
-   3-6 desde `instances.js` (create/start/restart), reemplazando el casing
-   especial de `hwenc`/`hwAccel` que existía ahí. Lo que sigue sin
-   implementar: el mecanismo de **scheduling periódico** (correr cada N
-   minutos, pause/resume/status persistente) que pide este paso para
-   watchdogs tipo CIFI — el runner de esta fase resuelve "qué corre en el
-   momento de crear/arrancar una instancia", no "qué corre en loop mientras
-   la instancia vive".
-3. ⬜ Abierto — Portar el watchdog de CIFI sobre Redroid 15 usando la
-   convención de scheduling (todavía sin diseñar, ver paso 2), en reemplazo
-   del script de cron + `flock` actual. **No** se tocó en esta iteración.
-4. ⬜ Abierto — Validar en vivo varios días sin reaparición del bug de lock
-   heredado. Requiere hardware real y días de observación; no intentado acá.
-5. ⬜ Abierto — Segundo piloto, mismo mecanismo: el watchdog persistente de
-   reconexión de WiFi falso (hoy vive hardcodeado en `jg-dashboard`, ver
-   `claimHwsimPhyPair`/`wifiWatchdogs` en `redroid.service.ts`) migra a
-   módulo-script en vez de portarse tal cual.
+**Steps:**
+0. ⬜ Open — **Known-combinations database + GApps/Magisk modules on top of the official image** (decision
+   05/10/2026, see `REQUIREMENTS.md` section 2). It replaces the catalog's custom images (`gapps-official`,
+   `wifi-v3`): the base is the official image pinned by digest, and GApps/Magisk are injected per instance
+   from packages with a known version and `sha256`, verified before use. It includes: the database format,
+   a snapshot included in every release, an optional update from the external repo with verification, and
+   an "unsupported" tier for whatever is not in the database. Design in `docs/KNOWN-COMBINATIONS.md` (a
+   7-sub-step plan). Sub-step 1 ✅ done: the pure core `backend/src/lib/knownDb.js` (validation, support
+   resolution, anti-rollback `serial`, ed25519 signature) + the seed snapshot `backend/db/snapshot.json` +
+   tests. **It is not yet wired** into instance creation. Sub-step 2 ✅ done: a read-only API (`/api/db`,
+   `/api/db/combinaciones`), loading by `serial` with a fallback (`knownDbStore.js`) and a Doctor check;
+   snapshot at `serial` 2 with the Intel Iris Xe validation. Sub-step 3 ✅ done: download + ed25519
+   signature verification + anti-rollback + atomic update (`knownDbUpdate.js`) and the signing tool
+   `backend/scripts/db-sign.js`. The maintainer's key was generated on 05/10/2026
+   (`backend/db/trusted-keys.json`) and the `fogelmanjg/redroid-forge-db` repo was created; without trusted
+   keys nothing is queried or applied. The images used by `jg-dashboard`'s redroid keep being maintained
+   there, but are not relevant to `redroid-forge`: they are separate projects and do not have to be
+   compatible with each other.
+1. ✅ **Done, partial** — Designed and implemented the convention for modules with execution logic tied to
+   the **lifecycle of an instance** (stages 3-6, see `docs/ARCHITECTURE.md` section "Phase 5: the generic
+   runner and the `etapa`/`entry` convention"): a manifest with `etapa`/`entry`, `entry` resolved relative
+   to the module's folder, a fixed export name per stage (`prepareCreate`/`integrate`/
+   `ensureHostInfraReady`/`ensureRuntimeReady`). It is **not** yet the "user module" convention this step
+   originally asks for (periodic cron-style schedule + pause/resume/status, CIFI reference) — that one is
+   still undesigned. What was solved is the most urgent and already real case of the project: `hwenc`
+   (Phase 2) had integration logic written but wired by hand in `instances.js`, without any generic hook
+   point.
+2. ✅ **Done for the lifecycle mechanism, open for persistent scheduling** —
+   `backend/src/lib/moduleRunner.js` orchestrates stages 3-6 from `instances.js` (create/start/restart),
+   replacing the special-casing of `hwenc`/`hwAccel` that existed there. What remains unimplemented: the
+   **periodic scheduling** mechanism (run every N minutes, persistent pause/resume/status) that this step
+   asks for CIFI-style watchdogs — this phase's runner solves "what runs at the moment of creating/starting
+   an instance", not "what runs in a loop while the instance lives".
+3. ⬜ Open — Port the CIFI watchdog on Redroid 15 using the scheduling convention (still undesigned, see
+   step 2), replacing the current cron script + `flock`. **Not** touched in this iteration.
+4. ⬜ Open — Validate live for several days with no reappearance of the inherited-lock bug. It requires real
+   hardware and days of observation; not attempted here.
+5. ⬜ Open — A second pilot, the same mechanism: the persistent fake-WiFi reconnection watchdog (today
+   hardcoded in `jg-dashboard`, see `claimHwsimPhyPair`/`wifiWatchdogs` in `redroid.service.ts`) migrates
+   to a script-module instead of being ported as is.
 
-**Además de lo pedido originalmente en los pasos 1-2** (efecto colateral
-positivo de dejar el runner de ciclo de vida bien genérico, no ad hoc para
-hwenc): `moduleGate.requiredModuleIdsForImage` ahora también deriva `hwenc`
-desde `img.hwEncCapable`, así que activar una imagen con ese flag exige
-aceptar su contrato igual que GApps/Magisk/WiFi falso. Ninguna imagen del
-catálogo (`backend/images.json`) declara ese flag todavía, así que esto no
-cambia el comportamiento observable de nada hoy.
+**In addition to what was originally asked in steps 1-2** (a positive side effect of leaving the lifecycle
+runner properly generic, not ad hoc for hwenc): `moduleGate.requiredModuleIdsForImage` now also derives
+`hwenc` from `img.hwEncCapable`, so activating an image with that flag requires accepting its contract just
+like GApps/Magisk/fake WiFi. No image in the catalog (`backend/images.json`) declares that flag yet, so
+this does not change the observable behavior of anything today.
 
-**[PENDIENTE] nada de lo hecho en los pasos 1-2 se validó contra un host
-real con Docker/redroid** — sólo hay cobertura de unit tests con
-fixtures/mocks (`backend/test/moduleRunner.test.js`,
-`backend/test/moduleContract.test.js`). Antes de usar esto con hardware
-real, correr el flujo completo (crear → inyectar en `/vendor` → arrancar →
-fixup post-boot) contra la imagen oficial de redroid en un host AMD/Intel.
+**[PENDING] nothing of what was done in steps 1-2 was validated against a real host with Docker/redroid**
+— there is only unit-test coverage with fixtures/mocks (`backend/test/moduleRunner.test.js`,
+`backend/test/moduleContract.test.js`). Before using this with real hardware, run the complete flow
+(create → inject into `/vendor` → start → post-boot fixup) against the official redroid image on an
+AMD/Intel host.
 
-**Gate:** CIFI corre como módulo dentro de `redroid-forge` (pause/
-resume/status desde la app, no edición manual de cron), validado en vivo
-sin que reaparezca el bug conocido. **No cumplido todavía** — los pasos 3-5
-siguen abiertos.
+**Gate:** CIFI runs as a module inside `redroid-forge` (pause/resume/status from the app, no manual cron
+editing), validated live without the known bug reappearing. **Not met yet** — steps 3-5 are still open.
 
-## Fase 6 — Autenticación opcional (Keycloak)
+## Phase 6 — Optional authentication (Keycloak)
 
-**Dificultad: Media** — el patrón ya está acordado y probado en otros
-proyectos propios (Keycloak admin API, bolt-on opcional con Plenum), no es
-terreno desconocido.
+**Difficulty: Medium** — the pattern is already agreed and tested in other projects of ours (Keycloak admin
+API, an optional bolt-on with Plenum), it is not unknown ground.
 
-**Pasos:**
-1. Implementar el bolt-on de auth: Keycloak directo, o delegado vía Plenum/
-   `jg-dashboard`.
-2. Confirmar que con la variable de entorno apagada el comportamiento es
-   idéntico a hoy (cero auth).
+**Steps:**
+1. Implement the auth bolt-on: Keycloak directly, or delegated through Plenum/`jg-dashboard`.
+2. Confirm that with the environment variable off the behavior is identical to today (zero auth).
 
-**Gate:** con auth apagado, comportamiento idéntico a hoy; con auth
-prendido, Keycloak filtra el acceso.
+**Gate:** with auth off, behavior identical to today; with auth on, Keycloak filters access.
 
-## Fase 7 — `jg-dashboard` y `plenum-redroid` pasan a consumidores
+## Phase 7 — `jg-dashboard` and `plenum-redroid` become consumers
 
-**Dificultad: Media-Alta** — son dos integraciones reales contra dos
-codebases distintas (Angular/NestJS en un caso, el módulo federado de
-Plenum en el otro), y hay que coordinar la migración sin downtime real
-sobre instancias que están en uso.
+**Difficulty: Medium-High** — two real integrations against two different codebases (Angular/NestJS in one
+case, Plenum's federated module in the other), and the migration has to be coordinated with no real
+downtime over instances that are in use.
 
-**Aclaración (05/10/2026):** `redroid-forge` y el redroid de `jg-dashboard`
-se tratan como **dos proyectos separados que no tienen que ser compatibles
-entre sí** (ni imágenes, ni instancias, ni estado). Por eso las pruebas de
-`redroid-forge` se hacen en `jgustavo46` y no en server01. Cuando
-`redroid-forge` esté funcionando, el redroid del dashboard se **quita y se
-reemplaza** por `redroid-forge`; recién en ese momento se vuelve a server01.
-No hay migración de imágenes ni de instancias del dashboard viejo.
+**Clarification (05/10/2026):** `redroid-forge` and `jg-dashboard`'s redroid are treated as **two separate
+projects that do not have to be compatible with each other** (neither images, nor instances, nor state).
+That is why `redroid-forge`'s tests are done on `jgustavo46` and not on server01. When `redroid-forge` is
+working, the dashboard's redroid is **removed and replaced** by `redroid-forge`; only at that moment do we
+go back to server01. There is no migration of images or instances from the old dashboard.
 
-**Pasos:**
-1. `jg-dashboard` pasa a llamar a la API/embed de `redroid-forge` en
-   vez de usar su propio `redroid.service.ts`.
-2. `plenum-redroid` hace lo mismo.
-3. El código viejo en ambos sigue presente sin tocarse (política de
-   convivencia, sección 4) durante todo el período de rodaje.
+**Steps:**
+1. `jg-dashboard` starts calling `redroid-forge`'s API/embed instead of using its own `redroid.service.ts`.
+2. `plenum-redroid` does the same.
+3. The old code in both stays in place untouched (the coexistence policy, section 4) during the whole
+   run-in period.
 
-**Gate:** ambos operan instancias reales exclusivamente a través de
-`redroid-forge` durante un período de rodaje, sin regresiones.
+**Gate:** both operate real instances exclusively through `redroid-forge` during a run-in period, with no
+regressions.
 
-## Fase 8 — Baja del código viejo + pulido público
+## Phase 8 — Removal of the old code + public polish
 
-**Dificultad: Baja** — es limpieza y documentación, no trabajo técnico
-nuevo.
+**Difficulty: Low** — it is cleanup and documentation, not new technical work.
 
-**Pasos:**
-1. **Asegurar el código viejo en GitHub antes de borrar nada.** ✅ Hecho el
-   05/10/2026: se pusheó `jg-dashboard` (los 2 commits pendientes, incluido
-   `27bd149`, el último trabajo de redroid) y `plenum-redroid` —que no era un
-   repo git ni existía en GitHub— se subió, congelado, a
-   `fogelmanjg-plenum/plenum-redroid` (privado, con un README que lo marca como
-   archivado y reemplazado por `redroid-forge`; sin `.env` ni datos de
-   ejecución). **Falta**, justo antes de borrar: volver a commitear/pushear
-   cualquier cambio nuevo de redroid en `jg-dashboard` (hoy tiene archivos sin
-   commitear no relacionados con esta decisión) y dejar un tag en el último
-   commit (ej. `redroid-legacy-<fecha>`) para encontrarlo fácil.
-2. Quitar **todo** el código de redroid de `jg-dashboard` y `plenum-redroid`
-   (recién acá, nunca antes del gate de la Fase 7), incluido el código muerto
-   del visor `ws-scrcpy`/oauth2-proxy. Decisión (05/10/2026): ese código queda
-   en GitHub como proyecto viejo, muerto y reemplazado por `redroid-forge`; no
-   se porta nada como compatibilidad.
-3. Escribir README/CONTRIBUTING/atribución definitivos, issue templates.
+**Steps:**
+1. **Secure the old code on GitHub before deleting anything.** ✅ Done on 05/10/2026: `jg-dashboard` was
+   pushed (the 2 pending commits, including `27bd149`, the last redroid work) and `plenum-redroid` — which
+   was not a git repo nor existed on GitHub — was uploaded, frozen, to `fogelmanjg-plenum/plenum-redroid`
+   (private, with a README marking it as archived and replaced by `redroid-forge`; without `.env` or
+   runtime data). **Still missing**, right before deleting: commit/push again any new redroid change in
+   `jg-dashboard` (it currently has uncommitted files unrelated to this decision) and leave a tag on the
+   last commit (e.g. `redroid-legacy-<date>`) to find it easily.
+2. Remove **all** the redroid code from `jg-dashboard` and `plenum-redroid` (only here, never before the
+   Phase 7 gate), including the dead code of the `ws-scrcpy`/oauth2-proxy viewer. Decision (05/10/2026):
+   that code stays on GitHub as an old project, dead and replaced by `redroid-forge`; nothing is ported as
+   compatibility.
+3. Write the definitive README/CONTRIBUTING/attribution, issue templates.
 
-**Gate:** proyecto en condición de llamarse **beta 0.9** — a partir de acá
-se retoma el mecanismo de donaciones/soporte (sección 8 de
-`REQUIREMENTS.md`), no antes.
+**Gate:** the project is in a condition to be called **beta 0.9** — from here the donations/support
+mechanism is picked up again (section 8 of `REQUIREMENTS.md`), not before.
 
-## Fuera de fases (bajo demanda, no bloquean nada de lo de arriba)
+## Outside the phases (on demand, they block nothing above)
 
-- Otros proyectos "grandes" a leer que puedan sumar algo (pendiente en
-  `REQUIREMENTS.md` sección 10) — se evalúan e insertan en la fase que
-  corresponda cuando se identifiquen, no generan una fase propia por sí
-  solos.
-- **Bloqueador de publicidad configurable (idea, 04/10/2026).** A nivel
-  sistema y por aplicación. Encaja como módulo de usuario de la Fase 5
-  (manifest + script), no como parte del core. Diseño a decidir; opciones
-  vistas:
-  - *Cliente VPN local* (NetGuard probado a mano, no necesita root): permite
-    reglas por app (uid). Requisito de plataforma: Android abre `/dev/tun`,
-    no `/dev/net/tun`; el contenedor debe crearse con
-    `--device /dev/net/tun:/dev/tun` (o `mknod /dev/tun c 10 200`, que no
-    sobrevive a recrear el contenedor). Sin ese nodo `Vpn.jniCreate` falla
-    con "Cannot create interface" y la VPN nunca se establece.
-  - *Efecto colateral a resolver:* la VPN también captura a `adbd` (uid
-    2000); con bloqueo activo el adb TCP queda inalcanzable. El módulo debe
-    permitir `com.android.shell` por defecto.
-  - *Alternativa sin VPN:* DNS privado / filtrado a nivel red del host
-    (bloqueo por dominio, sin granularidad por app).
-  - Reglas por app: definir si se guardan en el manifest del módulo o por
-    instancia.
-- **Más códecs de audio (idea, 06/10/2026).** Hoy el audio por scrcpy solo
-  anda con `--audio-codec=aac`; el default (opus) falla. scrcpy ofrece opus,
-  aac, flac y raw, así que el límite está en los encoders que la imagen
-  Android expone, no en scrcpy. No es para la primera versión.
-  - *Chequeo previo (~5 min, en la instancia de jgustavo46):* log de scrcpy
-    con opus y `dumpsys media.codec`, para confirmar por qué falla. Hipótesis
-    sin verificar: el `media_codecs.xml` de la imagen oficial no registra el
-    encoder `c2.android.opus.encoder` (AOSP lo trae por software), igual que
-    pasaba con los decoders.
-  - *Si es eso:* se registra desde el módulo de integración al crear la
-    instancia (mismo mecanismo que `addCodecsToXml` para los decoders), sin
-    imagen custom. Con opus como default (menos latencia y bitrate que aac).
-  - `raw` no necesita encoder (más ancho de banda; sirve por LAN y para
-    diagnóstico). `flac` es encoder por software de AOSP: probar si está
-    registrado.
-  - Sin aceleración por hardware: el costo de CPU del audio es despreciable.
-- **Zero-copy del decode y 4K a 60 fps (decidido 06/10/2026: después de la primera versión funcional
-  completa, igual que los códecs de audio).** Hoy el frame baja del GPU a RAM y se copia a gralloc; a 1080p
-  alcanza de sobra (>200 fps, ~3x menos CPU que software), pero 4K tiene un techo de ~55 fps por la copia de
-  12 MB por frame. Diseño pensado: la inversa del encoder. Android reserva el buffer de salida (gralloc,
-  dma-buf del mismo GPU) y pasa su fd al daemon por `SCM_RIGHTS`; el daemon lo importa como superficie VA y
-  hace un paso de VPP en el GPU (copia, conversión a NV12 y escalado a la pantalla de la instancia);
-  sincroniza con `vaSyncSurface` o un fence. La memoria compartida actual queda de respaldo con la misma
-  autoverificación del primer frame. Ventajas: sin descarga GPU→RAM ni copia a gralloc (casi cero CPU por
-  frame), 4K y 10 bits realistas, escalado en el GPU, el compositor consume el buffer sin volver a subirlo.
-  Riesgos: el gralloc de redroid es frágil (P010 reinicia Android; hay que probar NV12 con cuidado),
-  modificadores de tiling en Intel que gralloc no informa, y es específico por driver (AMD, Intel, NVIDIA).
-  **Primer paso, un spike de ~1 día:** ver si gralloc asigna NV12 sin romper nada y si el daemon puede
-  importar ese fd y escribir en él, antes de comprometer el diseño.
+- Other "large" projects to read that could add something (pending in `REQUIREMENTS.md` section 10) — they
+  are evaluated and inserted in the corresponding phase when identified, they do not generate a phase of
+  their own.
+- **Configurable ad blocker (idea, 04/10/2026).** At system level and per application. It fits as a Phase 5
+  user module (manifest + script), not as part of the core. Design to be decided; options seen:
+  - *Local VPN client* (NetGuard tested by hand, it needs no root): it allows per-app (uid) rules. Platform
+    requirement: Android opens `/dev/tun`, not `/dev/net/tun`; the container must be created with
+    `--device /dev/net/tun:/dev/tun` (or `mknod /dev/tun c 10 200`, which does not survive recreating the
+    container). Without that node `Vpn.jniCreate` fails with "Cannot create interface" and the VPN is never
+    established.
+  - *Side effect to solve:* the VPN also captures `adbd` (uid 2000); with blocking active, TCP adb becomes
+    unreachable. The module must allow `com.android.shell` by default.
+  - *Alternative without a VPN:* private DNS / host network-level filtering (blocking by domain, without
+    per-app granularity).
+  - Per-app rules: decide whether they are stored in the module's manifest or per instance.
+- **More audio codecs (idea, 06/10/2026).** Today audio over scrcpy only works with `--audio-codec=aac`; the
+  default (opus) fails. scrcpy offers opus, aac, flac and raw, so the limit is in the encoders the Android
+  image exposes, not in scrcpy. It is not for the first version.
+  - *Prior check (~5 min, on the jgustavo46 instance):* scrcpy's log with opus and `dumpsys media.codec`, to
+    confirm why it fails. Unverified hypothesis: the official image's `media_codecs.xml` does not register
+    the `c2.android.opus.encoder` encoder (AOSP ships it as software), just as happened with the decoders.
+  - *If that is it:* it is registered from the integration module when the instance is created (the same
+    mechanism as `addCodecsToXml` for the decoders), without a custom image. With opus as the default (lower
+    latency and bitrate than aac).
+  - `raw` needs no encoder (more bandwidth; useful on a LAN and for diagnostics). `flac` is an AOSP software
+    encoder: test whether it is registered.
+  - No hardware acceleration: the CPU cost of audio is negligible.
+- **Zero-copy decode and 4K at 60 fps (decided 06/10/2026: after the first complete functional version, like
+  the audio codecs).** Today the frame goes from the GPU to RAM and is copied into gralloc; at 1080p that is
+  more than enough (>200 fps, ~3x less CPU than software), but 4K has a ceiling of ~55 fps because of the
+  copy of 12 MB per frame. Design thought out: the inverse of the encoder. Android reserves the output
+  buffer (gralloc, a dma-buf of the same GPU) and passes its fd to the daemon through `SCM_RIGHTS`; the
+  daemon imports it as a VA surface and performs a VPP step on the GPU (copy, conversion to NV12 and scaling
+  to the instance's screen); it synchronizes with `vaSyncSurface` or a fence. The current shared memory
+  stays as a fallback with the same first-frame self-check. Advantages: no GPU→RAM download or copy into
+  gralloc (almost zero CPU per frame), 4K and 10-bit become realistic, scaling on the GPU, the compositor
+  consumes the buffer without uploading it again. Risks: redroid's gralloc is fragile (P010 restarts
+  Android; NV12 has to be tried carefully), Intel tiling modifiers that gralloc does not report, and it is
+  driver-specific (AMD, Intel, NVIDIA). **First step, a ~1-day spike:** see whether gralloc allocates NV12
+  without breaking anything and whether the daemon can import that fd and write into it, before committing
+  to the design.
