@@ -2,13 +2,13 @@ const cp = require('child_process');
 const runtime = require('./dockerRuntime');
 const store = require('./store');
 
-// A proposito NO es `promisify(execFile)` (como antes, ni resuelto una sola
-// vez al importar ni por-llamada): `child_process.execFile` trae su propio
-// simbolo `util.promisify.custom`, que sobrevive a `t.mock.method` -- asi que
-// `promisify(cp.execFile)` en un test mockeado igual termina llamando a la
-// implementacion real de Node por dentro, ignorando el mock (confirmado a
-// mano). Envolver el callback de `cp.execFile` a mano evita ese atajo y hace
-// que los tests puedan mockear `child_process.execFile` de verdad.
+// This is deliberately NOT `promisify(execFile)` (as before, neither resolved
+// once at import time nor per call): `child_process.execFile` carries its own
+// `util.promisify.custom` symbol, which survives `t.mock.method` -- so
+// `promisify(cp.execFile)` in a mocked test still ends up calling Node's real
+// implementation inside, ignoring the mock (confirmed by hand). Wrapping
+// `cp.execFile`'s callback by hand avoids that shortcut and lets the tests really
+// mock `child_process.execFile`.
 function execFileAsync(file, args) {
   return new Promise((resolve, reject) => {
     cp.execFile(file, args, (err, stdout, stderr) => {
@@ -18,14 +18,14 @@ function execFileAsync(file, args) {
   });
 }
 
-const HWSIM_RADIO_COUNT = process.env.HWSIM_RADIO_COUNT || '6'; // 2 radios/instancia
+const HWSIM_RADIO_COUNT = process.env.HWSIM_RADIO_COUNT || '6'; // 2 radios/instance
 
 function log(msg) { console.log(`[hwsimWifi] ${msg}`); }
 function warn(msg) { console.warn(`[hwsimWifi] ${msg}`); }
 
-// Porta fake-wifi-networking.service.ts de plenum-redroid. Corre como root
-// dentro del contenedor privilegiado --pid=host --network=host, así que los
-// comandos actúan directo sobre el host sin necesitar sudo.
+// Ports fake-wifi-networking.service.ts from plenum-redroid. It runs as root
+// inside the privileged --pid=host --network=host container, so the commands act
+// directly on the host without needing sudo.
 
 function parsePhyIfacePairs(iwDevOutput) {
   const pairs = [];
@@ -42,88 +42,82 @@ function parsePhyIfacePairs(iwDevOutput) {
   return pairs;
 }
 
-// Cola de serializacion para el reclamo de pares phy/iface de hwsim (bug
-// conocido, ver docs/ROADMAP.md Fase 3 paso 4): sin esto, dos instancias que
-// arrancan/reinician casi al mismo tiempo pueden llamar a ensureHwsimWifi en
-// paralelo, las dos leer 'iw dev' antes de que ninguna haya reclamado nada,
-// ver los mismos pares "libres", y las dos intentar moverlos -- una de las
-// dos termina sin radios wifi ese boot. Encadenando cada intento a esta
-// unica promesa a nivel de modulo (mismo patron que una cola con mutex: el
-// intento N+1 ni siquiera arranca a leer 'iw dev' hasta que el intento N
-// resolvio por completo, exito o fallo) se garantiza que nunca hay dos
-// lecturas de 'iw dev' en vuelo al mismo tiempo.
+// Serialization queue for claiming hwsim phy/iface pairs (a known bug, see
+// docs/ROADMAP.md Phase 3 step 4): without this, two instances that start/restart
+// at almost the same time may call ensureHwsimWifi in parallel, both read 'iw dev'
+// before either has claimed anything, see the same "free" pairs, and both try to
+// move them -- one of the two ends up without wifi radios that boot. By chaining
+// every attempt to this single module-level promise (the same pattern as a queue
+// with a mutex: attempt N+1 does not even start reading 'iw dev' until attempt N
+// has fully resolved, success or failure) it is guaranteed that there are never two
+// 'iw dev' reads in flight at the same time.
 let hwsimClaimTail = Promise.resolve();
 
-// Techo de cada intento en la cola: sin esto, un solo comando de host
-// colgado dentro de la seccion critica (ej. un `iw phy ... set netns` que
-// nunca vuelve por una llamada netlink trabada) deja `hwsimClaimTail` sin
-// avanzar nunca, y CUALQUIER instancia futura que necesite wifi falso en
-// este host queda esperando para siempre -- un solo comando colgado pasaba
-// de "esa instancia se jode este boot" a "el host entero deja de poder
-// arrancar wifi falso hasta reiniciar el backend" (hallazgo real de code
-// review, PR #3). El intento abandonado puede seguir corriendo en el fondo
-// (no hay forma generica de matar lo que `fn` haya lanzado por dentro,
-// incluye tanto execFileAsync como runtime.exec via dockerode) -- riesgo
-// residual aceptado: un reclamo tardio corriendo en paralelo con el
-// siguiente, mucho mas acotado que el deadlock total que reemplaza.
+// Ceiling for every attempt in the queue: without this, a single hung host command
+// inside the critical section (e.g. an `iw phy ... set netns` that never returns
+// because of a stuck netlink call) leaves `hwsimClaimTail` never advancing, and ANY
+// future instance that needs fake wifi on this host waits forever -- a single hung
+// command went from "that instance is out of luck this boot" to "the whole host
+// can no longer start fake wifi until the backend is restarted" (a real
+// code-review finding, PR #3). The abandoned attempt may keep running in the
+// background (there is no generic way to kill what `fn` launched inside, which
+// includes both execFileAsync and runtime.exec via dockerode) -- an accepted
+// residual risk: a late claim running in parallel with the next one, far more
+// bounded than the total deadlock it replaces.
 const HWSIM_CLAIM_TIMEOUT_MS = Number(process.env.HWSIM_CLAIM_TIMEOUT_MS) || 30000;
 
 function runHwsimClaim(fn) {
   const attempt = hwsimClaimTail.then(() => new Promise((resolve, reject) => {
     let settled = false;
-    // Si fn() gana la carrera (el caso normal, casi siempre) el timer tiene
-    // que cancelarse -- sin esto queda un setTimeout de 30s vivo por cada
-    // reclamo exitoso, sosteniendo el event loop y, si nadie mas lo referencia,
-    // terminando en un reject() sin handler mas tarde (unhandled rejection).
+    // If fn() wins the race (the normal case, almost always) the timer has to be
+    // cancelled -- without this a 30 s setTimeout stays alive for every successful
+    // claim, holding the event loop and, if nobody else references it, ending up in
+    // a reject() without a handler later (an unhandled rejection).
     const timer = setTimeout(() => {
       if (settled) return;
       settled = true;
-      reject(new Error(`runHwsimClaim: intento colgado mas de ${HWSIM_CLAIM_TIMEOUT_MS}ms, se abandona para no trabar la cola`));
+      reject(new Error(`runHwsimClaim: attempt hung for more than ${HWSIM_CLAIM_TIMEOUT_MS}ms, abandoned so as not to jam the queue`));
     }, HWSIM_CLAIM_TIMEOUT_MS);
     fn().then(
       (value) => { if (settled) return; settled = true; clearTimeout(timer); resolve(value); },
       (err) => { if (settled) return; settled = true; clearTimeout(timer); reject(err); },
     );
   }));
-  // El tail sigue avanzando aunque este intento haya fallado o se haya
-  // abandonado por timeout -- un reclamo rechazado nunca debe trabar a los
-  // que vienen atras en la cola. `attempt` (lo que se devuelve al llamador)
-  // si conserva el resultado/error real.
+  // The tail keeps advancing even if this attempt failed or was abandoned by a
+  // timeout -- a rejected claim must never jam those behind it in the queue.
+  // `attempt` (what is returned to the caller) does keep the real result/error.
   hwsimClaimTail = attempt.then(() => {}, () => {});
   return attempt;
 }
 
-// Solo para tests: la cola es un singleton a nivel de modulo, asi que sin
-// esto un test podria arrancar con el tail todavia "sucio" de un test
-// anterior (por ejemplo uno que dejo un mock a medio resolver).
+// Only for tests: the queue is a module-level singleton, so without this a test
+// could start with the tail still "dirty" from a previous test (for example one
+// that left a mock half-resolved).
 function _resetHwsimClaimTailForTests() {
   hwsimClaimTail = Promise.resolve();
 }
 
-// Instancias que efectivamente tienen phys de hwsim asignados en este
-// momento -- no alcanza con "el contenedor esta corriendo" (ver mas abajo).
-// Se agrega cuando claimAndAssignHwsimPair() mueve al menos un phy al netns
-// de esa instancia; una entrada vieja de un contenedor que ya murio se
-// descarta sola la proxima vez que se la consulta (containerId nunca se
-// reusa entre instancias, asi que no hay riesgo de falso positivo mientras
-// tanto).
+// Instances that effectively have hwsim phys assigned at this moment -- "the
+// container is running" is not enough (see below). It is added when
+// claimAndAssignHwsimPair() moves at least one phy into that instance's netns; an
+// old entry for a container that already died is discarded on its own the next
+// time it is queried (containerId is never reused between instances, so there is
+// no risk of a false positive in the meantime).
 const instancesHoldingHwsim = new Set();
 
-// Para decidir si es seguro recargar mac80211_hwsim cuando 'iw dev' no
-// muestra ningun phy libre: si de verdad todos estan en uso por otra
-// instancia que sigue corriendo, recargar el modulo se los robaria (ver la
-// nuance portada de jg-dashboard/redroid.service.ts). Solo se recarga si
-// NINGUNA otra instancia con wifi falso esta usando hwsim ahora mismo.
+// To decide whether it is safe to reload mac80211_hwsim when 'iw dev' shows no
+// free phy: if they are really all in use by another instance that keeps running,
+// reloading the module would steal them (see the nuance ported from
+// jg-dashboard/redroid.service.ts). It is only reloaded if NO other instance with
+// fake wifi is using hwsim right now.
 //
-// OJO: "usando hwsim" es instancesHoldingHwsim, no "el contenedor esta
-// corriendo" (info.State.Running) -- dos instancias A y B pueden arrancar
-// casi juntas, ambas con su contenedor ya "Running" en Docker antes de que
-// ninguna haya reclamado nada (el reclamo esta serializado por
-// runHwsimClaim). Si A revisa esto mientras el reclamo de B TODAVIA esta en
-// cola detras del de A, contar a B como "corriendo" alcanzaba para que A
-// concluyera mal "alguien mas esta usando hwsim" y se salteara un reload que
-// podria haber liberado radios para las dos (hallazgo real de code review,
-// PR #3).
+// NOTE: "using hwsim" is instancesHoldingHwsim, not "the container is running"
+// (info.State.Running) -- two instances A and B may start almost together, both
+// with their container already "Running" in Docker before either has claimed
+// anything (the claim is serialized by runHwsimClaim). If A checks this while B's
+// claim is STILL queued behind A's, counting B as "running" was enough for A to
+// wrongly conclude "someone else is using hwsim" and skip a reload that could
+// have freed radios for both (a real code-review finding, PR #3).
 async function anyOtherInstanceUsingHwsim(excludeContainerId) {
   const others = store.readAll().filter((i) => i.needsHwsimWifi && i.containerId && i.containerId !== excludeContainerId);
   for (const other of others) {
@@ -131,20 +125,19 @@ async function anyOtherInstanceUsingHwsim(excludeContainerId) {
     try {
       const info = await runtime.inspect(other.containerId);
       if (info.State.Running) return true;
-      instancesHoldingHwsim.delete(other.containerId); // murio, ya no tiene nada asignado
+      instancesHoldingHwsim.delete(other.containerId); // it died, it has nothing assigned anymore
     } catch {
-      instancesHoldingHwsim.delete(other.containerId); // el contenedor ya no existe
+      instancesHoldingHwsim.delete(other.containerId); // the container no longer exists
     }
   }
   return false;
 }
 
-// Seccion critica de ensureHwsimWifi, siempre corrida a traves de
-// runHwsimClaim: elige un par phy/iface libre y lo mueve al netns de la
-// instancia, incluyendo el renombrado de las interfaces ya dentro de ese
-// netns. Nunca corre superpuesta con otro reclamo.
+// Critical section of ensureHwsimWifi, always run through runHwsimClaim: it picks a
+// free phy/iface pair and moves it into the instance's netns, including renaming
+// the interfaces once inside that netns. It never runs overlapped with another claim.
 async function claimAndAssignHwsimPair(instanceId, containerId, pid) {
-  // Un phy de un swap anterior puede seguir con el nombre "wlan0_fake".
+  // A phy from a previous swap may still carry the name "wlan0_fake".
   await execFileAsync('ip', ['link', 'set', 'wlan0_fake', 'down']).catch(() => {});
   await execFileAsync('ip', ['link', 'set', 'wlan0_fake', 'name', 'wlan0']).catch(() => {});
 
@@ -153,34 +146,33 @@ async function claimAndAssignHwsimPair(instanceId, containerId, pid) {
     const { stdout } = await execFileAsync('iw', ['dev']);
     freePairs = parsePhyIfacePairs(stdout);
   } catch (e) {
-    warn(`'iw dev' fallo para ${instanceId}: ${e}`);
+    warn(`'iw dev' failed for ${instanceId}: ${e}`);
     return;
   }
 
-  // Visto en la practica: a veces un phy no vuelve al netns default del host
-  // cuando muere el contenedor que lo tenia -- directamente desaparece
-  // (causa raiz nunca confirmada). Si NINGUNO esta libre, solo tiene sentido
-  // recargar el modulo si ninguna otra instancia con wifi falso esta
-  // corriendo ahora mismo -- si alguna lo esta, recargar le robaria los
-  // radios que ya tiene asignados.
+  // Seen in practice: sometimes a phy does not return to the host's default netns
+  // when the container that held it dies -- it simply disappears (root cause never
+  // confirmed). If NONE is free, reloading the module only makes sense if no other
+  // instance with fake wifi is running right now -- if one is, reloading would steal
+  // the radios it already has assigned.
   if (freePairs.length === 0) {
     if (await anyOtherInstanceUsingHwsim(containerId)) {
-      warn(`0 phys libres para ${instanceId} pero otra instancia esta usando hwsim -- no se recarga el modulo`);
+      warn(`0 free phys for ${instanceId} but another instance is using hwsim -- the module is not reloaded`);
     } else {
-      warn(`0 phys libres para ${instanceId} y ninguna otra instancia usando hwsim -- recargando mac80211_hwsim`);
+      warn(`0 free phys for ${instanceId} and no other instance using hwsim -- reloading mac80211_hwsim`);
       try {
         await execFileAsync('rmmod', ['mac80211_hwsim']);
         await execFileAsync('modprobe', ['mac80211_hwsim', `radios=${HWSIM_RADIO_COUNT}`]);
         const { stdout } = await execFileAsync('iw', ['dev']);
         freePairs = parsePhyIfacePairs(stdout);
       } catch (e) {
-        warn(`recarga de mac80211_hwsim fallo para ${instanceId}: ${e}`);
+        warn(`reloading mac80211_hwsim failed for ${instanceId}: ${e}`);
       }
     }
   }
 
   if (freePairs.length < 2) {
-    warn(`solo ${freePairs.length} phy(s) libre(s) para ${instanceId} (necesita 2) — wifi no va a andar este boot`);
+    warn(`only ${freePairs.length} free phy(s) for ${instanceId} (it needs 2) — wifi will not work this boot`);
     return;
   }
 
@@ -190,11 +182,11 @@ async function claimAndAssignHwsimPair(instanceId, containerId, pid) {
   for (const [i, pair] of [a, b].entries()) {
     try {
       await execFileAsync('iw', ['phy', pair.phy, 'set', 'netns', pid]);
-      // A partir de aca el phy ya esta fisicamente en el netns de esta
-      // instancia (independiente de si el renombrado de la interfaz debajo
-      // sale bien) -- se marca ya mismo, no solo si renamedOk termina en
-      // true, porque instancesHoldingHwsim existe para "no le robes este
-      // phy a esta instancia", no para "el renombrado le salio perfecto".
+      // From here on the phy is already physically in this instance's netns
+      // (regardless of whether the interface rename below goes well) -- it is
+      // marked right away, not only if renamedOk ends up true, because
+      // instancesHoldingHwsim exists for "do not steal this phy from this
+      // instance", not for "the rename went perfectly for it".
       instancesHoldingHwsim.add(containerId);
       if (pair.iface !== targetNames[i]) {
         let ok = false;
@@ -209,37 +201,37 @@ async function claimAndAssignHwsimPair(instanceId, containerId, pid) {
           }
         }
         renamedOk.push(ok);
-        if (!ok) warn(`no se pudo renombrar ${pair.iface}->${targetNames[i]} para ${instanceId}`);
+        if (!ok) warn(`could not rename ${pair.iface}->${targetNames[i]} for ${instanceId}`);
       } else {
         renamedOk.push(true);
       }
     } catch (e) {
-      warn(`no se pudo mover ${pair.phy} al netns de ${instanceId}: ${e}`);
+      warn(`could not move ${pair.phy} into ${instanceId}'s netns: ${e}`);
       renamedOk.push(false);
     }
   }
 
   if (renamedOk.every(Boolean)) {
-    log(`${a.phy} (${a.iface}->wlan0), ${b.phy} (${b.iface}->wlan1) movidos al netns de ${instanceId} (pid ${pid})`);
+    log(`${a.phy} (${a.iface}->wlan0), ${b.phy} (${b.iface}->wlan1) moved into ${instanceId}'s netns (pid ${pid})`);
   } else {
-    warn(`setup incompleto para ${instanceId} (pid ${pid})`);
+    warn(`incomplete setup for ${instanceId} (pid ${pid})`);
   }
 }
 
-// Corre en cada start (Docker recrea el netns cada vez). Los phys de una
-// instancia vuelven solos al netns del host cuando su contenedor muere.
+// Runs on every start (Docker recreates the netns each time). An instance's phys
+// return on their own to the host's netns when its container dies.
 async function ensureHwsimWifi(instanceId, containerId) {
   try {
     await execFileAsync('modprobe', ['mac80211_hwsim', `radios=${HWSIM_RADIO_COUNT}`]);
   } catch (e) {
-    warn(`modprobe fallo para ${instanceId}: ${e}`);
+    warn(`modprobe failed for ${instanceId}: ${e}`);
   }
 
   let pid;
   try {
     pid = await runtime.getPid(containerId);
   } catch (e) {
-    warn(`no se pudo obtener el PID de ${instanceId}: ${e}`);
+    warn(`could not get the PID of ${instanceId}: ${e}`);
     return;
   }
 
@@ -247,10 +239,10 @@ async function ensureHwsimWifi(instanceId, containerId) {
 }
 
 function scheduleHwsimWifiFix(instanceId, containerId) {
-  ensureHwsimWifi(instanceId, containerId).catch((e) => warn(`scheduleHwsimWifiFix fallo para ${instanceId}: ${e}`));
+  ensureHwsimWifi(instanceId, containerId).catch((e) => warn(`scheduleHwsimWifiFix failed for ${instanceId}: ${e}`));
 }
 
-// El HAL de wifi falso solo dispara cuando algo le pide a Android conectarse.
+// The fake wifi HAL only fires when something asks Android to connect.
 async function ensureWifiConnected(instanceId, containerId) {
   const MAX_ATTEMPTS = 6;
   for (let i = 0; i < MAX_ATTEMPTS; i++) {
@@ -258,7 +250,7 @@ async function ensureWifiConnected(instanceId, containerId) {
     try {
       status = await runtime.exec(containerId, ['su', '-c', 'cmd wifi status']);
     } catch (e) {
-      warn(`chequeo de estado fallo para ${instanceId}: ${e}`);
+      warn(`status check failed for ${instanceId}: ${e}`);
     }
     if (status.includes('Wifi is connected')) return;
 
@@ -267,23 +259,23 @@ async function ensureWifiConnected(instanceId, containerId) {
       await new Promise((r) => setTimeout(r, 3000));
       await runtime.exec(containerId, ['su', '-c', 'cmd wifi connect-network jg-wifi open']);
     } catch (e) {
-      warn(`intento ${i + 1} fallo para ${instanceId}: ${e}`);
+      warn(`attempt ${i + 1} failed for ${instanceId}: ${e}`);
     }
     await new Promise((r) => setTimeout(r, 5000));
   }
-  warn(`se agotaron los intentos para ${instanceId} — puede necesitar reconexion manual`);
+  warn(`attempts exhausted for ${instanceId} — it may need a manual reconnection`);
 }
 
 function scheduleWifiConnectedFix(instanceId, containerId) {
   setTimeout(() => {
-    ensureWifiConnected(instanceId, containerId).catch((e) => warn(`scheduleWifiConnectedFix fallo para ${instanceId}: ${e}`));
+    ensureWifiConnected(instanceId, containerId).catch((e) => warn(`scheduleWifiConnectedFix failed for ${instanceId}: ${e}`));
   }, 20000);
 }
 
-// Las imagenes wifi-falso ocultan eth0 de ConnectivityService, asi que netd
-// nunca agrega una ip rule "lookup main" para esa interfaz — sin eso, eth0
-// queda detras de la regla catch-all "unreachable" hasta que el swap de wifi
-// ocurre, y ADB se vuelve poco confiable.
+// The fake-wifi images hide eth0 from ConnectivityService, so netd never adds an
+// ip rule "lookup main" for that interface — without it, eth0 stays behind the
+// catch-all "unreachable" rule until the wifi swap happens, and ADB becomes
+// unreliable.
 async function ensureEth0Routing(instanceId, containerId) {
   const script = "ip rule show | grep -q 'lookup main' || ip rule add priority 25000 lookup main";
   const MAX_ATTEMPTS = 8;
@@ -293,7 +285,7 @@ async function ensureEth0Routing(instanceId, containerId) {
     try {
       await runtime.exec(containerId, ['su', '-c', script]);
     } catch (e) {
-      warn(`ip rule add fallo para ${instanceId} (intento ${attempt}): ${e}`);
+      warn(`ip rule add failed for ${instanceId} (attempt ${attempt}): ${e}`);
       await new Promise((r) => setTimeout(r, RETRY_DELAY_MS));
       continue;
     }
@@ -305,27 +297,27 @@ async function ensureEth0Routing(instanceId, containerId) {
       await execFileAsync('ip', ['neigh', 'flush', ip]);
       await execFileAsync('ping', ['-c', '1', '-W', '1', ip]).catch(() => {});
     } catch (e) {
-      warn(`neigh flush fallo para ${instanceId}: ${e}`);
+      warn(`neigh flush failed for ${instanceId}: ${e}`);
     }
 
     try {
       const { stdout } = await execFileAsync('ip', ['neigh', 'show', ip]);
       if (/\b(REACHABLE|STALE|DELAY|PROBE)\b/.test(stdout)) {
-        log(`vecino resuelto para ${instanceId} en el intento ${attempt}`);
+        log(`neighbor resolved for ${instanceId} on attempt ${attempt}`);
         return;
       }
     } catch (e) {
-      warn(`neigh show fallo para ${instanceId}: ${e}`);
+      warn(`neigh show failed for ${instanceId}: ${e}`);
     }
 
     await new Promise((r) => setTimeout(r, RETRY_DELAY_MS));
   }
-  warn(`vecino sigue sin resolver para ${instanceId} tras ${MAX_ATTEMPTS} intentos`);
+  warn(`neighbor still unresolved for ${instanceId} after ${MAX_ATTEMPTS} attempts`);
 }
 
 function scheduleEth0RoutingFix(instanceId, containerId) {
   setTimeout(() => {
-    ensureEth0Routing(instanceId, containerId).catch((e) => warn(`scheduleEth0RoutingFix fallo para ${instanceId}: ${e}`));
+    ensureEth0Routing(instanceId, containerId).catch((e) => warn(`scheduleEth0RoutingFix failed for ${instanceId}: ${e}`));
   }, 20000);
 }
 
