@@ -539,3 +539,16 @@ se retoma el mecanismo de donaciones/soporte (sección 8 de
     diagnóstico). `flac` es encoder por software de AOSP: probar si está
     registrado.
   - Sin aceleración por hardware: el costo de CPU del audio es despreciable.
+- **Zero-copy del decode y 4K a 60 fps (decidido 06/10/2026: después de la primera versión funcional
+  completa, igual que los códecs de audio).** Hoy el frame baja del GPU a RAM y se copia a gralloc; a 1080p
+  alcanza de sobra (>200 fps, ~3x menos CPU que software), pero 4K tiene un techo de ~55 fps por la copia de
+  12 MB por frame. Diseño pensado: la inversa del encoder. Android reserva el buffer de salida (gralloc,
+  dma-buf del mismo GPU) y pasa su fd al daemon por `SCM_RIGHTS`; el daemon lo importa como superficie VA y
+  hace un paso de VPP en el GPU (copia, conversión a NV12 y escalado a la pantalla de la instancia);
+  sincroniza con `vaSyncSurface` o un fence. La memoria compartida actual queda de respaldo con la misma
+  autoverificación del primer frame. Ventajas: sin descarga GPU→RAM ni copia a gralloc (casi cero CPU por
+  frame), 4K y 10 bits realistas, escalado en el GPU, el compositor consume el buffer sin volver a subirlo.
+  Riesgos: el gralloc de redroid es frágil (P010 reinicia Android; hay que probar NV12 con cuidado),
+  modificadores de tiling en Intel que gralloc no informa, y es específico por driver (AMD, Intel, NVIDIA).
+  **Primer paso, un spike de ~1 día:** ver si gralloc asigna NV12 sin romper nada y si el daemon puede
+  importar ese fd y escribir en él, antes de comprometer el diseño.
