@@ -6,7 +6,9 @@ const snapshot = require('../db/snapshot.json');
 
 const clone = (o) => JSON.parse(JSON.stringify(o));
 const DIGEST = snapshot.bases[0].digest;
-const base = { baseDigest: DIGEST, modulos: { hwenc: 3 } };
+// La version del modulo hwenc que la combinacion del snapshot declara validada (cambia con cada release de la base).
+const HWENC = snapshot.combinaciones[0].modulos.hwenc;
+const base = { baseDigest: DIGEST, modulos: { hwenc: HWENC } };
 
 test('el snapshot semilla es valido', () => {
   assert.doesNotThrow(() => k.validateDatabase(snapshot));
@@ -56,7 +58,7 @@ test('resolve: piezas conocidas pero combinacion no validada -> comunidad', () =
 });
 
 test('resolve: version de modulo distinta a la validada -> comunidad', () => {
-  assert.strictEqual(k.resolve(snapshot, { baseDigest: DIGEST, modulos: { hwenc: 4 } }).nivel, 'comunidad');
+  assert.strictEqual(k.resolve(snapshot, { baseDigest: DIGEST, modulos: { hwenc: HWENC - 1 } }).nivel, 'comunidad');
 });
 
 test('resolve: paquete GApps desconocido -> sin-soporte', () => {

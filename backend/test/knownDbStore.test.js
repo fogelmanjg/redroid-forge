@@ -79,7 +79,7 @@ test('validate: chequeos mal formados se rechazan', () => {
 });
 
 test('snapshot real: hwenc sobre la base oficial es "oficial" en AMD e Intel, "comunidad" en NVIDIA', () => {
-  const input = { baseDigest: snapshot.bases[0].digest, modulos: { hwenc: 3 } };
+  const input = { baseDigest: snapshot.bases[0].digest, modulos: { hwenc: snapshot.combinaciones[0].modulos.hwenc } };
   for (const vendor of ['amd', 'intel']) {
     assert.strictEqual(knownDb.resolve(snapshot, { ...input, hostGpuVendor: vendor }).nivel, 'oficial', vendor);
   }

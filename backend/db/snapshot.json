@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "serial": 2,
-  "generatedAt": "2026-10-05T00:00:00Z",
+  "serial": 4,
+  "generatedAt": "2026-10-07T13:11:09Z",
   "minForgeVersion": "0.1.0",
   "bases": [
     {
@@ -23,7 +23,7 @@
       "gapps": null,
       "magisk": null,
       "modulos": {
-        "hwenc": 3
+        "hwenc": 4
       },
       "soporte": "oficial",
       "validaciones": [
@@ -33,7 +33,7 @@
             "gpu": "Radeon RX 480 (Polaris10)",
             "driver": "radeonsi"
           },
-          "fecha": "2026-10-05",
+          "fecha": "2026-10-06",
           "forgeVersion": "0.1.0",
           "resultado": "ok",
           "chequeos": [
@@ -53,13 +53,38 @@
               "detalle": "74 frames H.264 en 5 s, imagen correcta"
             },
             {
+              "id": "hwenc.decoders-registrados",
+              "resultado": "ok",
+              "detalle": "c2.hardware.decoder.h264 y .hevc registrados (el daemon informa solo lo que la GPU decodifica); VP9 no se registra"
+            },
+            {
+              "id": "hwenc.decode-h264",
+              "resultado": "ok",
+              "detalle": "H.264 High con B-frames, 720p (300 frames) y 1080p (180): idénticos a ffmpeg por MediaCodec; 0,64 s de CPU por 100 frames contra 2,44 s del decoder de software"
+            },
+            {
+              "id": "hwenc.decode-hevc",
+              "resultado": "ok",
+              "detalle": "HEVC 1080p, 180 frames idénticos a ffmpeg; 0,72 s de CPU por 100 frames contra 2,14 s del software"
+            },
+            {
+              "id": "hwenc.decode-hevc-10bit",
+              "resultado": "ok",
+              "detalle": "HEVC Main10 1080p, 150 frames idénticos a ffmpeg con salida de 8 bits (los 8 bits altos); no hay HDR real"
+            },
+            {
+              "id": "hwenc.decode-vp9",
+              "resultado": "omitido",
+              "detalle": "la GPU (UVD/VCE) no decodifica VP9 por hardware: Android usa su decoder de software"
+            },
+            {
               "id": "hwenc.scrcpy-visual",
               "resultado": "ok",
-              "detalle": "visto en vivo por scrcpy desde n02, sin artefactos"
+              "detalle": "SmartTube 1080p60 AVC 7,7 Mbps visto por scrcpy entre dos ciudades y dos ISP: calidad impecable, tironeo muy leve, 0 frames descartados por el reproductor"
             }
           ],
-          "notas": "Doctor verde (binder legacy), encoder c2.hardware.encoder.h264 registrado, screenrecord 5 s = 74 frames H.264 con imagen correcta, visto por scrcpy desde n02.",
-          "evidencia": "https://github.com/fogelmanjg/redroid-forge/pull/4"
+          "notas": "Decode por hardware de H.264 y HEVC (8 y 10 bits) verificado bit a bit contra ffmpeg. Los chequeos de encode se heredan de la validación del módulo v3 (el encoder no cambió). En uso real con SmartTube 1080p60 y scrcpy hubo dos cuelgues intermitentes del VCE (ring vce0 timeout, reset del GPU) en ~16 min: ver problemasConocidos.",
+          "evidencia": "https://github.com/fogelmanjg/redroid-forge/pull/15"
         },
         {
           "hardware": {
@@ -67,7 +92,7 @@
             "gpu": "Iris Xe (TigerLake-LP GT2)",
             "driver": "iHD"
           },
-          "fecha": "2026-10-05",
+          "fecha": "2026-10-07",
           "forgeVersion": "0.1.0",
           "resultado": "ok",
           "chequeos": [
@@ -90,13 +115,60 @@
               "id": "hwenc.scrcpy-visual",
               "resultado": "ok",
               "detalle": "visto en vivo por scrcpy, imagen limpia y fluida"
+            },
+            {
+              "id": "hwenc.decoders-registrados",
+              "resultado": "ok",
+              "detalle": "c2.hardware.decoder.h264, .hevc y .vp9 registrados (el iHD decodifica además vp8, mpeg2, vc1 y av1, para los que todavía no hay componente)"
+            },
+            {
+              "id": "hwenc.decode-h264",
+              "resultado": "ok",
+              "detalle": "720p (300 frames) y 1080p (180): idénticos a ffmpeg; 1,99 s de CPU por 100 frames contra 5,32 s del software (2,7x menos)"
+            },
+            {
+              "id": "hwenc.decode-hevc",
+              "resultado": "ok",
+              "detalle": "HEVC 1080p, 180 frames idénticos; 1,80 s por 100 frames contra 4,87 s (2,7x menos)"
+            },
+            {
+              "id": "hwenc.decode-hevc-10bit",
+              "resultado": "ok",
+              "detalle": "HEVC Main10 1080p, 150 frames idénticos con salida de 8 bits"
+            },
+            {
+              "id": "hwenc.decode-vp9",
+              "resultado": "ok",
+              "detalle": "VP9 720p (240 frames) idénticos; 1080p: 1,72 s por 100 frames contra 2,46 s del software (solo 1,4x menos)"
+            },
+            {
+              "id": "hwenc.decode-vp9-10bit",
+              "resultado": "ok",
+              "detalle": "VP9 perfil 2 720p, 150 frames idénticos con salida de 8 bits"
             }
           ],
-          "notas": "Requirio dos arreglos propios de Intel: intel-media-driver en la imagen del backend y normalizacion de start codes Annex-B a 4 bytes en el daemon (iHD emite 3 y el parser de CSD de MPEG4Writer exige 4). Instancia 1000x600 con tope de 3 GB, uso real ~1,6 GB.",
-          "evidencia": "https://github.com/fogelmanjg/redroid-forge/pull/6"
+          "notas": "Requirio dos arreglos propios de Intel: intel-media-driver en la imagen del backend y normalizacion de start codes Annex-B a 4 bytes en el daemon (iHD emite 3 y el parser de CSD de MPEG4Writer exige 4). Instancia 1000x600 con tope de 3 GB, uso real ~1,6 GB. Decode por hardware verificado en la misma máquina el 07/10/2026 (CPU de notebook). La descarga directa por vaDeriveImage pasó la autoverificación en Intel. El ahorro de CPU con VP9 es modesto porque el decoder de software es muy eficiente.",
+          "evidencia": "https://github.com/fogelmanjg/redroid-forge/pull/15"
         }
       ],
-      "problemasConocidos": []
+      "problemasConocidos": [
+        {
+          "id": "polaris-vce-timeout-intermitente",
+          "hardware": {
+            "vendor": "amd",
+            "gpu": "Radeon RX 480 (Polaris10)"
+          },
+          "descripcion": "Con decode y encode (scrcpy) a la vez en 1080p60 se vio dos veces en ~16 min un timeout del VCE (ring vce0 timeout) que resetea el GPU y reinicia Android. El daemon se relanza solo. Sin reproducir con solo decode; se sospecha de la reactivación del VCE tras estar inactivo o del driver/VA-API viejo de esa generación."
+        },
+        {
+          "id": "encoder-sin-control-de-bitrate",
+          "descripcion": "El encoder usa QP fijo y no respeta el bitrate que pide scrcpy: a 720p60 produce ~50 Mbps. Anda, pero consume mucha subida en conexiones remotas. Mejora pendiente."
+        },
+        {
+          "id": "hdr-y-10-bits-salen-como-8-bits",
+          "descripcion": "El video de 10 bits (HDR) se decodifica por hardware pero sale como 8 bits: el gralloc de redroid reinicia Android al asignar buffers P010. No hay HDR real ni por scrcpy."
+        }
+      ]
     }
   ]
 }

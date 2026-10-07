@@ -156,6 +156,145 @@ conocidos (ej. el artefacto de scanline en la 4060 con el driver
    por hardware, con salida equivalente a la de software y un uso de CPU
    claramente menor.
 
+   **Resultados en n02 (Iris Xe) con SmartTube, 06/10/2026** (decoders por hardware en la
+   instancia, pantalla 1280x720, scrcpy conectado a la vez): 720p y 1080p a 24 fps fluidos
+   (0 frames descartados), 720p a 60 fps AVC fluido, un H.264 a 60 fps de mayor resolución con
+   tirones (más de la mitad de los frames descartados), 2160p VP9 no llega, y **HDR (VP9
+   perfil 2, 10 bits) falla** porque el componente rechaza salida de 10 bits. El camino
+   actual hace GPU→RAM→socket→copia a gralloc→compositor (que reescala a la pantalla)
+   →conversión→encode, todo en un hilo por stream.
+
+   **Hallazgo crítico (06/10/2026): P010 reinicia Android entero en redroid.** El servicio allocator
+   de gralloc (`gralloc_gbm_bo_create`, gralloc.gbm.so) muere con SIGFPE (división por cero) al
+   asignar un buffer P010, y como el allocator es crítico, zygote y system_server se reinician: en la
+   instancia de n02 (Iris Xe) scrcpy quedó apuntando al sistema viejo y parecía colgado. Lo disparaba
+   `getHalPixelFormatForBitDepth10` / `isHalPixelFormatSupported`, que asignan un buffer de prueba. El
+   componente ya **no pide ni consulta P010**: la salida de 10 bits (HEVC Main10, VP9 perfil 2) se
+   entrega como YV12 de 8 bits con los 8 bits altos (verificado bit a bit contra ffmpeg en Polaris).
+   Sin HDR real ni rango de 10 bits, que scrcpy tampoco conserva. Pendiente: los decoders de software
+   de Android hacen la misma consulta con VP9 de 10 bits y probablemente tiren el sistema abajo en esta
+   imagen (sin probar); es un bug de gralloc de redroid para reportar upstream.
+
+   **Limitación conocida de esta etapa (decidida 06/10/2026):** SmartTube sigue ofreciendo en su menú
+   formatos UHD y HDR aunque la pantalla de la instancia sea de 720p y no declare HDR (no filtra por
+   pantalla). Solución provisoria: fijar en SmartTube la calidad máxima por defecto (p. ej. 1080p 60 fps
+   VP9 sin HDR), que el reproductor respeta. El HDR no se oculta a propósito: el decoder lo acepta y lo
+   entrega como 8 bits, mientras que quitar esos perfiles mandaría el video a decoders de software que
+   probablemente reinicien Android. Se revisa cuando esté el límite de resolución anunciada (punto 3).
+
+   **Medición por etapa (06/10/2026, Polaris en jgustavo46, por la ruta completa de Android;
+   `REDROID_FORGE_HWDEC_STATS=1` imprime estos promedios al cerrar cada sesión).** Milisegundos por frame, lado daemon:
+
+   | clip | MB/frame | espera GPU (decode) | descarga GPU→RAM | copia compacta | armar cola | escritura al socket | total daemon |
+   |---|---|---|---|---|---|---|---|
+   | H.264 720p60 | 1,4 | 0,5 | 2,5 | 0,1 | 0,6 | 1,2 | ~5,2 (31 % de un core a 60 fps) |
+   | H.264 1080p | 3,1 | 0,7 | 4,3 | 0,2 | 0,9 | 3,2 | ~9,6 |
+   | HEVC 4K | 12,4 | 2,6 | 13,6 | 1,6 | 2,9 | 4,6 | ~26 (techo ~38 fps) |
+
+   **Lo que domina es la descarga GPU→RAM (50-55 %), no el decode** (0,5-2,6 ms, el GPU va sobrado). 12,4 MB en
+   13,6 ms son ~0,9 GB/s: lectura lenta de memoria de video, típica de mapear la superficie con
+   `vaDeriveImage` en una GPU discreta (la ruta de `av_hwframe_transfer_data`). Siguen las copias en CPU
+   (cola + socket + conversión en Android, en serie en un hilo) y, por último, el decode. A 60 fps el
+   presupuesto es 16,7 ms por frame: 720p y 1080p entran, 4K no. No se midió Intel (n02 pausada por RAM) ni
+   el lado Android (lectura del socket y copia al bloque), que suma al total.
+
+   **Descarga GPU→RAM mejorada (06/10/2026, Polaris).** Se comparó `av_hwframe_transfer_data` (ffmpeg) contra
+   `vaGetImage`, `vaDeriveImage` + copia normal y `vaDeriveImage` + cargas no temporales SSE4.1
+   (`REDROID_FORGE_HWDEC_DOWNLOAD=ffmpeg|getimage|derive|derive-sse`). Los tres modos directos dan frames
+   idénticos a ffmpeg. Descarga + copia compacta por frame y fps de punta a punta por Android:
+   720p60 2,4→1,0 ms (160→188 fps), 1080p 4,3→1,9 ms (82→134 fps), 4K 14,6→8,3 ms (31→37 fps).
+   **`derive-sse` queda por defecto**, con una autoverificación: el primer frame de cada sesión se baja
+   también por ffmpeg y se compara byte a byte; si la descarga directa falla o difiere (tiling de Intel,
+   otro driver) la sesión vuelve al camino de ffmpeg y lo avisa por stderr. **Sin probar en Intel (Iris Xe)
+   ni en el 5700G**: ahí puede caer a ffmpeg, o ganar menos, y hay que medirlo.
+   Con esto lo que queda más caro del daemon son la cola y el socket (~3 ms por frame a 1080p).
+
+   **Frames por memoria compartida (06/10/2026, Polaris).** El daemon crea un memfd por sesión (512 MiB
+   virtuales, solo ocupa lo que escriben los frames), lo manda por SCM_RIGHTS en la respuesta de apertura
+   (`HwDecOpenRequest.flags = VAAPI_HWDEC_OPEN_SHM`) y baja cada frame directamente ahí; el componente lo mapea
+   de solo lectura y copia de ahí al bloque de gralloc. Quedan dos copias menos por frame (la cola del daemon y
+   el `write`/`read` por el socket) y el tiempo de cola + socket pasa de ~3 ms a ~0. Sin el flag el protocolo
+   sigue siendo el inline de antes. Frames idénticos a la referencia en todos los clips (8 y 10 bits).
+   Rendimiento puro (`NO_HASH=1`, sin verificar píxeles), hardware contra el decoder de software de Android en
+   la misma máquina: H.264 720p60 431 vs 298 fps, H.264 1080p 222 vs 125, HEVC 1080p 196 vs 196, HEVC 4K 55 vs 70.
+   **El valor es el CPU que deja libre, no los fps:** CPU total del host por cada 100 frames (incluye la
+   herramienta y el framework en los dos casos): H.264 1080p 0,64 s con hardware contra 2,44 s con software
+   (3,8x menos), HEVC 1080p 0,72 contra 2,14 (3,0x menos), HEVC 4K 1,69 contra 5,62 (3,3x menos).
+   Pendiente: el `.policy` de seccomp ahora lleva `recvmsg` (no se aplica en redroid, pero sí en un dispositivo
+   real); y medir Intel y el 5700G.
+
+   **Validación en uso real (06/10/2026): éxito.** SmartTube en una instancia de jgustavo46 (Polaris, El Cóndor),
+   visto por scrcpy desde Patagones (dos ciudades, dos ISP, sin conexión directa de Tailscale: pasa por un relay
+   DERP), reproduciendo un video 1080p a 60 fps AVC de 7,7 Mbps de un canal de pruebas 16K: decode y encode
+   por hardware a la vez, 0 frames descartados por el reproductor, daemon con 10-20 % de un núcleo, calidad
+   impecable y un tironeo muy leve en scrcpy. Lo que queda anotado como mejora, no como bloqueo:
+   - **El encoder ignora el bitrate** (QP fijo 26, sin control de tasa; `EncodeRequest` no lo trae y el
+     componente Android no lo lee). scrcpy pide 8 Mbps y el daemon codifica a ~50 Mbps a 720p60: explica la
+     calidad tan alta y el tironeo leve por la subida remota. Solución: control CBR/VBR en el daemon (campo de
+     bitrate y fps en el protocolo, atributo de control de tasa en `vaCreateConfig`, buffers de parámetros
+     misceláneos de VA-API). Fase de encode, después de la primera versión. Prueba rápida posible: variable
+     de entorno para subir el QP.
+   - **Cuelgue intermitente del VCE de la Polaris** (`ring vce0 timeout`, atribuido a `daemon:cs0`, reset del GPU
+     con `VRAM is lost`), **2 veces en ~16 min** de reproducción 1080p60 + scrcpy (22:33 y 22:49): tras el
+     reset, surfaceflinger y systemui abortan en Mesa y Android se reinicia. En la segunda, el daemon llevaba
+     ~10 s inactivo (0 % de CPU) y se colgó con el primer frame al reanudar: sospecha de reactivación del VCE
+     tras estar inactivo (power gating) o del salto de reloj de memoria 300→2000 MHz, sin verificar. El reloj
+     bajo (300 MHz) es estable en esa GPU. Si se repite: cruzar con `pp_dpm_mclk`, probar deshabilitar el
+     power gating del VCE (`amdgpu.ppfeaturemask`) o fijar el estado de energía. Sin repro con solo decode.
+   - **El daemon no se relanzaba** tras morir (el reset del GPU lo aborta con SIGABRT: "The CS has cancelled
+     because the context is lost"), dejando sin encode ni decode a todas las instancias hasta el próximo
+     `ensureDaemonRunning()`. ✅ Hecho: supervisor en `hwAccel.js` que lo relanza con espera creciente (1 s,
+     doblando hasta 30 s; vuelve a 1 s si vivió más de un minuto). Probado matándolo con SIGKILL: vuelve en 1 s.
+
+   **Intel Iris Xe (n02, 07/10/2026): todo verificado.** H.264 720p/1080p, HEVC 1080p, HEVC Main10, VP9 y VP9
+   perfil 2 (10 bits): frames idénticos a la referencia (0 distintos) en los tres códecs, con la memoria
+   compartida y la descarga directa por `vaDeriveImage`+SSE: **en Intel no cayó al camino de ffmpeg** (la
+   autoverificación del primer frame pasó). Bug corregido en esta prueba: el CSD de VP9 que entrega Android
+   (el `CodecPrivate` del WebM, empieza con 0x01) se anteponía al primer frame como si fueran SPS/PPS y
+   libavcodec lo rechazaba (`frame_sync_byte_0 out of range`); ahora solo H.264 y HEVC reciben la configuración
+   antepuesta. CPU total del host por 100 frames (herramienta de prueba, que además copia cada frame a un
+   ByteBuffer: un reproductor con superficie no paga eso), hardware contra el decoder de software de Android:
+   H.264 1080p 1,99 s contra 5,32 s (2,7x menos), HEVC 1080p 1,80 contra 4,87 (2,7x menos), VP9 1080p 1,72
+   contra 2,46 (1,4x menos), VP9 720p 1,02 contra 1,26 (1,2x menos). **El ahorro de VP9 es modesto**: libvpx es muy
+   eficiente y el costo fijo del camino (copiar 1,4-3 MB por frame a gralloc y el framework) pesa. En fps, el
+   software de VP9 gana (116 contra 93 fps a 1080p) y el de HEVC empata. n02 usa un CPU de notebook y tenía su
+   pila de desarrollo corriendo de fondo.
+
+   **AMD 5700G / Vega (server01, 07/10/2026): todo verificado, sin tocar producción.** Una instancia de prueba
+   (backend en el puerto 8099, adb 5700, slot de binder 5, contenedores y volumen propios) conviviendo con las 6
+   instancias del dashboard, que quedaron **idénticas** (mismos contenedores y fechas, mismo binderfs, mismos
+   puertos); al terminar se desmontó todo, incluidos los nodos de binderfs y la imagen oficial que se había
+   bajado. La 5700G registra H.264, HEVC y VP9: los tres códecs, en 8 y 10 bits, dan 0 frames distintos contra la
+   referencia, con memoria compartida y descarga directa (sin caer a ffmpeg). Solo decode, clips cortos, sin
+   scrcpy, para no cargar la GPU que comparten las instancias de producción (un reset de GPU las afectaría a
+   todas); no se midió CPU por el ruido de fondo de producción. Para convivir con otro orquestador se agregó
+   `REDROID_FORGE_BINDER_RESERVED` (lista de slots de binder a no reutilizar): el backend solo conoce los slots
+   de su propio registro y, con el registro vacío, habría elegido el slot 1 y reutilizado el binder de una
+   instancia ajena. Incidental: en esta máquina los decoders de software de Android dan 1080p distinto de la
+   referencia (los de hardware, idénticos).
+   **Plataformas verificadas: AMD Polaris (jgustavo46), Intel Iris Xe (n02) y AMD 5700G (server01).** NVIDIA
+   queda para el final, como se decidió.
+
+   **Siguiente tanda del hwdecode (orden decidido 06/10/2026):**
+   1. ✅ Medir tiempo por etapa (tabla de arriba). Falta el lado Android y Intel.
+   2. ✅ Salida de 10 bits en el componente: HEVC Main10 y VP9 perfil 2, como 8 bits (ver hallazgo de arriba).
+   3. **Límite de resolución anunciada = el escalón estándar (240/360/480/720/1080/1440/2160p)
+      más grande que quepa en la pantalla de la instancia, redondeando hacia abajo, con piso
+      en 720p**, y nunca por encima de lo que el hardware decodifique (eso lo informa el
+      daemon). Se aplica al crear la instancia (`media_codecs.xml` y límite de tamaño de la
+      interfaz Codec2); un cambio de pantalla pide recrear o reparchear. A comprobar con
+      SmartTube: los decoders de software siguen declarando 4K y un player que mire el
+      máximo entre todos podría seguir ofreciendo UHD.
+   4. Ganancias baratas según la medición (✅ descarga por `vaDeriveImage`+SSE hecha; ✅ memoria compartida hecha; faltan los hilos
+      en etapas y SIMD en U/V): etapas en hilos (decodificar el N+1 mientras se
+      baja y envía el N), `vaCopy` en vez de leer memoria de video con la CPU, memoria
+      compartida (memfd) en vez de socket, SIMD en la separación de U/V.
+   5. Si no alcanza, 2b (zero-copy): mantiene el frame en el GPU de punta a punta; el
+      compositor lo reescala sin pasar por la CPU. Riesgo: que el gralloc de redroid acepte el
+      formato y modificador de tiling.
+   Escalar dentro del daemon antes de bajar el frame ahorra copia pero cambia el tamaño que
+   ve la app: solo como opción explícita, nunca por defecto.
+
    **HDR (anotado 06/10/2026): no se conserva por scrcpy hoy, y no bloquea nada.**
    La pantalla de redroid no declara HDR (`supportedHdrTypes=[]`, sin wide color),
    scrcpy 4.1 no tiene opciones de HDR/10 bits, y el encoder es H.264 de 8 bits:
@@ -436,3 +575,32 @@ se retoma el mecanismo de donaciones/soporte (sección 8 de
     (bloqueo por dominio, sin granularidad por app).
   - Reglas por app: definir si se guardan en el manifest del módulo o por
     instancia.
+- **Más códecs de audio (idea, 06/10/2026).** Hoy el audio por scrcpy solo
+  anda con `--audio-codec=aac`; el default (opus) falla. scrcpy ofrece opus,
+  aac, flac y raw, así que el límite está en los encoders que la imagen
+  Android expone, no en scrcpy. No es para la primera versión.
+  - *Chequeo previo (~5 min, en la instancia de jgustavo46):* log de scrcpy
+    con opus y `dumpsys media.codec`, para confirmar por qué falla. Hipótesis
+    sin verificar: el `media_codecs.xml` de la imagen oficial no registra el
+    encoder `c2.android.opus.encoder` (AOSP lo trae por software), igual que
+    pasaba con los decoders.
+  - *Si es eso:* se registra desde el módulo de integración al crear la
+    instancia (mismo mecanismo que `addCodecsToXml` para los decoders), sin
+    imagen custom. Con opus como default (menos latencia y bitrate que aac).
+  - `raw` no necesita encoder (más ancho de banda; sirve por LAN y para
+    diagnóstico). `flac` es encoder por software de AOSP: probar si está
+    registrado.
+  - Sin aceleración por hardware: el costo de CPU del audio es despreciable.
+- **Zero-copy del decode y 4K a 60 fps (decidido 06/10/2026: después de la primera versión funcional
+  completa, igual que los códecs de audio).** Hoy el frame baja del GPU a RAM y se copia a gralloc; a 1080p
+  alcanza de sobra (>200 fps, ~3x menos CPU que software), pero 4K tiene un techo de ~55 fps por la copia de
+  12 MB por frame. Diseño pensado: la inversa del encoder. Android reserva el buffer de salida (gralloc,
+  dma-buf del mismo GPU) y pasa su fd al daemon por `SCM_RIGHTS`; el daemon lo importa como superficie VA y
+  hace un paso de VPP en el GPU (copia, conversión a NV12 y escalado a la pantalla de la instancia);
+  sincroniza con `vaSyncSurface` o un fence. La memoria compartida actual queda de respaldo con la misma
+  autoverificación del primer frame. Ventajas: sin descarga GPU→RAM ni copia a gralloc (casi cero CPU por
+  frame), 4K y 10 bits realistas, escalado en el GPU, el compositor consume el buffer sin volver a subirlo.
+  Riesgos: el gralloc de redroid es frágil (P010 reinicia Android; hay que probar NV12 con cuidado),
+  modificadores de tiling en Intel que gralloc no informa, y es específico por driver (AMD, Intel, NVIDIA).
+  **Primer paso, un spike de ~1 día:** ver si gralloc asigna NV12 sin romper nada y si el daemon puede
+  importar ese fd y escribir en él, antes de comprometer el diseño.

@@ -132,9 +132,9 @@ typedef struct {
  * reordenados: normalmente 0 o 1, mas cuando hay B-frames. EOS vacia el decoder y
  * devuelve los frames que quedaban. FLUSH descarta referencias y salida pendiente.
  *
- * Los frames viajan como bytes (NV12 u P010 compactos, sin padding): barato hasta
- * 1080p (~93 MB/s en NV12); para 4K de 10 bits (~750 MB/s) habria que pasar un
- * dma-buf (paso 2b, solo si la medicion lo justifica).
+ * Los frames son NV12 u P010 compactos, sin padding. Viajan inline por el socket, o por una memoria compartida
+ * (memfd) si el cliente la pide (VAAPI_HWDEC_OPEN_SHM), que evita dos copias por frame. Para 4K de 10 bits
+ * (~750 MB/s) habria que pasar un dma-buf (paso 2b, solo si la medicion lo justifica).
  *
  * VAAPI_CMD_HWDEC_CAPS: tag, y el daemon responde HwDecCapsResponse (una sola
  * respuesta, la conexion se cierra). Lo usa el backend para registrar en Android
@@ -158,16 +158,30 @@ typedef enum {
     VAAPI_HWDEC_MSG_FLUSH = 2,
     VAAPI_HWDEC_MSG_EOS = 3,
     VAAPI_HWDEC_MSG_CLOSE = 4,
+    /* Datos de configuracion del stream (SPS/PPS/VPS en Annex-B, el "codec config" de Android), SIN imagen.
+     * libavcodec rechaza un paquete H.264 que trae solo parametros ("no frame!"), asi que el daemon los
+     * guarda y los antepone al siguiente access unit (y de nuevo tras un FLUSH/EOS). Sigue `size` bytes;
+     * la respuesta no trae frames. */
+    VAAPI_HWDEC_MSG_CONFIG = 5,
 } VaapiHwdecMsg;
+
+/* HwDecOpenRequest.flags: el cliente sabe recibir el fd de una memoria compartida (SCM_RIGHTS) y leer ahi los
+ * frames. Si el daemon la ofrece, HwDecOpenResponse.shm_mib != 0 y el fd viaja adjunto a esa respuesta; los frames
+ * ya NO siguen inline: tras cada HwDecResponse vienen `nframes` HwDecFrameHeader SIN datos, y el frame k esta en
+ * la memoria compartida, desde el offset (suma de los `size` anteriores, cada uno redondeado hacia arriba a
+ * VAAPI_HWDEC_SHM_ALIGN). Los frames de una respuesta se pisan con los de la siguiente: el cliente los copia antes
+ * del proximo pedido. Sin el flag (o si el daemon no puede), el protocolo es el inline de siempre. */
+#define VAAPI_HWDEC_OPEN_SHM 1u
+#define VAAPI_HWDEC_SHM_ALIGN 4096u
 
 typedef struct {
     uint32_t codec; /* VAAPI_HWDEC_CODEC_* */
-    uint32_t reserved;
+    uint32_t flags; /* VAAPI_HWDEC_OPEN_* */
 } HwDecOpenRequest;
 
 typedef struct {
-    int32_t status; /* 0 = sesion abierta */
-    uint32_t reserved;
+    int32_t status;   /* 0 = sesion abierta */
+    uint32_t shm_mib; /* tamano de la memoria compartida en MiB (0 = no hay, frames inline) */
 } HwDecOpenResponse;
 
 typedef struct {

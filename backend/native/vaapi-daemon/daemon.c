@@ -19,6 +19,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <unistd.h>
 #include <errno.h>
 #include <sys/socket.h>
@@ -50,6 +51,8 @@
 
 #ifdef HAVE_HWDEC
 #include <pthread.h>
+#include <sys/mman.h>
+#include <sys/syscall.h>
 #include "hwdec.h"
 #endif
 
@@ -961,6 +964,12 @@ static int io_read_all(int fd, void *buf, size_t len) {
     return 1;
 }
 
+static uint64_t mono_ns(void) {
+    struct timespec t;
+    clock_gettime(CLOCK_MONOTONIC, &t);
+    return (uint64_t)t.tv_sec * 1000000000ull + (uint64_t)t.tv_nsec;
+}
+
 static int io_write_all(int fd, const void *buf, size_t len) {
     size_t sent = 0;
     while (sent < len) {
@@ -998,15 +1007,79 @@ static int fq_append(FrameQueue *q, const HwDecFrame *f) {
 }
 
 /* Vacia lo que el decoder tenga listo. Devuelve 0, o <0 si hubo un error real. */
+static __thread uint64_t tl_ns_queue;  /* tiempo en fq_append del hilo actual (REDROID_FORGE_HWDEC_STATS) */
+
+/* Memoria compartida (memfd) de la sesion hwdec, si el cliente la pidio: los frames se escriben ahi directamente. */
+typedef struct {
+    uint8_t *base;
+    size_t cap, off;
+} ShmWin;
+static __thread ShmWin *tl_shm;
+
+static size_t shm_align(size_t n) {
+    return (n + VAAPI_HWDEC_SHM_ALIGN - 1) / VAAPI_HWDEC_SHM_ALIGN * VAAPI_HWDEC_SHM_ALIGN;
+}
+
+static int fq_append_hdr(FrameQueue *q, const HwDecFrame *f) {
+    size_t need = q->len + sizeof(HwDecFrameHeader);
+    if (need > q->cap) {
+        size_t cap = q->cap ? q->cap * 2 : 4096;
+        unsigned char *nb = realloc(q->buf, cap);
+        if (!nb) return -1;
+        q->buf = nb;
+        q->cap = cap;
+    }
+    HwDecFrameHeader h = {.width = f->width, .height = f->height, .is_10bit = (uint32_t)f->is_10bit,
+                          .size = (uint32_t)f->size, .pts = f->pts};
+    memcpy(q->buf + q->len, &h, sizeof(h));
+    q->len = need;
+    q->nframes++;
+    return 0;
+}
+
 static int hwdec_drain(HwDecSession *s, FrameQueue *q) {
     HwDecFrame f;
     for (;;) {
-        int r = hwdec_receive(s, &f);
+        int r;
+        if (tl_shm) {
+            /* Modo memoria compartida: el frame se baja directo a su lugar; en la cola solo queda el encabezado. */
+            r = hwdec_receive_to(s, &f, tl_shm->base + tl_shm->off, tl_shm->cap - tl_shm->off);
+            if (r == HWDEC_AGAIN || r == HWDEC_EOF) return 0;
+            if (r < 0) return r;
+            tl_shm->off += shm_align(f.size);
+            if (fq_append_hdr(q, &f) != 0) return -1;
+            continue;
+        }
+        r = hwdec_receive(s, &f);
         if (r == HWDEC_AGAIN || r == HWDEC_EOF) return 0;
         if (r < 0) return r;
-        if (fq_append(q, &f) != 0) return -1;
+        const uint64_t t0 = mono_ns();
+        int ar = fq_append(q, &f);
+        tl_ns_queue += mono_ns() - t0;
+        if (ar != 0) return -1;
     }
 }
+
+/* Respuesta de apertura con el fd de la memoria compartida adjunto (SCM_RIGHTS). */
+static int send_open_resp_fd(int sock, const HwDecOpenResponse *resp, int fd) {
+    struct iovec iov = {.iov_base = (void *)resp, .iov_len = sizeof(*resp)};
+    union {
+        struct cmsghdr align;
+        char buf[CMSG_SPACE(sizeof(int))];
+    } u;
+    memset(&u, 0, sizeof(u));
+    struct msghdr msg = {.msg_iov = &iov, .msg_iovlen = 1, .msg_control = u.buf, .msg_controllen = sizeof(u.buf)};
+    struct cmsghdr *c = CMSG_FIRSTHDR(&msg);
+    c->cmsg_level = SOL_SOCKET;
+    c->cmsg_type = SCM_RIGHTS;
+    c->cmsg_len = CMSG_LEN(sizeof(int));
+    memcpy(CMSG_DATA(c), &fd, sizeof(int));
+    ssize_t n;
+    do { n = sendmsg(sock, &msg, MSG_NOSIGNAL); } while (n < 0 && errno == EINTR);
+    return n == (ssize_t)sizeof(*resp) ? 0 : -1;
+}
+
+#define HWDEC_SHM_MIB 512u  /* memoria virtual: solo se toca (y ocupa RAM) lo que escriben los frames */
 
 static void *hwdec_stream_thread(void *arg) {
     int fd = (int)(intptr_t)arg;
@@ -1015,6 +1088,17 @@ static void *hwdec_stream_thread(void *arg) {
     HwDecSession *s = NULL;
     unsigned char *au = NULL;
     size_t au_cap = 0;
+    /* Configuracion del stream (VAAPI_HWDEC_MSG_CONFIG): pendiente de anteponer al proximo AU, y la ultima
+     * conocida para repetirla tras un reinicio del decoder. */
+    unsigned char *cfg = NULL, *last_cfg = NULL, *joined = NULL;
+    size_t cfg_len = 0, last_cfg_len = 0, joined_cap = 0;
+    int need_replay = 1;
+    ShmWin shm = {0};
+    int memfd = -1;
+    tl_shm = NULL;
+    const int stats = getenv("REDROID_FORGE_HWDEC_STATS") != NULL;
+    uint64_t ns_wait = 0, ns_write = 0, nresp = 0;
+    tl_ns_queue = 0;
 
     if (io_read_all(fd, &open_req, sizeof(open_req)) != 1) goto done;
     if (open_req.codec < HWDEC_NCODECS) s = hwdec_open(hwdec_node(), (HwDecCodec)open_req.codec);
@@ -1023,14 +1107,38 @@ static void *hwdec_stream_thread(void *arg) {
         io_write_all(fd, &open_resp, sizeof(open_resp));
         goto done;
     }
-    if (io_write_all(fd, &open_resp, sizeof(open_resp)) != 0) goto done;
-    fprintf(stderr, "hwdec: sesion abierta (%s)\n", hwdec_codec_name((HwDecCodec)open_req.codec));
+    if (open_req.flags & VAAPI_HWDEC_OPEN_SHM) {
+        /* El cliente sabe usar memoria compartida: memfd + mmap, y el fd viaja con la respuesta. Si algo falla
+         * se sigue con frames inline (el cliente lo sabe por shm_mib == 0). */
+        const size_t cap = (size_t)HWDEC_SHM_MIB << 20;
+        memfd = (int)syscall(SYS_memfd_create, "redroid-forge-hwdec", 1u /* MFD_CLOEXEC */);
+        if (memfd >= 0 && ftruncate(memfd, (off_t)cap) == 0) {
+            void *m = mmap(NULL, cap, PROT_READ | PROT_WRITE, MAP_SHARED, memfd, 0);
+            if (m != MAP_FAILED) {
+                shm.base = m;
+                shm.cap = cap;
+                open_resp.shm_mib = HWDEC_SHM_MIB;
+            }
+        }
+        if (!shm.base && memfd >= 0) { close(memfd); memfd = -1; }
+    }
+    if (shm.base) {
+        if (send_open_resp_fd(fd, &open_resp, memfd) != 0) goto done;
+        tl_shm = &shm;
+    } else if (io_write_all(fd, &open_resp, sizeof(open_resp)) != 0) {
+        goto done;
+    }
+    fprintf(stderr, "hwdec: sesion abierta (%s%s)\n", hwdec_codec_name((HwDecCodec)open_req.codec),
+            shm.base ? ", memoria compartida" : "");
 
     for (;;) {
         HwDecRequest rq;
+        const uint64_t tw0 = stats ? mono_ns() : 0;
         if (io_read_all(fd, &rq, sizeof(rq)) != 1) break;   /* cerro la conexion: se cierra la sesion */
+        if (stats) ns_wait += mono_ns() - tw0;
         FrameQueue q = {0};
         int status = 0, stop = 0;
+        shm.off = 0;  /* los frames de la respuesta anterior ya los copio el cliente */
 
         switch (rq.msg) {
         case VAAPI_HWDEC_MSG_AU: {
@@ -1042,20 +1150,81 @@ static void *hwdec_stream_thread(void *arg) {
                 au_cap = rq.size;
             }
             if (io_read_all(fd, au, rq.size) != 1) { stop = 1; status = -4; break; }
+            /* Diagnostico (REDROID_FORGE_HWDEC_DEBUG=1): primeros bytes de cada access unit que llega. Sirve
+             * para ver en que formato lo entrega Android (Annex-B con 00 00 00 01, o con prefijo de largo). */
+            if (getenv("REDROID_FORGE_HWDEC_DEBUG")) {
+                char hex[3 * 24 + 1] = {0};
+                for (uint32_t i = 0; i < rq.size && i < 24; i++) snprintf(hex + 3 * i, 4, "%02x ", au[i]);
+                fprintf(stderr, "hwdec: AU pts=%lld size=%u: %s\n", (long long)rq.pts, rq.size, hex);
+            }
+            /* Antepone la configuracion (SPS/PPS) pendiente, o la ultima conocida si el decoder se reinicio. */
+            const unsigned char *send_buf = au;
+            size_t send_len = rq.size;
+            const unsigned char *pre = cfg_len ? cfg : (need_replay ? last_cfg : NULL);
+            size_t pre_len = cfg_len ? cfg_len : (need_replay ? last_cfg_len : 0);
+            if (pre && pre_len) {
+                if (pre_len + rq.size > joined_cap) {
+                    unsigned char *nb = realloc(joined, pre_len + rq.size);
+                    if (!nb) { status = -3; stop = 1; break; }
+                    joined = nb;
+                    joined_cap = pre_len + rq.size;
+                }
+                memcpy(joined, pre, pre_len);
+                memcpy(joined + pre_len, au, rq.size);
+                send_buf = joined;
+                send_len = pre_len + rq.size;
+            }
+            cfg_len = 0;
+            need_replay = 0;
             int r;
-            while ((r = hwdec_send(s, au, rq.size, rq.pts)) == HWDEC_AGAIN) {
+            while ((r = hwdec_send(s, send_buf, send_len, rq.pts)) == HWDEC_AGAIN) {
                 if ((status = hwdec_drain(s, &q)) < 0) break;
             }
             if (status == 0 && r < 0) status = r;
             if (status == 0) status = hwdec_drain(s, &q);
             break;
         }
+        case VAAPI_HWDEC_MSG_CONFIG: {
+            if (rq.size == 0 || rq.size > HWDEC_MAX_AU_SIZE) { status = -2; stop = 1; break; }
+            /* Android entrega los parametros en VARIOS buffers de configuracion (H.264: primero el SPS y
+             * despues el PPS; HEVC: VPS, SPS, PPS). Mientras ningun access unit los haya consumido se
+             * ACUMULAN; el primer CONFIG despues de un AU empieza un juego nuevo. */
+            /* Solo H.264 y HEVC llevan la configuracion DENTRO del bitstream (SPS/PPS/VPS en Annex-B) y necesitan
+             * que se antepongan. En VP8/VP9/AV1 el "CSD" de Android es el CodecPrivate del contenedor (para VP9
+             * empieza con 0x01, no con la marca de sincronizacion 0x49): anteponerlo vuelve invalido el frame. */
+            if (open_req.codec != VAAPI_HWDEC_CODEC_H264 && open_req.codec != VAAPI_HWDEC_CODEC_HEVC) {
+                unsigned char *skip = malloc(rq.size);
+                if (!skip) { status = -3; stop = 1; break; }
+                int rd = io_read_all(fd, skip, rq.size);
+                free(skip);
+                if (rd != 1) { stop = 1; status = -4; }
+                break;
+            }
+            size_t total = cfg_len + rq.size;
+            unsigned char *nb = realloc(cfg, total);
+            if (!nb) { status = -3; stop = 1; break; }
+            cfg = nb;
+            if (io_read_all(fd, cfg + cfg_len, rq.size) != 1) { stop = 1; status = -4; break; }
+            cfg_len = total;
+            unsigned char *nl = realloc(last_cfg, total);
+            if (!nl) { status = -3; stop = 1; break; }
+            last_cfg = nl;
+            memcpy(last_cfg, cfg, total);
+            last_cfg_len = total;
+            break;
+        }
         case VAAPI_HWDEC_MSG_FLUSH:
             hwdec_flush(s);
+            need_replay = 1;
             break;
         case VAAPI_HWDEC_MSG_EOS:
             status = hwdec_send_eos(s);
             if (status == 0) status = hwdec_drain(s, &q);
+            /* Despues de vaciar, libavcodec queda en estado EOF y rechaza mas entrada. El componente de
+             * Android tambien pide vaciar a mitad de stream (drain sin EOS, p. ej. al cambiar de
+             * resolucion), asi que el decoder se reinicia para poder seguir decodificando. */
+            hwdec_flush(s);
+            need_replay = 1;
             break;
         case VAAPI_HWDEC_MSG_CLOSE:
             stop = 1;
@@ -1067,13 +1236,28 @@ static void *hwdec_stream_thread(void *arg) {
         }
 
         HwDecResponse resp = {.status = status, .nframes = q.nframes};
+        const uint64_t ts0 = stats ? mono_ns() : 0;
         int werr = io_write_all(fd, &resp, sizeof(resp));
         if (!werr && q.len) werr = io_write_all(fd, q.buf, q.len);
+        if (stats) { ns_write += mono_ns() - ts0; nresp++; }
         free(q.buf);
         if (werr || stop) break;
     }
 done:
+    tl_shm = NULL;
+    if (shm.base) munmap(shm.base, shm.cap);
+    if (memfd >= 0) close(memfd);
+    if (stats && nresp) {
+        fprintf(stderr,
+                "hwdec-stats[daemon]: %llu respuestas | por respuesta (ms): espera_de_android=%.2f armar_cola=%.2f "
+                "escritura_al_socket=%.2f\n",
+                (unsigned long long)nresp, (double)ns_wait / nresp / 1e6, (double)tl_ns_queue / nresp / 1e6,
+                (double)ns_write / nresp / 1e6);
+    }
     free(au);
+    free(cfg);
+    free(last_cfg);
+    free(joined);
     hwdec_close(s);
     close(fd);
     return NULL;

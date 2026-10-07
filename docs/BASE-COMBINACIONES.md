@@ -365,6 +365,13 @@ que el trabajo humano no crezca linealmente con los usuarios:
    un forge más nuevo, y nunca tumba la app por eso. El snapshot pasó a
    `serial` 2: suma la validación de **Intel Iris Xe** y los `chequeos` de ambas
    validaciones.
+   **`serial` 4 (07/10/2026, sin firmar todavía):** el módulo hwenc pasa a la versión 4
+   (decode por hardware) y las dos validaciones suman chequeos de decode por
+   códec (`hwenc.decode-h264`, `-hevc`, `-hevc-10bit`, `-vp9`, `-vp9-10bit`,
+   `hwenc.decoders-registrados`), con sus mediciones, y la combinación declara
+   `problemasConocidos` (timeout intermitente del VCE de Polaris, encoder sin
+   control de bitrate, 10 bits/HDR como 8 bits). Un chequeo `omitido` significa
+   que el hardware no lo ofrece (VP9 en Polaris).
 3. ✅ **Hecho (05/10/2026)** Descarga y actualización con verificación
    completa (`backend/src/lib/knownDbUpdate.js`): la **firma se verifica sobre
    los bytes descargados antes de parsear nada**, luego forma + `serial`

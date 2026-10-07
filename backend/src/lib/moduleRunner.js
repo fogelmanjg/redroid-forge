@@ -101,12 +101,12 @@ async function prepareCreate(requiredModuleIds) {
 // el siguiente ni se llega a start() -- mejor un create() a medio inyectar y
 // visible en el error que un boot con la mitad de los modulos declarados sin
 // aplicarse en silencio.
-async function integrate(requiredModuleIds, containerId) {
+async function integrate(requiredModuleIds, containerId, ctx = {}) {
   for (const manifest of modulesForStage(requiredModuleIds, 4)) {
     const fn = requireStageFn(manifest, 4);
     log(`etapa 4: integrando modulo "${manifest.id}" en ${containerId}...`);
     // eslint-disable-next-line no-await-in-loop
-    await fn(containerId);
+    await fn(containerId, ctx);
   }
 }
 

@@ -1,6 +1,10 @@
 services:
   redroid-forge:
-    build: .
+    build:
+      context: .
+      args:
+        # 1 = daemon con decode por hardware (solo desarrollo, ver Dockerfile)
+        HWDEC: ${HWDEC:-0}
     container_name: redroid-forge
     privileged: true
     pid: host

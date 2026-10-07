@@ -92,6 +92,41 @@ const REQUIRED_BOOT_FLAGS = ['androidboot.use_redroid_c2=1'];
 
 const C2_ENCODER_NAME = 'c2.hardware.encoder.h264';
 
+// Escalones de resolucion estandar (lado largo x lado corto), de menor a mayor.
+const RESOLUTION_LADDER = [
+  [426, 240], [640, 360], [854, 480], [1280, 720], [1920, 1080], [2560, 1440], [3840, 2160],
+];
+const MIN_DECODE_LADDER_INDEX = 3; // piso: 720p, aunque la pantalla sea mas chica
+
+// Limite de resolucion que anuncian los decoders por hardware (decidido 06/10/2026): el escalon estandar mas
+// grande que QUEPA en la pantalla de la instancia, redondeando hacia abajo, con piso en 720p. Se compara en
+// orientacion horizontal sin importar si la pantalla es vertical. Que un reproductor ofrezca UHD en una pantalla
+// de 720p no sirve de nada: el compositor igual lo reescala, y el decode y la copia de un 4K cuestan 9 veces mas.
+// Pura (sin E/S) para poder probarla.
+function decodeSizeLimit(display) {
+  const w = Number(display && display.width);
+  const h = Number(display && display.height);
+  const long = Math.max(w, h);
+  const short = Math.min(w, h);
+  let idx = MIN_DECODE_LADDER_INDEX;
+  if (Number.isFinite(long) && Number.isFinite(short)) {
+    for (let i = RESOLUTION_LADDER.length - 1; i >= MIN_DECODE_LADDER_INDEX; i -= 1) {
+      if (long >= RESOLUTION_LADDER[i][0] && short >= RESOLUTION_LADDER[i][1]) { idx = i; break; }
+    }
+  }
+  const [maxLong, maxShort] = RESOLUTION_LADDER[idx];
+  // XML: ancho y alto maximos por separado (un video vertical tiene el lado largo en el alto), y el limite de
+  // area en bloques de 16x16, que es lo que de verdad deja afuera a un cuadrado de lado largo x lado largo.
+  const blocks = Math.ceil(maxLong / 16) * Math.ceil(maxShort / 16);
+  return { maxLong, maxShort, blocks, label: `${maxShort}p` };
+}
+
+function limitXml(limit) {
+  if (!limit) return '';
+  return `\n            <Limit name="size" max="${limit.maxLong}x${limit.maxLong}" />` +
+    `\n            <Limit name="block-count" range="1-${limit.blocks}" />\n        `;
+}
+
 function log(msg) { console.log(`[hwenc-integrate] ${msg}`); }
 
 // Etapa 3 (ver manifest.json y backend/src/lib/moduleRunner.js): que necesita
@@ -111,24 +146,69 @@ function prepareCreate() {
 // No reemplaza media_codecs.xml entero -- cada imagen base (oficial,
 // custom, lo que sea) puede traer includes/entradas propias que no
 // queremos pisar. Se extrae el archivo YA presente en la instancia, se le
-// agrega la linea del encoder si todavia no esta, y se reinyecta -- sin
-// esta declaracion, MediaCodecList nunca se entera de que el componente
-// existe aunque su store AIDL este bien registrado (Tier 5.6 de
-// redroid-hwenc, confirmado en vivo el 28/09 contra la imagen oficial).
-async function patchMediaCodecsXml(containerId) {
+// agregan las lineas del encoder y de los decoders que el HOST soporta por hardware (las que
+// todavia no estan), y se reinyecta -- sin esta declaracion, MediaCodecList nunca se entera de que
+// los componentes existen aunque su store AIDL este bien registrado (Tier 5.6 de redroid-hwenc,
+// confirmado en vivo el 28/09 contra la imagen oficial).
+//
+// Pura (sin E/S) para poder probarla: devuelve el XML nuevo, o el mismo si no habia nada que agregar.
+function addCodecsToXml(original, decoders, limit = null) {
+  let xml = original;
+  if (!xml.includes(C2_ENCODER_NAME)) {
+    const patched = xml.replace(/<Encoders>/, `<Encoders>\n        <MediaCodec name="${C2_ENCODER_NAME}" type="video/avc" />`);
+    if (patched === xml) {
+      throw new Error('No se encontro <Encoders> en media_codecs.xml -- formato inesperado, no se pudo parchear');
+    }
+    xml = patched;
+  }
+  const missing = decoders.filter((d) => !xml.includes(`"${d.name}"`));
+  if (missing.length > 0) {
+    const lines = missing
+      .map((d) => (limit
+        ? `        <MediaCodec name="${d.name}" type="${d.type}">${limitXml(limit)}</MediaCodec>`
+        : `        <MediaCodec name="${d.name}" type="${d.type}" />`))
+      .join('\n');
+    // La imagen oficial no trae <Decoders> en este archivo (los decoders de software viven en los
+    // <Include>), asi que normalmente se CREA la seccion. Va AL FINAL, despues de los <Include>:
+    // MediaCodecList prefiere el primero que coincide por tipo, y mientras el decode por hardware no
+    // este validado el de software tiene que seguir siendo el predeterminado (el de hardware se elige
+    // por nombre). Pasarlo al principio es el cambio que "enciende" el hardware por defecto.
+    let patched;
+    if (/<Decoders>/.test(xml)) {
+      patched = xml.replace(/<Decoders>/, `<Decoders>\n${lines}`);
+    } else {
+      patched = xml.replace(/<\/MediaCodecs>/, `    <Decoders>\n${lines}\n    </Decoders>\n</MediaCodecs>`);
+    }
+    if (patched === xml) {
+      throw new Error('No se encontro <MediaCodecs> en media_codecs.xml -- formato inesperado, no se pudo parchear');
+    }
+    xml = patched;
+  }
+  return xml;
+}
+
+async function patchMediaCodecsXml(containerId, ctx = {}) {
+  // Esta etapa (4, crear la instancia) corre ANTES que ensureHostInfraReady (etapa 5, donde arranca el
+  // daemon): sin esto, la primera instancia de un backend recien levantado le preguntaria las
+  // capacidades a un daemon que todavia no existe y no registraria ningun decoder. Es idempotente.
+  await hwAccel.ensureDaemonRunning();
+  const caps = await hwAccel.queryHwdecCaps();
+  if (caps.codecs.length > 0) {
+    log(`decode por hardware del host (${caps.driver}): ${caps.codecs.map((c) => c.id).join(', ')}`);
+  } else {
+    log('el host no ofrece decode por hardware (o el daemon no lo informo): no se registran decoders');
+  }
+  const decoders = caps.codecs;
   const tmpPath = path.join(os.tmpdir(), `media_codecs-${containerId.slice(0, 12)}.xml`);
   await execFileAsync('docker', ['cp', `${containerId}:/vendor/etc/media_codecs.xml`, tmpPath]);
   const original = fs.readFileSync(tmpPath, 'utf-8');
-  if (original.includes(C2_ENCODER_NAME)) {
-    log('media_codecs.xml ya tiene la entrada del encoder, no se toca');
-    return;
-  }
-  const patched = original.replace(
-    /<Encoders>/,
-    `<Encoders>\n        <MediaCodec name="${C2_ENCODER_NAME}" type="video/avc" />`,
-  );
+  const limit = ctx.display ? decodeSizeLimit(ctx.display) : null;
+  if (limit) log(`limite de decode por hardware: ${limit.label} (pantalla ${ctx.display.width}x${ctx.display.height})`);
+  const patched = addCodecsToXml(original, decoders, limit);
   if (patched === original) {
-    throw new Error('No se encontro <Encoders> en media_codecs.xml -- formato inesperado, no se pudo parchear');
+    log('media_codecs.xml ya tiene todas las entradas, no se toca');
+    fs.unlinkSync(tmpPath);
+    return;
   }
   fs.writeFileSync(tmpPath, patched);
   await execFileAsync('chown', ['root:root', tmpPath]);
@@ -164,7 +244,7 @@ async function copyIntoContainer(containerId, srcPath, destRelPath) {
 // containerId tiene que ser de un contenedor CREADO pero NUNCA ARRANCADO
 // (o detenido antes de su primer boot real) -- /vendor deja de ser
 // escribible segundos despues de que Android bootea por primera vez.
-async function integrate(containerId) {
+async function integrate(containerId, ctx = {}) {
   log(`inyectando ${FILES.length} archivos en ${containerId}...`);
   for (const relPath of FILES) {
     await copyIntoContainer(containerId, path.join(ARTIFACTS_DIR, relPath), relPath);
@@ -179,7 +259,7 @@ async function integrate(containerId) {
     path.join(__dirname, 'redroid-nodcc.rc'),
     'etc/init/redroid-nodcc.rc',
   );
-  await patchMediaCodecsXml(containerId);
+  await patchMediaCodecsXml(containerId, ctx);
   log('listo -- prepareCreate() ya se encargo de sumar los boot flags requeridos al Cmd del contenedor.');
 }
 
@@ -262,7 +342,7 @@ async function ensureRuntimeReady(containerId) {
 }
 
 module.exports = {
-  prepareCreate, integrate, ensureHostInfraReady, ensureRuntimeReady, FILES, REQUIRED_BOOT_FLAGS, ARTIFACTS_DIR,
+  prepareCreate, integrate, ensureHostInfraReady, ensureRuntimeReady, addCodecsToXml, decodeSizeLimit, FILES, REQUIRED_BOOT_FLAGS, ARTIFACTS_DIR,
 };
 
 if (require.main === module) {
