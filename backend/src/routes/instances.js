@@ -174,7 +174,7 @@ router.post('/', async (req, res) => {
     });
 
     // Etapa 4: entre create() y start() -- unica ventana en la que /vendor es
-    // escribible (ver docs/ARQUITECTURA.md). Si un modulo falla aca, no se
+    // escribible (ver docs/ARCHITECTURE.md). Si un modulo falla aca, no se
     // sigue a start(): mejor limpiar el contenedor recien creado que dejarlo
     // huerfano -- todavia no se llego a store.upsert(), asi que sin este
     // cleanup quedaria invisible para el DELETE de la API (habria que
@@ -272,7 +272,7 @@ router.post('/:id/restart', async (req, res) => {
   }
 });
 
-// No hay convencion previa de "etapa 6 bajo demanda" (ver ARQUITECTURA.md)
+// No hay convencion previa de "etapa 6 bajo demanda" (ver ARCHITECTURE.md)
 // disparada por el usuario contra una instancia puntual -- esta ruta es la
 // primera. A diferencia de scheduleWifiFixes (fire-and-forget tras el
 // start), esto responde recien cuando el spoof + restart terminaron, para

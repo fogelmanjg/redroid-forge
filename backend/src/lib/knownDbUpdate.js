@@ -5,7 +5,7 @@ const knownDbStore = require('./knownDbStore');
 const pkg = require('../../package.json');
 
 // Descarga y aplicacion de la base de combinaciones desde el repo externo
-// (docs/BASE-COMBINACIONES.md, secciones 4.2 y 4.3). Sub-paso 3 del plan.
+// (docs/KNOWN-COMBINATIONS.md, secciones 4.2 y 4.3). Sub-paso 3 del plan.
 //
 // Orden de seguridad: primero se verifica la FIRMA sobre los bytes exactos
 // descargados; recien despues se parsea el JSON. Nada se escribe en disco

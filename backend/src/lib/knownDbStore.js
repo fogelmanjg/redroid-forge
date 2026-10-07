@@ -2,7 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const knownDb = require('./knownDb');
 
-// Carga de la base de combinaciones conocidas (docs/BASE-COMBINACIONES.md,
+// Carga de la base de combinaciones conocidas (docs/KNOWN-COMBINATIONS.md,
 // secciones 4.1 y 5). Dos fuentes: el snapshot que viaja DENTRO de la release
 // (confiable por venir con el codigo) y, mas adelante (sub-paso 3), una copia
 // descargada y verificada en data/db/. Se usa la de mayor `serial`. Este

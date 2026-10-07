@@ -1,7 +1,7 @@
 # Módulo: hwenc
 
 Primer caso real de la convención de módulos con lógica de ejecución
-descripta en `docs/ARQUITECTURA.md` (etapas 3, 4, 5 y 6) y en la sección 5 de
+descripta en `docs/ARCHITECTURE.md` (etapas 3, 4, 5 y 6) y en la sección 5 de
 `docs/REQUIREMENTS.md`. Desde Fase 5, además, es el primer módulo que corre
 a través del runner genérico (`backend/src/lib/moduleRunner.js`) en vez de
 estar cableado a mano en `instances.js` — cualquier módulo futuro con la
@@ -11,7 +11,7 @@ misma forma (`etapa`/`entry` en su manifest) se integra sin tocar
 - **`manifest.json`** — contrato del módulo (qué toca, con qué es compatible),
   mismo schema que ya valida Fase 4 (`moduleManifests.js`), más dos campos
   que ese sistema descubre pero no interpreta: `etapa` (en qué momento del
-  ciclo de vida de la instancia opera, ver `ARQUITECTURA.md`) y `entry` (el
+  ciclo de vida de la instancia opera, ver `ARCHITECTURE.md`) y `entry` (el
   script que hace el trabajo real, resuelto relativo a esta misma carpeta).
   Vive en `backend/src/modules/hwenc/manifest.json` (no en
   `backend/src/modules/manifests/`) — `moduleManifests.js` escanea las dos

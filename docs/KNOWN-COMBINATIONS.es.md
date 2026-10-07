@@ -1,7 +1,13 @@
 # Base de datos de combinaciones conocidas — diseño
 
+**Idiomas:** [English](KNOWN-COMBINATIONS.md) | Español
+
+> El idioma oficial de este proyecto es el **inglés**. Este archivo se ofrece por comodidad y puede
+> no estar perfectamente actualizado o traducido — ante cualquier duda,
+> [KNOWN-COMBINATIONS.md](KNOWN-COMBINATIONS.md) (inglés) es la fuente de verdad.
+
 Estado: **borrador de diseño (05/10/2026)**. Implementa la decisión de
-`REQUIREMENTS.md` sección 2 ("Base de datos de combinaciones conocidas") y el
+[`REQUIREMENTS.es.md`](REQUIREMENTS.es.md) sección 2 ("Base de datos de combinaciones conocidas") y el
 paso 0 de la Fase 5 del `ROADMAP.md`. Pendiente de decidir: ver
 §10 de `REQUIREMENTS.md`.
 
@@ -275,7 +281,7 @@ su propio manifest:
   llama al resolutor → guarda `veredicto` en la instancia. Si no es
   `oficial`, la API lo devuelve y la UI lo muestra de forma visible (mismo
   criterio de transparencia que los tiers de la sección 2).
-- **Módulos GApps/Magisk** (`etapa 4`, ver `ARQUITECTURA.md`): reciben el
+- **Módulos GApps/Magisk** (`etapa 4`, ver [`ARCHITECTURE.es.md`](ARCHITECTURE.es.md)): reciben el
   paquete resuelto (ruta en cache ya verificada). Sus manifests dejan de
   llevar `origen` hardcodeado como fuente de descarga (siguen declarándolo
   para el contrato mostrado al usuario).

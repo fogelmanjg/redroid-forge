@@ -2,7 +2,7 @@
 'use strict';
 
 // Modulo hwenc (etapas 3, 4, 5 y 6 -- ver manifest.json, moduleRunner.js y
-// docs/ARQUITECTURA.md): integra el componente Codec2 de VA-API (proyecto
+// docs/ARCHITECTURE.md): integra el componente Codec2 de VA-API (proyecto
 // redroid-hwenc, Apache-2.0, mismo autor que redroid-forge) en una instancia
 // recien creada, mientras todavia esta detenida, y lo deja usable en runtime.
 //
@@ -54,7 +54,7 @@ const ARTIFACTS_DIR = process.env.REDROID_HWENC_ARTIFACTS_DIR
 // Ruta relativa dentro de ARTIFACTS_DIR -> mismo path dentro de /vendor de
 // la instancia. Cierre transitivo de dependencias calculado a mano el
 // 28/09 (readelf -d sobre el binario + sus .so, resolviendo contra este
-// mismo arbol) -- ver docs/ARQUITECTURA.md para el detalle de como se armo
+// mismo arbol) -- ver docs/ARCHITECTURE.md para el detalle de como se armo
 // esta lista y por que NO incluye libva/libgbm/libdrm/libEGL (esas son
 // dependencias del daemon del host, no de este binario -- error que se
 // cometio la primera vez, corregido acá).
@@ -275,7 +275,7 @@ async function ensureHostInfraReady() {
   await hwAccel.ensureDaemonRunning();
 }
 
-// Etapa 6 (ver docs/ARQUITECTURA.md): a diferencia de integrate(), esto
+// Etapa 6 (ver docs/ARCHITECTURE.md): a diferencia de integrate(), esto
 // corre DESPUES del boot, sobre una instancia ya viva -- unico bug de los
 // 3 encontrados en Tier 5.13 que sigue sin resolverse del lado de la
 // imagen/build. media.c2.hal.selection default a "hidl" en este framework

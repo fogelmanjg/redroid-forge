@@ -2,14 +2,14 @@ const path = require('path');
 const manifests = require('./moduleManifests');
 
 // Orquestador generico de modulos con logica de ejecucion real (etapa/entry
-// en su manifest, ver docs/ARQUITECTURA.md) -- Fase 5, generalizado a partir
+// en su manifest, ver docs/ARCHITECTURE.md) -- Fase 5, generalizado a partir
 // del unico caso real que existia (hwenc, cableado a mano en instances.js).
 // A diferencia de moduleGate.js (que solo decide si un modulo *puede*
 // activarse: compatibilidad + consentimiento), este archivo es el que
 // efectivamente ejecuta el codigo del modulo en el momento del ciclo de vida
 // que le corresponde.
 //
-// Convencion (documentada tambien en docs/ARQUITECTURA.md): un modulo que
+// Convencion (documentada tambien en docs/ARCHITECTURE.md): un modulo que
 // declara "etapa": [...] en su manifest expone, desde el archivo que declara
 // en "entry" (resuelto relativo a LA CARPETA DEL MODULO, nunca a este
 // archivo), una funcion con nombre fijo por cada etapa que le aplique. No
@@ -24,7 +24,7 @@ const STAGE_EXPORT_NAME = {
   // Devuelve `{ binds?: string[], cmd?: string[] }`, puramente aditivo.
   3: 'prepareCreate',
   // Etapa 4: entre runtime.create() y runtime.start() -- unica ventana en la
-  // que /vendor es escribible (ver ARQUITECTURA.md). Recibe el containerId
+  // que /vendor es escribible (ver ARCHITECTURE.md). Recibe el containerId
   // ya creado (todavia detenido).
   4: 'integrate',
   // Etapa 5: infraestructura companion del host, independiente de cualquier

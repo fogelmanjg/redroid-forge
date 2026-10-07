@@ -1,5 +1,5 @@
 // Cobertura del runner generico de modulos (Fase 5, ver docs/ROADMAP.md y
-// docs/ARQUITECTURA.md). No levanta Docker ni redroid real -- los modulos de
+// docs/ARCHITECTURE.md). No levanta Docker ni redroid real -- los modulos de
 // prueba son fixtures puros (sin child_process/dockerode) que solo anotan
 // que los llamaron y con que argumentos, para verificar el punto del ciclo
 // de vida en el que el runner los invoca. El unico contacto con un modulo

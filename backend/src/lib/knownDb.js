@@ -1,7 +1,7 @@
 const crypto = require('crypto');
 
 // Nucleo puro de la base de datos de combinaciones conocidas (diseno en
-// docs/BASE-COMBINACIONES.md). Sin I/O de disco ni red: recibe documentos ya
+// docs/KNOWN-COMBINATIONS.md). Sin I/O de disco ni red: recibe documentos ya
 // leidos, asi se testea sin Docker. Carga/actualizacion/cache van en pasos
 // posteriores (ver seccion 7 del doc).
 
@@ -69,7 +69,7 @@ function validateDatabase(db) {
     for (const v of vals) {
       if (!v.hardware || !isStr(v.hardware.vendor)) errors.push(`combinacion "${c.id}": validacion sin hardware.vendor`);
       if (!['ok', 'parcial', 'falla'].includes(v.resultado)) errors.push(`combinacion "${c.id}": resultado de validacion invalido`);
-      // Chequeos reproducibles (docs/BASE-COMBINACIONES.md 1.1): opcionales
+      // Chequeos reproducibles (docs/KNOWN-COMBINATIONS.md 1.1): opcionales
       // por ahora, pero si estan deben tener id y resultado validos.
       if (v.chequeos !== undefined) {
         if (!Array.isArray(v.chequeos)) errors.push(`combinacion "${c.id}": "chequeos" debe ser un array`);

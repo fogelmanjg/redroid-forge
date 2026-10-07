@@ -5,7 +5,7 @@ const updater = require('../lib/knownDbUpdate');
 const router = express.Router();
 
 // Lectura (sub-paso 2) + consulta/aplicacion de actualizaciones (sub-paso 3,
-// docs/BASE-COMBINACIONES.md). Aplicar es SIEMPRE una accion explicita (POST).
+// docs/KNOWN-COMBINATIONS.md). Aplicar es SIEMPRE una accion explicita (POST).
 router.get('/', (req, res) => {
   try {
     const cfg = updater.getConfig();
