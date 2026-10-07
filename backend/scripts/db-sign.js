@@ -1,19 +1,19 @@
 #!/usr/bin/env node
-// Herramienta de la persona que libera la base (docs/KNOWN-COMBINATIONS.md
-// 4.3). Sin dependencias: usa el ed25519 nativo de Node. Esta copia vive en
-// redroid-forge y se mantiene identica a la de tools/ en redroid-forge-db.
+// Tool for whoever releases the database (docs/KNOWN-COMBINATIONS.md 4.3).
+// Dependency-free: it uses Node's native ed25519. This copy lives in
+// redroid-forge and is kept identical to the one in tools/ of redroid-forge-db.
 //
 //   db-sign.js keygen <dir> [--passphrase-env VAR | --no-passphrase]
-//       crea <dir>/db-signing.key (0600) y <dir>/db-signing.pub
-//   db-sign.js sign   <database.json> <clave-privada> [--passphrase-env VAR]
-//       escribe <database.json>.sig
-//   db-sign.js verify <database.json> <clave-publica.pem>
-//       verifica <database.json>.sig
+//       creates <dir>/db-signing.key (0600) and <dir>/db-signing.pub
+//   db-sign.js sign   <database.json> <private-key> [--passphrase-env VAR]
+//       writes <database.json>.sig
+//   db-sign.js verify <database.json> <public-key.pem>
+//       verifies <database.json>.sig
 //
-// Passphrase: por defecto se PIDE POR TERMINAL con la entrada oculta (la
-// persona que firma la escribe; nada la ve ni la guarda). --passphrase-env
-// existe para automatizar/testear. La clave privada NUNCA debe vivir en un
-// servidor compartido ni en CI (ver 4.3).
+// Passphrase: by default it is ASKED FOR ON THE TERMINAL with hidden input (the
+// person signing types it; nothing sees or stores it). --passphrase-env exists
+// to automate/test. The private key must NEVER live on a shared server or in CI
+// (see 4.3).
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
@@ -26,9 +26,9 @@ const flag = (name) => { const i = args.indexOf(name); return i >= 0 ? args.spli
 const bool = (name) => { const i = args.indexOf(name); if (i >= 0) { args.splice(i, 1); return true; } return false; };
 const die = (m) => { console.error(m); process.exit(2); };
 
-// Pide un texto por terminal sin hacer eco. Falla si no hay TTY.
+// Asks for text on the terminal without echoing it. It fails if there is no TTY.
 function promptHidden(question) {
-  if (!process.stdin.isTTY) die('no hay terminal interactiva para pedir la passphrase: usa --passphrase-env VAR');
+  if (!process.stdin.isTTY) die('there is no interactive terminal to ask for the passphrase: use --passphrase-env VAR');
   return new Promise((resolve) => {
     const rl = readline.createInterface({ input: process.stdin, output: process.stdout, terminal: true });
     rl.stdoutMuted = false;
@@ -39,10 +39,10 @@ function promptHidden(question) {
 }
 
 async function newPassphrase() {
-  const a = await promptHidden(`Passphrase nueva (minimo ${MIN_PASSPHRASE} caracteres): `);
-  if (a.length < MIN_PASSPHRASE) die(`la passphrase debe tener al menos ${MIN_PASSPHRASE} caracteres`);
-  const b = await promptHidden('Repetila: ');
-  if (a !== b) die('las passphrases no coinciden');
+  const a = await promptHidden(`New passphrase (minimum ${MIN_PASSPHRASE} characters): `);
+  if (a.length < MIN_PASSPHRASE) die(`the passphrase must have at least ${MIN_PASSPHRASE} characters`);
+  const b = await promptHidden('Repeat it: ');
+  if (a !== b) die('the passphrases do not match');
   return a;
 }
 
@@ -50,12 +50,12 @@ async function main() {
   const passEnv = flag('--passphrase-env');
   const noPass = bool('--no-passphrase');
   let passphrase = passEnv ? process.env[passEnv] : undefined;
-  if (passEnv && !passphrase) die(`la variable ${passEnv} esta vacia`);
+  if (passEnv && !passphrase) die(`the variable ${passEnv} is empty`);
 
   if (cmd === 'keygen') {
-    const dir = args[0] || die('uso: keygen <dir> [--passphrase-env VAR | --no-passphrase]');
+    const dir = args[0] || die('usage: keygen <dir> [--passphrase-env VAR | --no-passphrase]');
     const keyFile = path.join(dir, 'db-signing.key');
-    if (fs.existsSync(keyFile)) die(`ya existe ${keyFile}: no se sobrescribe (borralo a mano si de verdad queres otra)`);
+    if (fs.existsSync(keyFile)) die(`${keyFile} already exists: it is not overwritten (delete it by hand if you really want another one)`);
     if (!passphrase && !noPass) passphrase = await newPassphrase();
     fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
     fs.chmodSync(dir, 0o700);
@@ -64,37 +64,37 @@ async function main() {
     fs.writeFileSync(keyFile, privateKey.export(privOpts), { mode: 0o600 });
     const pub = publicKey.export({ type: 'spki', format: 'pem' });
     fs.writeFileSync(path.join(dir, 'db-signing.pub'), pub);
-    console.log(`clave privada: ${keyFile} (${passphrase ? 'protegida con passphrase' : 'SIN passphrase'})`);
-    console.log('GUARDA UN RESPALDO de esa clave privada: si se pierde hay que rotar a una nueva.');
-    console.log('Clave publica (esta SI se puede compartir):\n' + pub);
+    console.log(`private key: ${keyFile} (${passphrase ? 'protected with a passphrase' : 'WITHOUT a passphrase'})`);
+    console.log('KEEP A BACKUP of that private key: if it is lost you have to rotate to a new one.');
+    console.log('Public key (this one CAN be shared):\n' + pub);
   } else if (cmd === 'sign') {
     const [file, key] = args;
-    if (!file || !key) die('uso: sign <database.json> <clave-privada> [--passphrase-env VAR]');
+    if (!file || !key) die('usage: sign <database.json> <private-key> [--passphrase-env VAR]');
     const pem = fs.readFileSync(key);
-    // Clave cifrada (PKCS#8 con passphrase): se detecta por la cabecera del PEM,
-    // porque el codigo de error de OpenSSL cuando falta la passphrase cambia
-    // entre versiones de Node.
+    // Encrypted key (PKCS#8 with a passphrase): detected by the PEM header,
+    // because OpenSSL's error code when the passphrase is missing changes
+    // between Node versions.
     if (!passphrase && pem.toString().includes('ENCRYPTED')) {
-      passphrase = await promptHidden('Passphrase de la clave: ');
+      passphrase = await promptHidden('Key passphrase: ');
     }
     let priv;
     try {
       priv = crypto.createPrivateKey({ key: pem, ...(passphrase ? { passphrase } : {}) });
     } catch (e) {
-      die(passphrase ? 'passphrase incorrecta' : `no se pudo abrir la clave privada: ${e.message}`);
+      die(passphrase ? 'wrong passphrase' : `could not open the private key: ${e.message}`);
     }
     const sig = crypto.sign(null, fs.readFileSync(file), priv).toString('base64');
     fs.writeFileSync(`${file}.sig`, sig + '\n');
-    console.log(`firma escrita en ${file}.sig`);
+    console.log(`signature written to ${file}.sig`);
   } else if (cmd === 'verify') {
     const [file, pub] = args;
-    if (!file || !pub) die('uso: verify <database.json> <clave-publica.pem>');
+    if (!file || !pub) die('usage: verify <database.json> <public-key.pem>');
     const ok = crypto.verify(null, fs.readFileSync(file), crypto.createPublicKey(fs.readFileSync(pub)),
       Buffer.from(fs.readFileSync(`${file}.sig`, 'utf-8').trim(), 'base64'));
-    console.log(ok ? 'FIRMA VALIDA' : 'FIRMA INVALIDA');
+    console.log(ok ? 'VALID SIGNATURE' : 'INVALID SIGNATURE');
     process.exit(ok ? 0 : 1);
   } else {
-    die('comandos: keygen | sign | verify');
+    die('commands: keygen | sign | verify');
   }
 }
 

@@ -25,85 +25,85 @@ function setup({ cache } = {}) {
   return { snapshotPath, cachePath };
 }
 
-test('sin cache: usa el snapshot', () => {
+test('no cache: uses the snapshot', () => {
   const r = knownDbStore.loadCurrent(setup());
   assert.strictEqual(r.source, 'snapshot');
   assert.strictEqual(r.db.serial, snapshot.serial);
   assert.deepStrictEqual(r.warnings, []);
 });
 
-test('cache con serial mayor: gana la actualizada', () => {
+test('cache with a higher serial: the updated one wins', () => {
   const nueva = { ...clone(snapshot), serial: snapshot.serial + 1 };
   const r = knownDbStore.loadCurrent(setup({ cache: nueva }));
   assert.strictEqual(r.source, 'actualizada');
   assert.strictEqual(r.db.serial, snapshot.serial + 1);
 });
 
-test('cache mas vieja que el snapshot (release nueva): gana el snapshot, con aviso', () => {
+test('cache older than the snapshot (new release): the snapshot wins, with a warning', () => {
   const vieja = { ...clone(snapshot), serial: snapshot.serial - 1 };
   const r = knownDbStore.loadCurrent(setup({ cache: vieja }));
   assert.strictEqual(r.source, 'snapshot');
 });
 
-test('cache corrupta o invalida: se ignora con aviso, no tumba', () => {
-  for (const cache of ['{no es json', { ...clone(snapshot), bases: 'x' }]) {
+test('corrupt or invalid cache: it is ignored with a warning, it does not bring anything down', () => {
+  for (const cache of ['{not json', { ...clone(snapshot), bases: 'x' }]) {
     const r = knownDbStore.loadCurrent(setup({ cache }));
     assert.strictEqual(r.source, 'snapshot');
-    assert.match(r.warnings[0], /se ignora la base descargada/);
+    assert.match(r.warnings[0], /the downloaded database is ignored/);
   }
 });
 
-test('cache que exige un forge mas nuevo: se ignora con aviso', () => {
+test('cache that requires a newer forge: it is ignored with a warning', () => {
   const exigente = { ...clone(snapshot), serial: snapshot.serial + 1, minForgeVersion: '99.0.0' };
   const r = knownDbStore.loadCurrent(setup({ cache: exigente }));
   assert.strictEqual(r.source, 'snapshot');
-  assert.match(r.warnings[0], /exige redroid-forge/);
+  assert.match(r.warnings[0], /requires redroid-forge/);
 });
 
-test('snapshot roto: el error se propaga (es un release roto)', () => {
+test('broken snapshot: the error propagates (it is a broken release)', () => {
   const dir = tmpDir();
   const snapshotPath = path.join(dir, 's.json');
   fs.writeFileSync(snapshotPath, '{}');
-  assert.throws(() => knownDbStore.loadCurrent({ snapshotPath, cachePath: path.join(dir, 'x.json') }), /Base invalida/);
+  assert.throws(() => knownDbStore.loadCurrent({ snapshotPath, cachePath: path.join(dir, 'x.json') }), /Invalid database/);
 });
 
-test('summarize: cuenta bases, paquetes, combinaciones y oficiales', () => {
+test('summarize: counts bases, packages, combinations and official ones', () => {
   const s = knownDbStore.summarize(knownDbStore.loadCurrent(setup()));
   assert.deepStrictEqual(s.counts, { bases: 1, paquetes: 0, combinaciones: 1, oficiales: 1 });
 });
 
-test('validate: chequeos mal formados se rechazan', () => {
+test('validate: malformed checks are rejected', () => {
   const db = clone(snapshot);
-  db.combinaciones[0].validaciones[0].chequeos = [{ id: 'x', resultado: 'quizas' }, { resultado: 'ok' }];
-  assert.throws(() => knownDb.validateDatabase(db), (e) => /resultado invalido/.test(e.message) && /sin "id"/.test(e.message));
+  db.combinaciones[0].validaciones[0].chequeos = [{ id: 'x', resultado: 'maybe' }, { resultado: 'ok' }];
+  assert.throws(() => knownDb.validateDatabase(db), (e) => /invalid result/.test(e.message) && /without "id"/.test(e.message));
 });
 
-test('snapshot real: hwenc sobre la base oficial es "oficial" en AMD e Intel, "comunidad" en NVIDIA', () => {
+test('real snapshot: hwenc on the official base is "oficial" on AMD and Intel, "comunidad" on NVIDIA', () => {
   const input = { baseDigest: snapshot.bases[0].digest, modulos: { hwenc: snapshot.combinaciones[0].modulos.hwenc } };
   for (const vendor of ['amd', 'intel']) {
     assert.strictEqual(knownDb.resolve(snapshot, { ...input, hostGpuVendor: vendor }).nivel, 'oficial', vendor);
   }
   const nv = knownDb.resolve(snapshot, { ...input, hostGpuVendor: 'nvidia' });
   assert.strictEqual(nv.nivel, 'comunidad');
-  assert.match(nv.motivos[0], /validada en amd, intel/);
+  assert.match(nv.motivos[0], /validated on amd, intel/);
 });
 
-test('snapshot real: toda validacion ok lleva chequeos reproducibles', () => {
+test('real snapshot: every ok validation carries reproducible checks', () => {
   for (const c of snapshot.combinaciones) {
     for (const v of c.validaciones.filter((x) => x.resultado === 'ok')) {
-      assert.ok(Array.isArray(v.chequeos) && v.chequeos.length > 0, `${c.id}/${v.hardware.vendor} sin chequeos`);
+      assert.ok(Array.isArray(v.chequeos) && v.chequeos.length > 0, `${c.id}/${v.hardware.vendor} without checks`);
     }
   }
 });
 
-test('doctor.checkKnownDb: ok sobre el snapshot real', () => {
+test('doctor.checkKnownDb: ok on the real snapshot', () => {
   const r = require('../src/lib/doctor').checkKnownDb();
   assert.strictEqual(r.status, 'ok');
   assert.match(r.detail, /serial/);
 });
 
-// Los tests de rutas corren SIN claves de confianza (archivo vacio) para que
-// ninguno toque la red, aunque el build real traiga la clave del mantenedor.
+// The route tests run WITHOUT trusted keys (an empty file) so that none of them
+// touches the network, even though the real build ships the maintainer's key.
 const NO_KEYS = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'nokeys-')), 'keys.json');
 fs.writeFileSync(NO_KEYS, JSON.stringify({ keys: [] }));
 process.env.REDROID_FORGE_DB_TRUSTED_KEYS_FILE = NO_KEYS;
@@ -115,7 +115,7 @@ async function withServer(fn) {
   try { await fn(`http://127.0.0.1:${server.address().port}`); } finally { server.close(); }
 }
 
-test('GET /api/db: resumen', async () => {
+test('GET /api/db: summary', async () => {
   await withServer(async (base) => {
     const r = await fetch(`${base}/api/db`);
     assert.strictEqual(r.status, 200);
@@ -126,7 +126,7 @@ test('GET /api/db: resumen', async () => {
   });
 });
 
-test('GET /api/db/combinaciones: lista con la base resuelta', async () => {
+test('GET /api/db/combinaciones: list with the resolved base', async () => {
   await withServer(async (base) => {
     const j = await (await fetch(`${base}/api/db/combinaciones`)).json();
     assert.strictEqual(j.combinaciones[0].id, 'redroid15-hwenc');
@@ -135,7 +135,7 @@ test('GET /api/db/combinaciones: lista con la base resuelta', async () => {
   });
 });
 
-test('POST /api/db/update sin claves de confianza: 412 y mensaje claro', async () => {
+test('POST /api/db/update without trusted keys: 412 and a clear message', async () => {
   await withServer(async (base) => {
     const r = await fetch(`${base}/api/db/update`, { method: 'POST' });
     assert.strictEqual(r.status, 412);
@@ -144,15 +144,15 @@ test('POST /api/db/update sin claves de confianza: 412 y mensaje claro', async (
   });
 });
 
-test('POST /api/db/check sin claves: 502 y no hace ninguna conexion', async () => {
+test('POST /api/db/check without keys: 502 and it makes no connection', async () => {
   await withServer(async (base) => {
     const r = await fetch(`${base}/api/db/check`, { method: 'POST' });
     assert.strictEqual(r.status, 502);
-    assert.match((await r.json()).motivo, /sin claves/);
+    assert.match((await r.json()).motivo, /no trusted keys/);
   });
 });
 
-test('GET /api/db incluye el estado de la actualizacion', async () => {
+test('GET /api/db includes the update state', async () => {
   await withServer(async (base) => {
     const j = await (await fetch(`${base}/api/db`)).json();
     assert.strictEqual(j.actualizacion.clavesDeConfianza, 0);

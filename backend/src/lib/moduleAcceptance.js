@@ -5,12 +5,11 @@ const { readJsonArray, writeJsonArray } = require('./jsonFileStore');
 const DATA_DIR = path.join(__dirname, '..', '..', 'data');
 const DEFAULT_STORE_FILE = path.join(DATA_DIR, 'module-acceptances.json');
 
-// Registro de "usuario/instancia acepto el manifest version N de modulo X, en
-// tal fecha" (seccion 5 de docs/REQUIREMENTS.md). No hay auth todavia (Fase
-// 6), asi que la aceptacion vale para toda la instalacion (un solo registro
-// por modulo+version alcanza para "vigente"), pero se guarda el contexto de
-// usuario/instancia disponible para auditoria y para cuando la Fase 6 sume
-// usuarios reales.
+// Record of "user/instance accepted manifest version N of module X, on such
+// a date" (section 5 of docs/REQUIREMENTS.md). There is no auth yet (Phase
+// 6), so the acceptance holds for the whole installation (a single record
+// per module+version is enough for "current"), but the available user/instance
+// context is stored for auditing and for when Phase 6 adds real users.
 let storeFile = DEFAULT_STORE_FILE;
 
 function readAll() {
@@ -37,24 +36,24 @@ function record({ moduleId, version, userId, instanceId, instanceName }) {
   return entry;
 }
 
-// La aceptacion mas reciente registrada para un modulo, sin importar version
-// (para mostrar "aceptaste la v1, la actual es v2" en vez de solo si/no).
+// The most recent acceptance recorded for a module, regardless of version
+// (to show "you accepted v1, the current one is v2" instead of just yes/no).
 function latestFor(moduleId) {
   const all = readAll().filter((a) => a.moduleId === moduleId);
   if (all.length === 0) return null;
   return all.reduce((a, b) => (new Date(a.acceptedAt) >= new Date(b.acceptedAt) ? a : b));
 }
 
-// Vigente = la aceptacion mas reciente es para la version actual del
-// manifest. Si el manifest subio de version (cambio el disclaimer o lo que
-// toca), deja de estar vigente y hay que volver a aceptar.
+// Current = the most recent acceptance is for the manifest's current version.
+// If the manifest went up a version (the disclaimer or what it touches
+// changed), it stops being current and has to be accepted again.
 function isAccepted(moduleId, currentVersion) {
   const latest = latestFor(moduleId);
   return !!latest && latest.version === currentVersion;
 }
 
-// Solo para tests: aisla el archivo de datos para no pisar
-// backend/data/module-acceptances.json real ni depender de su estado previo.
+// Only for tests: isolates the data file so as not to overwrite the real
+// backend/data/module-acceptances.json nor depend on its previous state.
 function _setStoreFileForTests(file) {
   storeFile = file || DEFAULT_STORE_FILE;
 }

@@ -5,10 +5,10 @@ const catalog = require('../../images.json');
 
 const router = express.Router();
 
-// El mismo manifest se usa tanto para listar el catalogo de modulos como
-// para que el frontend renderice el modal de contrato generico (seccion 5)
-// -- acá se le suma el estado de aceptacion y, si se pide para una imagen
-// puntual (?imageId=), si es compatible con ella (compatibleCon).
+// The same manifest is used both to list the module catalog and for the
+// frontend to render the generic contract modal (section 5) -- here the
+// acceptance state is added and, if asked for a specific image (?imageId=),
+// whether it is compatible with it (compatibleCon).
 function withStatus(manifest, imageId) {
   const latest = acceptance.latestFor(manifest.id);
   const out = {
@@ -25,7 +25,7 @@ function withStatus(manifest, imageId) {
       out.incompatibilityReason = out.compatible ? null : manifests.incompatibilityReason(manifest, img);
     } else {
       out.compatible = null;
-      out.incompatibilityReason = `Imagen desconocida: ${imageId}`;
+      out.incompatibilityReason = `Unknown image: ${imageId}`;
     }
   }
 
@@ -38,21 +38,21 @@ router.get('/', (req, res) => {
 
 router.get('/:id', (req, res) => {
   const manifest = manifests.get(req.params.id);
-  if (!manifest) return res.status(404).json({ error: `Modulo desconocido: ${req.params.id}` });
+  if (!manifest) return res.status(404).json({ error: `Unknown module: ${req.params.id}` });
   res.json(withStatus(manifest, req.query.imageId));
 });
 
 router.post('/:id/accept', (req, res) => {
   const manifest = manifests.get(req.params.id);
-  if (!manifest) return res.status(404).json({ error: `Modulo desconocido: ${req.params.id}` });
+  if (!manifest) return res.status(404).json({ error: `Unknown module: ${req.params.id}` });
 
   const { version, instanceId, instanceName, userId } = req.body || {};
-  // Solo se puede aceptar la version actual del manifest -- evita que un
-  // frontend viejo (con un manifest cacheado desactualizado) registre una
-  // aceptacion que ya no corresponde al contrato vigente.
+  // Only the manifest's current version can be accepted -- it prevents an old
+  // frontend (with an outdated cached manifest) from recording an acceptance
+  // that no longer corresponds to the current contract.
   if (version !== manifest.version) {
     return res.status(409).json({
-      error: `La version enviada (${version}) no coincide con la version actual del manifest "${manifest.id}" (${manifest.version}). Volve a leer el contrato.`,
+      error: `The submitted version (${version}) does not match the current version of manifest "${manifest.id}" (${manifest.version}). Read the contract again.`,
     });
   }
 
