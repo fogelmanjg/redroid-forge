@@ -19,6 +19,47 @@ function warn(msg) { console.warn(`[hwAccel] ${msg}`); }
 
 let daemonProcess = null;
 
+// Supervision del daemon: si muere (por ejemplo, un reset del GPU de amdgpu lo aborta con SIGABRT -- "The CS has
+// cancelled because the context is lost"), el encode y el decode por hardware de TODAS las instancias quedan
+// caidos hasta que alguien lo relance. Se relanza solo, con espera creciente para no entrar en un bucle apretado
+// si muere apenas arranca (driver roto, GPU que no vuelve).
+const RESTART_MIN_MS = 1000;
+const RESTART_MAX_MS = 30000;
+const STABLE_UPTIME_MS = 60000; // si vivio al menos esto, el proximo reinicio vuelve a empezar desde el minimo
+let daemonWanted = false;
+let restartTimer = null;
+let restartDelayMs = RESTART_MIN_MS;
+let daemonStartedAt = 0;
+
+// Pura (para probarla): cuanto esperar antes de relanzar, dado cuanto vivio la ultima vez y la espera anterior.
+// Devuelve { wait, next }: esperar `wait` ahora y usar `next` como espera anterior la proxima vez.
+function nextRestartDelay(prevDelayMs, uptimeMs) {
+  const wait = uptimeMs >= STABLE_UPTIME_MS ? RESTART_MIN_MS : Math.max(RESTART_MIN_MS, prevDelayMs);
+  return { wait, next: Math.min(wait * 2, RESTART_MAX_MS) };
+}
+
+function scheduleDaemonRestart(uptimeMs) {
+  if (!daemonWanted || restartTimer) return;
+  const { wait, next } = nextRestartDelay(restartDelayMs, uptimeMs);
+  restartDelayMs = next;
+  warn(`el daemon VA-API se relanza en ${Math.round(wait / 1000)} s`);
+  restartTimer = setTimeout(() => {
+    restartTimer = null;
+    ensureDaemonRunning().catch((e) => {
+      warn(`no se pudo relanzar el daemon VA-API: ${e.message}`);
+      scheduleDaemonRestart(0);
+    });
+  }, wait);
+  if (restartTimer.unref) restartTimer.unref();
+}
+
+// Apagado ordenado: deja de relanzar y mata al daemon.
+function stopDaemon() {
+  daemonWanted = false;
+  if (restartTimer) { clearTimeout(restartTimer); restartTimer = null; }
+  if (daemonProcess) daemonProcess.kill();
+}
+
 // AMD/Intel exponen VA-API encode real (radeonsi/iHD). NVIDIA solo expone
 // decode via nvidia-vaapi-driver (VAEntrypointVLD, no EncSlice) -- el
 // encode en hosts NVIDIA es un componente aparte (redroid-nvidia, Venus-proxy
@@ -49,6 +90,7 @@ function isDaemonAlive() {
 // Un solo daemon por host, compartido por todas las instancias -- no es un
 // proceso por instancia. Idempotente: no hace nada si ya esta corriendo.
 async function ensureDaemonRunning() {
+  daemonWanted = true;
   if (isDaemonAlive()) return;
 
   if (!fs.existsSync(DAEMON_BIN)) {
@@ -61,11 +103,13 @@ async function ensureDaemonRunning() {
   fs.rmSync(SOCKET_PATH, { force: true });
 
   daemonProcess = spawn(DAEMON_BIN, [], { stdio: ['ignore', 'pipe', 'pipe'] });
+  daemonStartedAt = Date.now();
   daemonProcess.stdout.on('data', (d) => log(d.toString().trim()));
   daemonProcess.stderr.on('data', (d) => warn(d.toString().trim()));
   daemonProcess.on('exit', (code, signal) => {
-    warn(`el daemon VA-API termino (code=${code}, signal=${signal}) -- se reintenta en el proximo ensureDaemonRunning()`);
+    warn(`el daemon VA-API termino (code=${code}, signal=${signal})`);
     daemonProcess = null;
+    scheduleDaemonRestart(Date.now() - daemonStartedAt);
   });
 
   const deadline = Date.now() + DAEMON_START_TIMEOUT_MS;
@@ -147,6 +191,6 @@ function queryHwdecCaps({ socketPath = SOCKET_PATH, timeoutMs = 3000 } = {}) {
 }
 
 module.exports = {
-  detectGpuVendor, encodeSupported, ensureDaemonRunning, daemonBind, queryHwdecCaps, parseHwdecCaps,
+  detectGpuVendor, encodeSupported, ensureDaemonRunning, stopDaemon, nextRestartDelay, daemonBind, queryHwdecCaps, parseHwdecCaps,
   HWDEC_COMPONENTS, VAAPI_ROOT, SOCKET_PATH,
 };

@@ -223,6 +223,29 @@ conocidos (ej. el artefacto de scanline en la 4060 con el driver
    Pendiente: el `.policy` de seccomp ahora lleva `recvmsg` (no se aplica en redroid, pero sí en un dispositivo
    real); y medir Intel y el 5700G.
 
+   **Validación en uso real (06/10/2026): éxito.** SmartTube en una instancia de jgustavo46 (Polaris, El Cóndor),
+   visto por scrcpy desde Patagones (dos ciudades, dos ISP, sin conexión directa de Tailscale: pasa por un relay
+   DERP), reproduciendo un video 1080p a 60 fps AVC de 7,7 Mbps de un canal de pruebas 16K: decode y encode
+   por hardware a la vez, 0 frames descartados por el reproductor, daemon con 10-20 % de un núcleo, calidad
+   impecable y un tironeo muy leve en scrcpy. Lo que queda anotado como mejora, no como bloqueo:
+   - **El encoder ignora el bitrate** (QP fijo 26, sin control de tasa; `EncodeRequest` no lo trae y el
+     componente Android no lo lee). scrcpy pide 8 Mbps y el daemon codifica a ~50 Mbps a 720p60: explica la
+     calidad tan alta y el tironeo leve por la subida remota. Solución: control CBR/VBR en el daemon (campo de
+     bitrate y fps en el protocolo, atributo de control de tasa en `vaCreateConfig`, buffers de parámetros
+     misceláneos de VA-API). Fase de encode, después de la primera versión. Prueba rápida posible: variable
+     de entorno para subir el QP.
+   - **Cuelgue intermitente del VCE de la Polaris** (`ring vce0 timeout`, atribuido a `daemon:cs0`, reset del GPU
+     con `VRAM is lost`), **2 veces en ~16 min** de reproducción 1080p60 + scrcpy (22:33 y 22:49): tras el
+     reset, surfaceflinger y systemui abortan en Mesa y Android se reinicia. En la segunda, el daemon llevaba
+     ~10 s inactivo (0 % de CPU) y se colgó con el primer frame al reanudar: sospecha de reactivación del VCE
+     tras estar inactivo (power gating) o del salto de reloj de memoria 300→2000 MHz, sin verificar. El reloj
+     bajo (300 MHz) es estable en esa GPU. Si se repite: cruzar con `pp_dpm_mclk`, probar deshabilitar el
+     power gating del VCE (`amdgpu.ppfeaturemask`) o fijar el estado de energía. Sin repro con solo decode.
+   - **El daemon no se relanzaba** tras morir (el reset del GPU lo aborta con SIGABRT: "The CS has cancelled
+     because the context is lost"), dejando sin encode ni decode a todas las instancias hasta el próximo
+     `ensureDaemonRunning()`. ✅ Hecho: supervisor en `hwAccel.js` que lo relanza con espera creciente (1 s,
+     doblando hasta 30 s; vuelve a 1 s si vivió más de un minuto). Probado matándolo con SIGKILL: vuelve en 1 s.
+
    **Siguiente tanda del hwdecode (orden decidido 06/10/2026):**
    1. ✅ Medir tiempo por etapa (tabla de arriba). Falta el lado Android y Intel.
    2. ✅ Salida de 10 bits en el componente: HEVC Main10 y VP9 perfil 2, como 8 bits (ver hallazgo de arriba).

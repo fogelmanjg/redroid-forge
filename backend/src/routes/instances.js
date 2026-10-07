@@ -180,7 +180,11 @@ router.post('/', async (req, res) => {
     // cleanup quedaria invisible para el DELETE de la API (habria que
     // borrarlo a mano con `docker rm`).
     try {
-      await moduleRunner.integrate(requiredModuleIds, containerId);
+      // `display`: el tamano de pantalla de la instancia, para los modulos que ajustan algo a el (hwenc limita la
+      // resolucion que anuncian los decoders por hardware).
+      await moduleRunner.integrate(requiredModuleIds, containerId, {
+        display: { width: Number(width) || 720, height: Number(height) || 1280 },
+      });
     } catch (e) {
       await runtime.remove(containerId, { force: true }).catch(() => {});
       await runtime.removeVolume(volumeName).catch(() => {});
