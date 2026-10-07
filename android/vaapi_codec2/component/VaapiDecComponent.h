@@ -91,11 +91,16 @@ private:
         uint32_t width = 0, height = 0;
         bool tenBit = false;
         int64_t pts = 0;  // el frameIndex del trabajo cuyo access unit origino este frame
-        std::vector<uint8_t> data;
+        // El contenido (NV12/P010 compacto): en la memoria compartida con el daemon (valido hasta el proximo
+        // pedido al daemon) o, si no hay, en `owned`.
+        const uint8_t *data = nullptr;
+        size_t size = 0;
+        std::vector<uint8_t> owned;
     };
 
     // Conexion con el daemon. Todas se llaman con mLock tomado.
     bool openSessionLocked();
+    void unmapShmLocked();
     void closeSessionLocked();
     // Un mensaje de ida y vuelta: devuelve el status del daemon (<0 = error o conexion caida).
     int exchangeLocked(uint32_t msg, const uint8_t *data, uint32_t size, int64_t pts,
@@ -112,6 +117,8 @@ private:
 
     std::mutex mLock;          // protege la sesion (socket) con el daemon
     int mSock = -1;
+    uint8_t *mShm = nullptr;   // memoria compartida con el daemon (solo lectura), o nullptr
+    size_t mShmSize = 0;
 
     bool mSignalledError = false;
     bool mSignalledOutputEos = false;

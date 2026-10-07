@@ -5,6 +5,7 @@
 
 #include <errno.h>
 #include <string.h>
+#include <sys/mman.h>
 #include <sys/socket.h>
 #include <sys/time.h>
 #include <sys/un.h>
@@ -73,6 +74,34 @@ bool writeAll(int fd, const void *buf, size_t len) {
         sent += static_cast<size_t>(n);
     }
     return true;
+}
+
+
+// Lee la HwDecOpenResponse; si trae un fd adjunto (SCM_RIGHTS) lo deja en *fd, si no, -1.
+bool recvOpenResponse(int sock, HwDecOpenResponse *resp, int *fd) {
+    *fd = -1;
+    struct iovec iov = {.iov_base = resp, .iov_len = sizeof(*resp)};
+    union {
+        struct cmsghdr align;
+        char buf[CMSG_SPACE(sizeof(int))];
+    } u;
+    memset(&u, 0, sizeof(u));
+    struct msghdr msg = {};
+    msg.msg_iov = &iov;
+    msg.msg_iovlen = 1;
+    msg.msg_control = u.buf;
+    msg.msg_controllen = sizeof(u.buf);
+    ssize_t n;
+    do { n = recvmsg(sock, &msg, MSG_CMSG_CLOEXEC); } while (n < 0 && errno == EINTR);
+    if (n <= 0) return false;
+    for (struct cmsghdr *c = CMSG_FIRSTHDR(&msg); c; c = CMSG_NXTHDR(&msg, c)) {
+        if (c->cmsg_level == SOL_SOCKET && c->cmsg_type == SCM_RIGHTS && c->cmsg_len >= CMSG_LEN(sizeof(int))) {
+            memcpy(fd, CMSG_DATA(c), sizeof(int));
+        }
+    }
+    // Una respuesta partida (no pasa con un datagrama de 8 bytes) se completa leyendo el resto.
+    size_t got = static_cast<size_t>(n);
+    return got == sizeof(*resp) || readAll(sock, reinterpret_cast<char *>(resp) + got, sizeof(*resp) - got);
 }
 
 // Marca un trabajo como terminado sin imagen (parametros SPS/PPS, trabajos descartados, EOS).
@@ -396,8 +425,17 @@ VaapiDecComponent::~VaapiDecComponent() {
     closeSessionLocked();
 }
 
+void VaapiDecComponent::unmapShmLocked() {
+    if (mShm) {
+        munmap(mShm, mShmSize);
+        mShm = nullptr;
+        mShmSize = 0;
+    }
+}
+
 bool VaapiDecComponent::openSessionLocked() {
     if (mSock >= 0) return true;
+    unmapShmLocked();  // resto de una sesion que se cayo
     int fd = socket(AF_UNIX, SOCK_STREAM, 0);
     if (fd < 0) {
         ALOGE("socket() failed: %s", strerror(errno));
@@ -419,33 +457,58 @@ bool VaapiDecComponent::openSessionLocked() {
     uint32_t tag = VAAPI_CMD_HWDEC;
     HwDecOpenRequest req = {};
     req.codec = mCodec->wireCodec;
+    req.flags = VAAPI_HWDEC_OPEN_SHM;  // frames por memoria compartida si el daemon puede
     HwDecOpenResponse resp = {};
+    int shmFd = -1;
     if (!writeAll(fd, &tag, sizeof(tag)) || !writeAll(fd, &req, sizeof(req)) ||
-        !readAll(fd, &resp, sizeof(resp))) {
+        !recvOpenResponse(fd, &resp, &shmFd)) {
         ALOGE("hwdec open: the daemon closed the connection");
         close(fd);
         return false;
     }
     if (resp.status != 0) {
+        if (shmFd >= 0) close(shmFd);
         // No hay fallback a software aca: quien llama (MediaCodec/el reproductor) elige otro decoder.
         ALOGE("the daemon refused to open a %s session (status %d): this hardware cannot decode it",
               mCodec->mediaType, resp.status);
         close(fd);
         return false;
     }
+    if (resp.shm_mib != 0 && shmFd >= 0) {
+        const size_t size = static_cast<size_t>(resp.shm_mib) << 20;
+        void *m = mmap(nullptr, size, PROT_READ, MAP_SHARED, shmFd, 0);
+        if (m == MAP_FAILED) {
+            // El daemon ya ofrecio la memoria compartida: sin poder mapearla no se puede seguir en ese modo.
+            ALOGE("mmap of the shared frame memory failed: %s", strerror(errno));
+            close(shmFd);
+            close(fd);
+            return false;
+        }
+        mShm = static_cast<uint8_t *>(m);
+        mShmSize = size;
+    } else if (resp.shm_mib != 0) {
+        ALOGE("the daemon announced shared memory but sent no fd");
+        close(fd);
+        return false;
+    }
+    if (shmFd >= 0) close(shmFd);  // el mapeo sigue valido sin el fd
     mSock = fd;
-    ALOGI("hwdec session open for %s", mCodec->name);
+    ALOGI("hwdec session open for %s%s", mCodec->name, mShm ? " (shared memory)" : "");
     return true;
 }
 
 void VaapiDecComponent::closeSessionLocked() {
-    if (mSock < 0) return;
+    if (mSock < 0) {
+        unmapShmLocked();
+        return;
+    }
     HwDecRequest req = {};
     req.msg = VAAPI_HWDEC_MSG_CLOSE;
     HwDecResponse resp = {};
     if (writeAll(mSock, &req, sizeof(req))) readAll(mSock, &resp, sizeof(resp));
     close(mSock);
     mSock = -1;
+    unmapShmLocked();
 }
 
 int VaapiDecComponent::exchangeLocked(uint32_t msg, const uint8_t *data, uint32_t size, int64_t pts,
@@ -468,6 +531,7 @@ int VaapiDecComponent::exchangeLocked(uint32_t msg, const uint8_t *data, uint32_
         mSock = -1;
         return -1;
     }
+    size_t shmOff = 0;
     for (uint32_t i = 0; i < resp.nframes; i++) {
         HwDecFrameHeader h = {};
         if (!readAll(mSock, &h, sizeof(h)) || h.size > (1u << 30)) {
@@ -481,12 +545,27 @@ int VaapiDecComponent::exchangeLocked(uint32_t msg, const uint8_t *data, uint32_
         f.height = h.height;
         f.tenBit = h.is_10bit != 0;
         f.pts = h.pts;
-        f.data.resize(h.size);
-        if (!readAll(mSock, f.data.data(), h.size)) {
-            ALOGE("hwdec: reading a frame body failed");
-            close(mSock);
-            mSock = -1;
-            return -1;
+        f.size = h.size;
+        if (mShm) {
+            // Los frames de la respuesta estan en la memoria compartida, uno tras otro, cada uno alineado.
+            if (shmOff + h.size > mShmSize) {
+                ALOGE("hwdec: frame outside the shared memory (off=%zu size=%u)", shmOff, h.size);
+                close(mSock);
+                mSock = -1;
+                return -1;
+            }
+            f.data = mShm + shmOff;
+            shmOff += (static_cast<size_t>(h.size) + VAAPI_HWDEC_SHM_ALIGN - 1) / VAAPI_HWDEC_SHM_ALIGN *
+                      VAAPI_HWDEC_SHM_ALIGN;
+        } else {
+            f.owned.resize(h.size);
+            if (!readAll(mSock, f.owned.data(), h.size)) {
+                ALOGE("hwdec: reading a frame body failed");
+                close(mSock);
+                mSock = -1;
+                return -1;
+            }
+            f.data = f.owned.data();
         }
         if (frames) frames->push_back(std::move(f));
     }
@@ -591,7 +670,7 @@ void VaapiDecComponent::finishFrame(Frame &frame, const std::unique_ptr<C2Work> 
         // layout que le haya dado gralloc, asi que se copia plano por plano segun rowInc/colInc
         // (igual que C2SoftVpxDec).
         const uint32_t w = frame.width, h = frame.height;
-        const uint8_t *src = frame.data.data();
+        const uint8_t *src = frame.data;
         uint8_t *dstY = const_cast<uint8_t *>(wView.data()[C2PlanarLayout::PLANE_Y]);
         uint8_t *dstU = const_cast<uint8_t *>(wView.data()[C2PlanarLayout::PLANE_U]);
         uint8_t *dstV = const_cast<uint8_t *>(wView.data()[C2PlanarLayout::PLANE_V]);

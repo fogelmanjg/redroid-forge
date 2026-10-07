@@ -48,6 +48,7 @@ int main(int argc, char **argv) {
         return 2;
     }
     const char *path = argv[1];
+    const bool noHash = getenv("NO_HASH") != nullptr;  // rendimiento puro, sin verificar pixeles
     const bool p010 = getenv("OUT_P010") != nullptr;  // pedir P010 (10 bits) y hashear las muestras de 16 bits
     const char *name = (argc > 2 && strcmp(argv[2], "-") != 0) ? argv[2] : nullptr;
     FILE *out = argc > 3 ? fopen(argv[3], "w") : stdout;
@@ -166,6 +167,13 @@ int main(int argc, char **argv) {
                 size_t osz = 0;
                 uint8_t *p = AMediaCodec_getOutputBuffer(codec, oi, &osz);
                 if (width == 0) refresh();
+                if (noHash) {  // solo medir rendimiento: no empaquetar ni hashear (el CRC de un frame 4K cuesta ~10 ms)
+                    fprintf(out, "%ld %lld\n", frames, (long long)info.presentationTimeUs);
+                    frames++;
+                    AMediaCodec_releaseOutputBuffer(codec, oi, false);
+                    if (info.flags & AMEDIACODEC_BUFFER_FLAG_END_OF_STREAM) outputEos = true;
+                    continue;
+                }
                 const int32_t w = cropR - cropL + 1, h = cropB - cropT + 1;
                 packed.clear();
                 if (p010) {

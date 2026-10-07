@@ -34,6 +34,7 @@ typedef enum {
 } HwDecCodec;
 
 enum { HWDEC_OK = 0, HWDEC_AGAIN = 1, HWDEC_EOF = 2 };  /* negativo = error */
+enum { HWDEC_NOSPACE = -1000 };  /* hwdec_receive_to: el frame no entra en el destino dado (se pierde) */
 
 typedef struct {
     int supported[HWDEC_NCODECS];  /* el hardware decodifica este codec (8 bits como minimo) */
@@ -67,6 +68,11 @@ int hwdec_send_eos(HwDecSession *s);
 
 /* HWDEC_OK (frame en *out), HWDEC_AGAIN (hace falta mas entrada), HWDEC_EOF, o <0. */
 int hwdec_receive(HwDecSession *s, HwDecFrame *out);
+
+/* Igual, pero el frame (NV12/P010 compacto) se escribe directamente en `dst` (de `dstcap` bytes) en vez de en el
+ * buffer interno de la sesion: out->data == dst. Si no entra devuelve HWDEC_NOSPACE (el frame se pierde). Es lo
+ * que permite entregar frames por memoria compartida sin una copia intermedia. */
+int hwdec_receive_to(HwDecSession *s, HwDecFrame *out, uint8_t *dst, size_t dstcap);
 
 /* Descarta referencias y salida pendiente (seek / reinicio del stream). */
 void hwdec_flush(HwDecSession *s);

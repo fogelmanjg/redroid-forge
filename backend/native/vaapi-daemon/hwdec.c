@@ -279,6 +279,10 @@ int hwdec_send_eos(HwDecSession *s) {
 }
 
 int hwdec_receive(HwDecSession *s, HwDecFrame *out) {
+    return hwdec_receive_to(s, out, NULL, 0);
+}
+
+int hwdec_receive_to(HwDecSession *s, HwDecFrame *out, uint8_t *dst, size_t dstcap) {
     av_frame_unref(s->frame);
     av_frame_unref(s->sw);
     uint64_t t0 = s->stats ? now_ns() : 0;
@@ -313,11 +317,18 @@ int hwdec_receive(HwDecSession *s, HwDecFrame *out) {
     int w = s->frame->width, h = s->frame->height;
     int need = av_image_get_buffer_size(swfmt, w, h, 1);
     if (need < 0) return need;
-    if ((size_t)need > s->cap) {
-        uint8_t *nb = realloc(s->buf, need);
-        if (!nb) return -1;
-        s->buf = nb;
-        s->cap = need;
+    uint8_t *dstbuf;
+    if (dst) {
+        if ((size_t)need > dstcap) return HWDEC_NOSPACE;
+        dstbuf = dst;
+    } else {
+        if ((size_t)need > s->cap) {
+            uint8_t *nb = realloc(s->buf, need);
+            if (!nb) return -1;
+            s->buf = nb;
+            s->cap = need;
+        }
+        dstbuf = s->buf;
     }
     if (s->dl_mode == DL_FFMPEG) {
         t0 = s->stats ? now_ns() : 0;
@@ -325,13 +336,13 @@ int hwdec_receive(HwDecSession *s, HwDecFrame *out) {
         if (s->stats) s->ns_transfer += now_ns() - t0;
         if (r < 0) { averr("av_hwframe_transfer_data", r); return r; }
         t0 = s->stats ? now_ns() : 0;
-        r = av_image_copy_to_buffer(s->buf, need, (const uint8_t *const *)s->sw->data, s->sw->linesize, swfmt, w, h, 1);
+        r = av_image_copy_to_buffer(dstbuf, need, (const uint8_t *const *)s->sw->data, s->sw->linesize, swfmt, w, h, 1);
         if (s->stats) s->ns_copy += now_ns() - t0;
         if (r < 0) return r;
     } else {
         /* Descarga directa con VA-API: baja y compacta en un solo paso (cuenta como "descarga"). */
         t0 = s->stats ? now_ns() : 0;
-        r = va_download(s, vctx->display, surf, swfmt, w, h, s->buf);
+        r = va_download(s, vctx->display, surf, swfmt, w, h, dstbuf);
         if (s->stats) s->ns_transfer += now_ns() - t0;
         /* Autoverificacion: el primer frame de la sesion se baja tambien por ffmpeg y se compara byte a byte.
          * Si la descarga directa falla o difiere (driver con superficies en tiling, etc.), esta sesion vuelve al
@@ -344,11 +355,11 @@ int hwdec_receive(HwDecSession *s, HwDecFrame *out) {
             if (rr >= 0)
                 rr = av_image_copy_to_buffer(ref, need, (const uint8_t *const *)s->sw->data, s->sw->linesize,
                                              swfmt, w, h, 1);
-            if (rr < 0 || memcmp(ref, s->buf, (size_t)need) != 0) {
+            if (rr < 0 || memcmp(ref, dstbuf, (size_t)need) != 0) {
                 fprintf(stderr, "hwdec: la descarga directa (%s) no coincide con la de ffmpeg: se usa ffmpeg\n",
                         s->dl_mode == DL_GETIMAGE ? "getimage" : s->dl_mode == DL_DERIVE ? "derive" : "derive-sse");
                 ok = 0;
-                if (rr >= 0) memcpy(s->buf, ref, (size_t)need);
+                if (rr >= 0) memcpy(dstbuf, ref, (size_t)need);
             }
             free(ref);
         }
@@ -357,7 +368,7 @@ int hwdec_receive(HwDecSession *s, HwDecFrame *out) {
             s->dl_mode = DL_FFMPEG;
             r = av_hwframe_transfer_data(s->sw, s->frame, 0);
             if (r < 0) { averr("av_hwframe_transfer_data", r); return r; }
-            r = av_image_copy_to_buffer(s->buf, need, (const uint8_t *const *)s->sw->data, s->sw->linesize, swfmt, w, h, 1);
+            r = av_image_copy_to_buffer(dstbuf, need, (const uint8_t *const *)s->sw->data, s->sw->linesize, swfmt, w, h, 1);
             if (r < 0) return r;
         }
     }
@@ -366,7 +377,7 @@ int hwdec_receive(HwDecSession *s, HwDecFrame *out) {
     out->height = h;
     out->is_10bit = (swfmt == AV_PIX_FMT_P010LE);
     out->pts = s->frame->pts;
-    out->data = s->buf;
+    out->data = dstbuf;
     out->size = need;
     return HWDEC_OK;
 }

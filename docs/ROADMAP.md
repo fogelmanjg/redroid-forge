@@ -209,6 +209,20 @@ conocidos (ej. el artefacto de scanline en la 4060 con el driver
    ni en el 5700G**: ahí puede caer a ffmpeg, o ganar menos, y hay que medirlo.
    Con esto lo que queda más caro del daemon son la cola y el socket (~3 ms por frame a 1080p).
 
+   **Frames por memoria compartida (06/10/2026, Polaris).** El daemon crea un memfd por sesión (512 MiB
+   virtuales, solo ocupa lo que escriben los frames), lo manda por SCM_RIGHTS en la respuesta de apertura
+   (`HwDecOpenRequest.flags = VAAPI_HWDEC_OPEN_SHM`) y baja cada frame directamente ahí; el componente lo mapea
+   de solo lectura y copia de ahí al bloque de gralloc. Quedan dos copias menos por frame (la cola del daemon y
+   el `write`/`read` por el socket) y el tiempo de cola + socket pasa de ~3 ms a ~0. Sin el flag el protocolo
+   sigue siendo el inline de antes. Frames idénticos a la referencia en todos los clips (8 y 10 bits).
+   Rendimiento puro (`NO_HASH=1`, sin verificar píxeles), hardware contra el decoder de software de Android en
+   la misma máquina: H.264 720p60 431 vs 298 fps, H.264 1080p 222 vs 125, HEVC 1080p 196 vs 196, HEVC 4K 55 vs 70.
+   **El valor es el CPU que deja libre, no los fps:** CPU total del host por cada 100 frames (incluye la
+   herramienta y el framework en los dos casos): H.264 1080p 0,64 s con hardware contra 2,44 s con software
+   (3,8x menos), HEVC 1080p 0,72 contra 2,14 (3,0x menos), HEVC 4K 1,69 contra 5,62 (3,3x menos).
+   Pendiente: el `.policy` de seccomp ahora lleva `recvmsg` (no se aplica en redroid, pero sí en un dispositivo
+   real); y medir Intel y el 5700G.
+
    **Siguiente tanda del hwdecode (orden decidido 06/10/2026):**
    1. ✅ Medir tiempo por etapa (tabla de arriba). Falta el lado Android y Intel.
    2. ✅ Salida de 10 bits en el componente: HEVC Main10 y VP9 perfil 2, como 8 bits (ver hallazgo de arriba).
@@ -219,8 +233,8 @@ conocidos (ej. el artefacto de scanline en la 4060 con el driver
       interfaz Codec2); un cambio de pantalla pide recrear o reparchear. A comprobar con
       SmartTube: los decoders de software siguen declarando 4K y un player que mire el
       máximo entre todos podría seguir ofreciendo UHD.
-   4. Ganancias baratas según la medición (✅ descarga por `vaDeriveImage`+SSE hecha; faltan los hilos en
-      etapas, memoria compartida y SIMD en U/V): etapas en hilos (decodificar el N+1 mientras se
+   4. Ganancias baratas según la medición (✅ descarga por `vaDeriveImage`+SSE hecha; ✅ memoria compartida hecha; faltan los hilos
+      en etapas y SIMD en U/V): etapas en hilos (decodificar el N+1 mientras se
       baja y envía el N), `vaCopy` en vez de leer memoria de video con la CPU, memoria
       compartida (memfd) en vez de socket, SIMD en la separación de U/V.
    5. Si no alcanza, 2b (zero-copy): mantiene el frame en el GPU de punta a punta; el

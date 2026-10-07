@@ -51,6 +51,8 @@
 
 #ifdef HAVE_HWDEC
 #include <pthread.h>
+#include <sys/mman.h>
+#include <sys/syscall.h>
 #include "hwdec.h"
 #endif
 
@@ -1007,10 +1009,48 @@ static int fq_append(FrameQueue *q, const HwDecFrame *f) {
 /* Vacia lo que el decoder tenga listo. Devuelve 0, o <0 si hubo un error real. */
 static __thread uint64_t tl_ns_queue;  /* tiempo en fq_append del hilo actual (REDROID_FORGE_HWDEC_STATS) */
 
+/* Memoria compartida (memfd) de la sesion hwdec, si el cliente la pidio: los frames se escriben ahi directamente. */
+typedef struct {
+    uint8_t *base;
+    size_t cap, off;
+} ShmWin;
+static __thread ShmWin *tl_shm;
+
+static size_t shm_align(size_t n) {
+    return (n + VAAPI_HWDEC_SHM_ALIGN - 1) / VAAPI_HWDEC_SHM_ALIGN * VAAPI_HWDEC_SHM_ALIGN;
+}
+
+static int fq_append_hdr(FrameQueue *q, const HwDecFrame *f) {
+    size_t need = q->len + sizeof(HwDecFrameHeader);
+    if (need > q->cap) {
+        size_t cap = q->cap ? q->cap * 2 : 4096;
+        unsigned char *nb = realloc(q->buf, cap);
+        if (!nb) return -1;
+        q->buf = nb;
+        q->cap = cap;
+    }
+    HwDecFrameHeader h = {.width = f->width, .height = f->height, .is_10bit = (uint32_t)f->is_10bit,
+                          .size = (uint32_t)f->size, .pts = f->pts};
+    memcpy(q->buf + q->len, &h, sizeof(h));
+    q->len = need;
+    q->nframes++;
+    return 0;
+}
+
 static int hwdec_drain(HwDecSession *s, FrameQueue *q) {
     HwDecFrame f;
     for (;;) {
-        int r = hwdec_receive(s, &f);
+        int r;
+        if (tl_shm) {
+            /* Modo memoria compartida: el frame se baja directo a su lugar; en la cola solo queda el encabezado. */
+            r = hwdec_receive_to(s, &f, tl_shm->base + tl_shm->off, tl_shm->cap - tl_shm->off);
+            if (r == HWDEC_AGAIN || r == HWDEC_EOF) return 0;
+            if (r < 0) return r;
+            tl_shm->off += shm_align(f.size);
+            if (fq_append_hdr(q, &f) != 0) return -1;
+            continue;
+        }
+        r = hwdec_receive(s, &f);
         if (r == HWDEC_AGAIN || r == HWDEC_EOF) return 0;
         if (r < 0) return r;
         const uint64_t t0 = mono_ns();
@@ -1019,6 +1059,27 @@ static int hwdec_drain(HwDecSession *s, FrameQueue *q) {
         if (ar != 0) return -1;
     }
 }
+
+/* Respuesta de apertura con el fd de la memoria compartida adjunto (SCM_RIGHTS). */
+static int send_open_resp_fd(int sock, const HwDecOpenResponse *resp, int fd) {
+    struct iovec iov = {.iov_base = (void *)resp, .iov_len = sizeof(*resp)};
+    union {
+        struct cmsghdr align;
+        char buf[CMSG_SPACE(sizeof(int))];
+    } u;
+    memset(&u, 0, sizeof(u));
+    struct msghdr msg = {.msg_iov = &iov, .msg_iovlen = 1, .msg_control = u.buf, .msg_controllen = sizeof(u.buf)};
+    struct cmsghdr *c = CMSG_FIRSTHDR(&msg);
+    c->cmsg_level = SOL_SOCKET;
+    c->cmsg_type = SCM_RIGHTS;
+    c->cmsg_len = CMSG_LEN(sizeof(int));
+    memcpy(CMSG_DATA(c), &fd, sizeof(int));
+    ssize_t n;
+    do { n = sendmsg(sock, &msg, MSG_NOSIGNAL); } while (n < 0 && errno == EINTR);
+    return n == (ssize_t)sizeof(*resp) ? 0 : -1;
+}
+
+#define HWDEC_SHM_MIB 512u  /* memoria virtual: solo se toca (y ocupa RAM) lo que escriben los frames */
 
 static void *hwdec_stream_thread(void *arg) {
     int fd = (int)(intptr_t)arg;
@@ -1032,6 +1093,9 @@ static void *hwdec_stream_thread(void *arg) {
     unsigned char *cfg = NULL, *last_cfg = NULL, *joined = NULL;
     size_t cfg_len = 0, last_cfg_len = 0, joined_cap = 0;
     int need_replay = 1;
+    ShmWin shm = {0};
+    int memfd = -1;
+    tl_shm = NULL;
     const int stats = getenv("REDROID_FORGE_HWDEC_STATS") != NULL;
     uint64_t ns_wait = 0, ns_write = 0, nresp = 0;
     tl_ns_queue = 0;
@@ -1043,8 +1107,29 @@ static void *hwdec_stream_thread(void *arg) {
         io_write_all(fd, &open_resp, sizeof(open_resp));
         goto done;
     }
-    if (io_write_all(fd, &open_resp, sizeof(open_resp)) != 0) goto done;
-    fprintf(stderr, "hwdec: sesion abierta (%s)\n", hwdec_codec_name((HwDecCodec)open_req.codec));
+    if (open_req.flags & VAAPI_HWDEC_OPEN_SHM) {
+        /* El cliente sabe usar memoria compartida: memfd + mmap, y el fd viaja con la respuesta. Si algo falla
+         * se sigue con frames inline (el cliente lo sabe por shm_mib == 0). */
+        const size_t cap = (size_t)HWDEC_SHM_MIB << 20;
+        memfd = (int)syscall(SYS_memfd_create, "redroid-forge-hwdec", 1u /* MFD_CLOEXEC */);
+        if (memfd >= 0 && ftruncate(memfd, (off_t)cap) == 0) {
+            void *m = mmap(NULL, cap, PROT_READ | PROT_WRITE, MAP_SHARED, memfd, 0);
+            if (m != MAP_FAILED) {
+                shm.base = m;
+                shm.cap = cap;
+                open_resp.shm_mib = HWDEC_SHM_MIB;
+            }
+        }
+        if (!shm.base && memfd >= 0) { close(memfd); memfd = -1; }
+    }
+    if (shm.base) {
+        if (send_open_resp_fd(fd, &open_resp, memfd) != 0) goto done;
+        tl_shm = &shm;
+    } else if (io_write_all(fd, &open_resp, sizeof(open_resp)) != 0) {
+        goto done;
+    }
+    fprintf(stderr, "hwdec: sesion abierta (%s%s)\n", hwdec_codec_name((HwDecCodec)open_req.codec),
+            shm.base ? ", memoria compartida" : "");
 
     for (;;) {
         HwDecRequest rq;
@@ -1053,6 +1138,7 @@ static void *hwdec_stream_thread(void *arg) {
         if (stats) ns_wait += mono_ns() - tw0;
         FrameQueue q = {0};
         int status = 0, stop = 0;
+        shm.off = 0;  /* los frames de la respuesta anterior ya los copio el cliente */
 
         switch (rq.msg) {
         case VAAPI_HWDEC_MSG_AU: {
@@ -1147,6 +1233,9 @@ static void *hwdec_stream_thread(void *arg) {
         if (werr || stop) break;
     }
 done:
+    tl_shm = NULL;
+    if (shm.base) munmap(shm.base, shm.cap);
+    if (memfd >= 0) close(memfd);
     if (stats && nresp) {
         fprintf(stderr,
                 "hwdec-stats[daemon]: %llu respuestas | por respuesta (ms): espera_de_android=%.2f armar_cola=%.2f "
