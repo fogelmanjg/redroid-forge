@@ -30,17 +30,17 @@ namespace android {
 namespace {
 
 constexpr size_t kMinInputBufferSize = 2 * 1024 * 1024;
-// Tope de la demora de salida: AVC permite hasta 16 frames de reordenamiento (el decoder de AOSP
-// llega a 34 por soportar entrelazado); HEVC hasta 16.
+// Cap on the output delay: AVC allows up to 16 reordering frames (AOSP's decoder
+// goes up to 34 because it supports interlacing); HEVC up to 16.
 constexpr uint32_t kMaxOutputDelay = 34;
-// Si hay mas trabajos pendientes que esto, el mas viejo se da por descartado por el decoder.
+// If more jobs than this are pending, the oldest one is considered dropped by the decoder.
 constexpr size_t kMaxPending = 24;
-constexpr uint32_t kMaxAccessUnit = 32u * 1024 * 1024;  // mismo tope que el daemon
+constexpr uint32_t kMaxAccessUnit = 32u * 1024 * 1024;  // same cap as the daemon
 constexpr int kSocketTimeoutSec = 10;
 
-// El allocator de gralloc de redroid alinea el pitch a 256 bytes, pero el layout que C2 deduce de un
-// bloque YV12 asume 16: con 1920 (pitch real 2048) el framework leia las filas con otro paso y salian
-// 128 bytes de ceros por fila. Pedir el ancho ya alineado a 256 hace que ambos coincidan.
+// redroid's gralloc allocator aligns the pitch to 256 bytes, but the layout C2 deduces from a
+// YV12 block assumes 16: with 1920 (real pitch 2048) the framework read the rows with another step and
+// 128 bytes of zeros per row came out. Asking for the width already aligned to 256 makes both match.
 uint32_t alignPitch(uint32_t v) { return (v + 255) & ~255u; }
 
 const std::vector<VaapiDecCodec> kCodecs = {
@@ -77,7 +77,7 @@ bool writeAll(int fd, const void *buf, size_t len) {
 }
 
 
-// Lee la HwDecOpenResponse; si trae un fd adjunto (SCM_RIGHTS) lo deja en *fd, si no, -1.
+// Reads the HwDecOpenResponse; if it carries an attached fd (SCM_RIGHTS) it leaves it in *fd, otherwise -1.
 bool recvOpenResponse(int sock, HwDecOpenResponse *resp, int *fd) {
     *fd = -1;
     struct iovec iov = {.iov_base = resp, .iov_len = sizeof(*resp)};
@@ -99,12 +99,12 @@ bool recvOpenResponse(int sock, HwDecOpenResponse *resp, int *fd) {
             memcpy(fd, CMSG_DATA(c), sizeof(int));
         }
     }
-    // Una respuesta partida (no pasa con un datagrama de 8 bytes) se completa leyendo el resto.
+    // A split response (it does not happen with an 8-byte datagram) is completed by reading the rest.
     size_t got = static_cast<size_t>(n);
     return got == sizeof(*resp) || readAll(sock, reinterpret_cast<char *>(resp) + got, sizeof(*resp) - got);
 }
 
-// Marca un trabajo como terminado sin imagen (parametros SPS/PPS, trabajos descartados, EOS).
+// Marks a job as finished without an image (SPS/PPS parameters, dropped jobs, EOS).
 void fillEmptyWork(const std::unique_ptr<C2Work> &work) {
     uint32_t flags = 0;
     if (work->input.flags & C2FrameData::FLAG_END_OF_STREAM) {
@@ -128,7 +128,7 @@ const VaapiDecCodec *findVaapiDecCodec(const std::string &name) {
 }
 
 // ------------------------------------------------------------------------------------------
-// Interfaz: adaptada de C2SoftAvcDec::IntfImpl / C2SoftHevcDec / C2SoftVpxDec (AOSP, Apache-2.0).
+// Interface: adapted from C2SoftAvcDec::IntfImpl / C2SoftHevcDec / C2SoftVpxDec (AOSP, Apache-2.0).
 // ------------------------------------------------------------------------------------------
 
 VaapiDecInterface::VaapiDecInterface(const std::shared_ptr<C2ReflectorHelper> &helper,
@@ -161,10 +161,10 @@ VaapiDecInterface::VaapiDecInterface(const std::shared_ptr<C2ReflectorHelper> &h
                          .withSetter(SizeSetter)
                          .build());
 
-    // Formato de pixel de salida. Solo 8 bits (420_888): P010 NO se ofrece. En redroid, gralloc revienta
-    // (SIGFPE en gralloc_gbm_bo_create, dentro del servicio allocator) al asignar un buffer P010, y como el
-    // allocator es critico, Android entero se reinicia. IMPLEMENTATION_DEFINED esta para que el framework
-    // pueda distinguir el modo superficie, igual que en los decoders de software de AOSP.
+    // Output pixel format. 8 bits only (420_888): P010 is NOT offered. On redroid, gralloc blows up
+    // (SIGFPE in gralloc_gbm_bo_create, inside the allocator service) when allocating a P010 buffer, and since the
+    // allocator is critical, the whole of Android restarts. IMPLEMENTATION_DEFINED is there so that the framework
+    // can tell the surface mode apart, just like in AOSP's software decoders.
     addParameter(DefineParam(mPixelFormat, C2_PARAMKEY_PIXEL_FORMAT)
                          .withDefault(new C2StreamPixelFormatInfo::output(
                                  0u, HAL_PIXEL_FORMAT_YCBCR_420_888))
@@ -183,8 +183,8 @@ VaapiDecInterface::VaapiDecInterface(const std::shared_ptr<C2ReflectorHelper> &h
                          .withSetter(MaxPictureSizeSetter, mSize)
                          .build());
 
-    // Perfiles y niveles: los de los decoders por software de AOSP mas los de 10 bits (HEVC Main10,
-    // VP9 perfil 2), que es lo que usa el HDR. Si el hardware del host no los decodifica, la sesion falla al abrirse.
+    // Profiles and levels: those of AOSP's software decoders plus the 10-bit ones (HEVC Main10,
+    // VP9 profile 2), which is what HDR uses. If the host hardware does not decode them, the session fails on open.
     switch (codec->wireCodec) {
     case VAAPI_HWDEC_CODEC_H264:
         addParameter(
@@ -435,7 +435,7 @@ void VaapiDecComponent::unmapShmLocked() {
 
 bool VaapiDecComponent::openSessionLocked() {
     if (mSock >= 0) return true;
-    unmapShmLocked();  // resto de una sesion que se cayo
+    unmapShmLocked();  // leftover of a session that fell over
     int fd = socket(AF_UNIX, SOCK_STREAM, 0);
     if (fd < 0) {
         ALOGE("socket() failed: %s", strerror(errno));
@@ -457,7 +457,7 @@ bool VaapiDecComponent::openSessionLocked() {
     uint32_t tag = VAAPI_CMD_HWDEC;
     HwDecOpenRequest req = {};
     req.codec = mCodec->wireCodec;
-    req.flags = VAAPI_HWDEC_OPEN_SHM;  // frames por memoria compartida si el daemon puede
+    req.flags = VAAPI_HWDEC_OPEN_SHM;  // frames through shared memory if the daemon can
     HwDecOpenResponse resp = {};
     int shmFd = -1;
     if (!writeAll(fd, &tag, sizeof(tag)) || !writeAll(fd, &req, sizeof(req)) ||
@@ -468,7 +468,7 @@ bool VaapiDecComponent::openSessionLocked() {
     }
     if (resp.status != 0) {
         if (shmFd >= 0) close(shmFd);
-        // No hay fallback a software aca: quien llama (MediaCodec/el reproductor) elige otro decoder.
+        // There is no software fallback here: whoever calls (MediaCodec/the player) picks another decoder.
         ALOGE("the daemon refused to open a %s session (status %d): this hardware cannot decode it",
               mCodec->mediaType, resp.status);
         close(fd);
@@ -478,7 +478,7 @@ bool VaapiDecComponent::openSessionLocked() {
         const size_t size = static_cast<size_t>(resp.shm_mib) << 20;
         void *m = mmap(nullptr, size, PROT_READ, MAP_SHARED, shmFd, 0);
         if (m == MAP_FAILED) {
-            // El daemon ya ofrecio la memoria compartida: sin poder mapearla no se puede seguir en ese modo.
+            // The daemon already offered the shared memory: without being able to map it, that mode cannot go on.
             ALOGE("mmap of the shared frame memory failed: %s", strerror(errno));
             close(shmFd);
             close(fd);
@@ -491,7 +491,7 @@ bool VaapiDecComponent::openSessionLocked() {
         close(fd);
         return false;
     }
-    if (shmFd >= 0) close(shmFd);  // el mapeo sigue valido sin el fd
+    if (shmFd >= 0) close(shmFd);  // the mapping stays valid without the fd
     mSock = fd;
     ALOGI("hwdec session open for %s%s", mCodec->name, mShm ? " (shared memory)" : "");
     return true;
@@ -547,7 +547,7 @@ int VaapiDecComponent::exchangeLocked(uint32_t msg, const uint8_t *data, uint32_
         f.pts = h.pts;
         f.size = h.size;
         if (mShm) {
-            // Los frames de la respuesta estan en la memoria compartida, uno tras otro, cada uno alineado.
+            // The response frames are in the shared memory, one after another, each one aligned.
             if (shmOff + h.size > mShmSize) {
                 ALOGE("hwdec: frame outside the shared memory (off=%zu size=%u)", shmOff, h.size);
                 close(mSock);
@@ -573,9 +573,9 @@ int VaapiDecComponent::exchangeLocked(uint32_t msg, const uint8_t *data, uint32_
 }
 
 c2_status_t VaapiDecComponent::onInit() {
-    // La sesion se abre ACA y no en el primer frame: si este hardware no decodifica el codec,
-    // MediaCodec falla al iniciar y el reproductor cae limpio a otro decoder, en vez de romperse
-    // a mitad del video.
+    // The session is opened HERE and not at the first frame: if this hardware does not decode the codec,
+    // MediaCodec fails on start and the player falls back cleanly to another decoder, instead of breaking
+    // halfway through the video.
     std::lock_guard<std::mutex> lock(mLock);
     mSignalledError = false;
     mSignalledOutputEos = false;
@@ -629,7 +629,7 @@ void VaapiDecComponent::finishFrame(Frame &frame, const std::unique_ptr<C2Work> 
     const uint64_t index = static_cast<uint64_t>(frame.pts);
     mPending.erase(index);
 
-    // Tamano de salida: se informa al framework antes del primer frame y en cada cambio.
+    // Output size: the framework is told before the first frame and on every change.
     std::shared_ptr<C2Param> sizeUpdate;
     if (frame.width != mWidth || frame.height != mHeight) {
         C2StreamPictureSizeInfo::output size(0u, frame.width, frame.height);
@@ -644,15 +644,15 @@ void VaapiDecComponent::finishFrame(Frame &frame, const std::unique_ptr<C2Work> 
         mHeight = frame.height;
     }
 
-    // Formato de salida: siempre YV12 de 8 bits. Con 10 bits de entrada (HEVC Main10, VP9 perfil 2) se
-    // queda con los 8 bits altos de cada muestra, como los decoders de software de AOSP cuando no hay P010.
-    // NO se consulta si P010 esta soportado (getHalPixelFormatForBitDepth10 / isHalPixelFormatSupported
-    // asignan un buffer de prueba): en redroid eso mata al allocator de gralloc y reinicia Android.
+    // Output format: always 8-bit YV12. With 10-bit input (HEVC Main10, VP9 profile 2) it
+    // keeps the high 8 bits of each sample, like AOSP's software decoders when there is no P010.
+    // P010 support is NOT queried (getHalPixelFormatForBitDepth10 / isHalPixelFormatSupported
+    // allocate a test buffer): on redroid that kills the gralloc allocator and restarts Android.
     const uint32_t format = HAL_PIXEL_FORMAT_YV12;
 
     std::shared_ptr<C2GraphicBlock> block;
     C2MemoryUsage usage = {C2MemoryUsage::CPU_READ, C2MemoryUsage::CPU_WRITE};
-    // El allocator de gralloc de redroid alinea el pitch a 256 bytes (ver alignPitch).
+    // redroid's gralloc allocator aligns the pitch to 256 bytes (see alignPitch).
     c2_status_t err = pool->fetchGraphicBlock(alignPitch(frame.width), frame.height, format, usage, &block);
     if (err != C2_OK) {
         ALOGE("fetchGraphicBlock for the output failed: %d", err);
@@ -666,9 +666,9 @@ void VaapiDecComponent::finishFrame(Frame &frame, const std::unique_ptr<C2Work> 
             mSignalledError = true;
             return;
         }
-        // El daemon entrega NV12 (8 bits) o P010 (10 bits) compactos, sin padding; el bloque tiene el
-        // layout que le haya dado gralloc, asi que se copia plano por plano segun rowInc/colInc
-        // (igual que C2SoftVpxDec).
+        // The daemon delivers compact NV12 (8-bit) or P010 (10-bit), without padding; the block has the
+        // layout gralloc gave it, so it is copied plane by plane according to rowInc/colInc
+        // (just like C2SoftVpxDec).
         const uint32_t w = frame.width, h = frame.height;
         const uint8_t *src = frame.data;
         uint8_t *dstY = const_cast<uint8_t *>(wView.data()[C2PlanarLayout::PLANE_Y]);
@@ -682,7 +682,7 @@ void VaapiDecComponent::finishFrame(Frame &frame, const std::unique_ptr<C2Work> 
         const int32_t dstVColInc = layout.planes[C2PlanarLayout::PLANE_V].colInc;
 
         if (frame.tenBit) {
-            // 10 bits pero el consumidor pidio 8: se queda con los 8 bits altos de cada muestra.
+            // 10 bits but the consumer asked for 8: it keeps the high 8 bits of each sample.
             const uint16_t *srcY = reinterpret_cast<const uint16_t *>(src);
             const uint16_t *srcUv = srcY + static_cast<size_t>(w) * h;
             for (uint32_t y = 0; y < h; y++) {
@@ -758,7 +758,7 @@ c2_status_t VaapiDecComponent::drainInternal(uint32_t drainMode,
         status = exchangeLocked(VAAPI_HWDEC_MSG_EOS, nullptr, 0, 0, &frames);
     }
     for (Frame &f : frames) finishFrame(f, current, pool);
-    // Despues de vaciar, todo trabajo que siga pendiente no tuvo imagen (el decoder lo descarto).
+    // After draining, any job that is still pending had no image (the decoder dropped it).
     std::set<uint64_t> leftovers;
     leftovers.swap(mPending);
     for (uint64_t index : leftovers) completeEmpty(index, current);
@@ -801,7 +801,7 @@ void VaapiDecComponent::process(const std::unique_ptr<C2Work> &work,
         }
     }
 
-    bool sentPicture = false;  // este trabajo dejo un access unit en el decoder esperando su frame
+    bool sentPicture = false;  // this job left an access unit in the decoder waiting for its frame
     if (inSize > 0) {
         if (inSize > kMaxAccessUnit) {
             ALOGE("access unit too large: %zu", inSize);
@@ -814,8 +814,8 @@ void VaapiDecComponent::process(const std::unique_ptr<C2Work> &work,
         int status;
         {
             std::lock_guard<std::mutex> lock(mLock);
-            // Los parametros (SPS/PPS/VPS) viajan como CONFIG: el daemon los antepone al siguiente access
-            // unit (libavcodec rechaza un paquete H.264 que no trae ningun slice).
+            // The parameters (SPS/PPS/VPS) travel as CONFIG: the daemon prepends them to the next access
+            // unit (libavcodec rejects an H.264 packet that carries no slice).
             status = exchangeLocked(config ? VAAPI_HWDEC_MSG_CONFIG : VAAPI_HWDEC_MSG_AU, rView.data(),
                                     static_cast<uint32_t>(inSize), static_cast<int64_t>(index), &frames);
         }
@@ -826,7 +826,7 @@ void VaapiDecComponent::process(const std::unique_ptr<C2Work> &work,
             work->workletsProcessed = 1u;
             return;
         }
-        // Los parametros de configuracion (SPS/PPS/VPS) no producen imagen: no se espera frame.
+        // The configuration parameters (SPS/PPS/VPS) produce no image: no frame is awaited.
         if (!config) {
             mPending.insert(index);
             sentPicture = true;
@@ -839,7 +839,7 @@ void VaapiDecComponent::process(const std::unique_ptr<C2Work> &work,
                 return;
             }
         }
-        // Si el decoder retiene mas trabajos de los razonables, el mas viejo fue descartado.
+        // If the decoder holds back more jobs than is reasonable, the oldest one was dropped.
         while (mPending.size() > kMaxPending) completeEmpty(*mPending.begin(), work);
     }
 
@@ -848,7 +848,7 @@ void VaapiDecComponent::process(const std::unique_ptr<C2Work> &work,
         mSignalledOutputEos = true;
         if (work->workletsProcessed == 0u) fillEmptyWork(work);
     } else if (!sentPicture && work->workletsProcessed == 0u) {
-        fillEmptyWork(work);  // entrada vacia o solo parametros: no hay nada que esperar
+        fillEmptyWork(work);  // empty input or only parameters: there is nothing to wait for
     }
     work->input.buffers.clear();
 }

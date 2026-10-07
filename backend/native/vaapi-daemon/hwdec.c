@@ -391,8 +391,8 @@ void hwdec_close(HwDecSession *s) {
     if (s->stats && s->nframes) {
         const double n = (double)s->nframes;
         fprintf(stderr,
-                "hwdec-stats[%s,descarga=%s]: %llu frames, %.1f MB/frame | por frame (ms): send=%.2f receive=%.2f "
-                "espera_GPU(decode)=%.2f descarga_GPU->RAM=%.2f copia_compacta=%.2f\n",
+                "hwdec-stats[%s,download=%s]: %llu frames, %.1f MB/frame | per frame (ms): send=%.2f receive=%.2f "
+                "gpu_wait(decode)=%.2f download_GPU->RAM=%.2f compact_copy=%.2f\n",
                 hwdec_codec_name(s->codec),
                 s->dl_mode == DL_GETIMAGE ? "getimage" : s->dl_mode == DL_DERIVE ? "derive" : s->dl_mode == DL_DERIVE_SSE ? "derive-sse" : "ffmpeg",
                 (unsigned long long)s->nframes, (double)s->nbytes / n / 1e6,

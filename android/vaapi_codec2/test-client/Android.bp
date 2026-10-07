@@ -61,7 +61,7 @@ cc_binary {
     ],
 }
 
-// Herramienta de prueba del decode por MediaCodec (solo desarrollo): ver hwdec_mediacodec_test.cpp.
+// Test tool for MediaCodec decode (development only): see hwdec_mediacodec_test.cpp.
 cc_binary {
     name: "hwdec_mediacodec_test",
     srcs: ["hwdec_mediacodec_test.cpp"],

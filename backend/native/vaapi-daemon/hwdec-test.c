@@ -112,7 +112,7 @@ int main(int argc, char **argv) {
     if (argc >= 3 && !strcmp(argv[1], "--twice")) { g_twice = 1; argv += 1; argc -= 1; }
     if (argc >= 4 && !strcmp(argv[1], "--socket")) { sock = argv[2]; argv += 2; argc -= 2; }
     if (argc >= 3 && !strcmp(argv[1], "--twice")) { g_twice = 1; argv += 1; argc -= 1; }
-    if (argc < 2) { fprintf(stderr, "uso: %s --probe [nodo] | [--socket ruta] <archivo> [nodo] [salida.md5]\n", argv[0]); return 2; }
+    if (argc < 2) { fprintf(stderr, "usage: %s --probe [node] | [--socket path] <file> [node] [output.md5]\n", argv[0]); return 2; }
     const char *path = argv[1], *node = argc > 2 ? argv[2] : DEFAULT_NODE;
     g_out = argc > 3 ? fopen(argv[3], "w") : NULL;
 
@@ -186,7 +186,7 @@ int main(int argc, char **argv) {
         if (pass == 0 && g_twice) {
             if (g_client) { /* the daemon restarts the decoder by itself after the EOS */ }
             else hwdec_flush(s);
-            if (g_out) fprintf(g_out, "# --- segunda pasada ---\n");
+            if (g_out) fprintf(g_out, "# --- second pass ---\n");
             g_pass1_frames = g_frames;
         }
     }
@@ -195,10 +195,10 @@ int main(int argc, char **argv) {
     struct rusage ru;
     getrusage(RUSAGE_SELF, &ru);
     double cpu = ru.ru_utime.tv_sec + ru.ru_utime.tv_usec / 1e6 + ru.ru_stime.tv_sec + ru.ru_stime.tv_usec / 1e6;
-    printf("RESULTADO: %s %dx%d -> %ld access units, %ld frames decodificados por hardware, cpu=%.2fs%s%s\n",
+    printf("RESULT: %s %dx%d -> %ld access units, %ld frames decoded in hardware, cpu=%.2fs%s%s\n",
            hwdec_codec_name(codec), st->codecpar->width, st->codecpar->height, units, g_frames, cpu,
-           g_bad ? " (CON ERRORES)" : "",
-           (g_twice && g_frames != 2 * g_pass1_frames) ? " (LA SEGUNDA PASADA NO DIO LOS MISMOS FRAMES)" : "");
+           g_bad ? " (WITH ERRORS)" : "",
+           (g_twice && g_frames != 2 * g_pass1_frames) ? " (THE SECOND PASS DID NOT YIELD THE SAME FRAMES)" : "");
     if (g_out) fclose(g_out);
     return g_bad ? 1 : 0;
 }

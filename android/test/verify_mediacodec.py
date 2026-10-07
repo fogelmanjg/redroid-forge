@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Compara la salida de hwdec_mediacodec_test (CRC32 por frame I420, en orden de salida) contra la
-decodificacion de referencia por software de ffmpeg. Uso: verify_mediacodec.py <clip> <salida.txt> [p010]
-(p010: la salida es P010 de 10 bits, se compara contra ffmpeg -pix_fmt p010le;
-trunc8: clip de 10 bits pedido como I420 de 8 bits, el decoder se queda con los 8 bits altos de cada
-muestra de 16 bits = muestra de 10 bits >> 2, y la referencia hace lo mismo con un lut de ffmpeg)"""
+"""Compares the output of hwdec_mediacodec_test (CRC32 per I420 frame, in output order) against the
+software reference decode of ffmpeg. Usage: verify_mediacodec.py <clip> <output.txt> [p010]
+(p010: the output is 10-bit P010, it is compared against ffmpeg -pix_fmt p010le;
+trunc8: a 10-bit clip requested as 8-bit I420, the decoder keeps the high 8 bits of each
+16-bit sample = 10-bit sample >> 2, and the reference does the same with an ffmpeg lut)"""
 import subprocess, sys, zlib
 
 clip, got_path = sys.argv[1], sys.argv[2]
@@ -15,7 +15,7 @@ w, h = int(probe[0]), int(probe[1])
 size = w * h * 3 if p010 else w * h * 3 // 2
 ref = []
 if trunc8:
-    # 10 bits -> lut val/4 -> palabras de 16 bits cuyo byte bajo es el valor de 8 bits
+    # 10 bits -> lut val/4 -> 16-bit words whose low byte is the 8-bit value
     cmd = ['ffmpeg', '-v', 'error', '-threads', '1', '-i', clip, '-vf',
            "format=yuv420p10le,lutyuv=y='floor(val/4)':u='floor(val/4)':v='floor(val/4)'",
            '-f', 'rawvideo', '-pix_fmt', 'yuv420p10le', '-']
