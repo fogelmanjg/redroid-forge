@@ -1189,6 +1189,17 @@ static void *hwdec_stream_thread(void *arg) {
             /* Android entrega los parametros en VARIOS buffers de configuracion (H.264: primero el SPS y
              * despues el PPS; HEVC: VPS, SPS, PPS). Mientras ningun access unit los haya consumido se
              * ACUMULAN; el primer CONFIG despues de un AU empieza un juego nuevo. */
+            /* Solo H.264 y HEVC llevan la configuracion DENTRO del bitstream (SPS/PPS/VPS en Annex-B) y necesitan
+             * que se antepongan. En VP8/VP9/AV1 el "CSD" de Android es el CodecPrivate del contenedor (para VP9
+             * empieza con 0x01, no con la marca de sincronizacion 0x49): anteponerlo vuelve invalido el frame. */
+            if (open_req.codec != VAAPI_HWDEC_CODEC_H264 && open_req.codec != VAAPI_HWDEC_CODEC_HEVC) {
+                unsigned char *skip = malloc(rq.size);
+                if (!skip) { status = -3; stop = 1; break; }
+                int rd = io_read_all(fd, skip, rq.size);
+                free(skip);
+                if (rd != 1) { stop = 1; status = -4; }
+                break;
+            }
             size_t total = cfg_len + rq.size;
             unsigned char *nb = realloc(cfg, total);
             if (!nb) { status = -3; stop = 1; break; }

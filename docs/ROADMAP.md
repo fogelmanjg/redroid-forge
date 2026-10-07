@@ -246,6 +246,20 @@ conocidos (ej. el artefacto de scanline en la 4060 con el driver
      `ensureDaemonRunning()`. ✅ Hecho: supervisor en `hwAccel.js` que lo relanza con espera creciente (1 s,
      doblando hasta 30 s; vuelve a 1 s si vivió más de un minuto). Probado matándolo con SIGKILL: vuelve en 1 s.
 
+   **Intel Iris Xe (n02, 07/10/2026): todo verificado.** H.264 720p/1080p, HEVC 1080p, HEVC Main10, VP9 y VP9
+   perfil 2 (10 bits): frames idénticos a la referencia (0 distintos) en los tres códecs, con la memoria
+   compartida y la descarga directa por `vaDeriveImage`+SSE: **en Intel no cayó al camino de ffmpeg** (la
+   autoverificación del primer frame pasó). Bug corregido en esta prueba: el CSD de VP9 que entrega Android
+   (el `CodecPrivate` del WebM, empieza con 0x01) se anteponía al primer frame como si fueran SPS/PPS y
+   libavcodec lo rechazaba (`frame_sync_byte_0 out of range`); ahora solo H.264 y HEVC reciben la configuración
+   antepuesta. CPU total del host por 100 frames (herramienta de prueba, que además copia cada frame a un
+   ByteBuffer: un reproductor con superficie no paga eso), hardware contra el decoder de software de Android:
+   H.264 1080p 1,99 s contra 5,32 s (2,7x menos), HEVC 1080p 1,80 contra 4,87 (2,7x menos), VP9 1080p 1,72
+   contra 2,46 (1,4x menos), VP9 720p 1,02 contra 1,26 (1,2x menos). **El ahorro de VP9 es modesto**: libvpx es muy
+   eficiente y el costo fijo del camino (copiar 1,4-3 MB por frame a gralloc y el framework) pesa. En fps, el
+   software de VP9 gana (116 contra 93 fps a 1080p) y el de HEVC empata. n02 usa un CPU de notebook y tenía su
+   pila de desarrollo corriendo de fondo.
+
    **Siguiente tanda del hwdecode (orden decidido 06/10/2026):**
    1. ✅ Medir tiempo por etapa (tabla de arriba). Falta el lado Android y Intel.
    2. ✅ Salida de 10 bits en el componente: HEVC Main10 y VP9 perfil 2, como 8 bits (ver hallazgo de arriba).
