@@ -2,11 +2,11 @@ const fs = require('fs');
 const path = require('path');
 const knownDb = require('./knownDb');
 
-// Carga de la base de combinaciones conocidas (docs/KNOWN-COMBINATIONS.md,
-// secciones 4.1 y 5). Dos fuentes: el snapshot que viaja DENTRO de la release
-// (confiable por venir con el codigo) y, mas adelante (sub-paso 3), una copia
-// descargada y verificada en data/db/. Se usa la de mayor `serial`. Este
-// modulo solo LEE: la descarga/verificacion/actualizacion no esta todavia.
+// Loading of the known-combinations database (docs/KNOWN-COMBINATIONS.md,
+// sections 4.1 and 5). Two sources: the snapshot that travels INSIDE the release
+// (trusted because it comes with the code) and a downloaded and verified copy in
+// data/db/. The one with the higher `serial` is used. This module only READS:
+// downloading/verifying/updating lives in knownDbUpdate.js.
 
 const SNAPSHOT_PATH = path.join(__dirname, '..', '..', 'db', 'snapshot.json');
 const CACHE_PATH = path.join(__dirname, '..', '..', 'data', 'db', 'database.json');
@@ -17,9 +17,9 @@ function readValidated(file) {
 }
 
 // -> { db, source: 'snapshot'|'actualizada', warnings: [string] }
-// Un snapshot ilegible es un error real (esta roto el propio release) y se
-// propaga; una copia descargada ilegible/invalida NO tumba nada: se ignora
-// con un aviso y se sigue con el snapshot.
+// An unreadable snapshot is a real error (the release itself is broken) and
+// propagates; an unreadable/invalid downloaded copy does NOT bring anything
+// down: it is ignored with a warning and the snapshot is used.
 function loadCurrent({ snapshotPath = SNAPSHOT_PATH, cachePath = CACHE_PATH } = {}) {
   const warnings = [];
   const snapshot = readValidated(snapshotPath);
@@ -29,11 +29,11 @@ function loadCurrent({ snapshotPath = SNAPSHOT_PATH, cachePath = CACHE_PATH } = 
       cached = readValidated(cachePath);
       const accept = knownDb.checkUpdateAcceptable(cached, null, require('../../package.json').version);
       if (!accept.ok) {
-        warnings.push(`se ignora la base descargada: ${accept.motivo}`);
+        warnings.push(`the downloaded database is ignored: ${accept.motivo}`);
         cached = null;
       }
     } catch (e) {
-      warnings.push(`se ignora la base descargada (ilegible o invalida): ${e.message}`);
+      warnings.push(`the downloaded database is ignored (unreadable or invalid): ${e.message}`);
       cached = null;
     }
   }

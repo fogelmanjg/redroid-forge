@@ -13,12 +13,12 @@ const execFileAsync = promisify(execFile);
 async function checkDockerSocket() {
   try {
     await runtime.docker.ping();
-    return { status: 'ok', detail: 'Socket de Docker respondiendo.' };
+    return { status: 'ok', detail: 'Docker socket responding.' };
   } catch (e) {
     return {
       status: 'fail',
-      detail: `No se pudo hablar con el socket de Docker: ${e.message}`,
-      fix: 'Confirmar que /var/run/docker.sock esta montado en el contenedor de redroid-forge (ver docker-compose.yml) y que el daemon de Docker esta corriendo en el host.',
+      detail: `Could not talk to the Docker socket: ${e.message}`,
+      fix: 'Confirm that /var/run/docker.sock is mounted in the redroid-forge container (see docker-compose.yml) and that the Docker daemon is running on the host.',
     };
   }
 }
@@ -26,10 +26,10 @@ async function checkDockerSocket() {
 function checkBinderfs() {
   const ctrlPath = '/dev/binderfs/binder-control';
   if (fs.existsSync(ctrlPath)) {
-    return { status: 'ok', detail: `${ctrlPath} presente.` };
+    return { status: 'ok', detail: `${ctrlPath} present.` };
   }
-  // Modo legacy (kernel sin CONFIG_ANDROID_BINDERFS): binder_linux crea
-  // /dev/binderN segun `devices=`. Ver binder.js (useLegacyBinder).
+  // Legacy mode (kernel without CONFIG_ANDROID_BINDERFS): binder_linux creates
+  // /dev/binderN according to `devices=`. See binder.js (useLegacyBinder).
   const legacySlots = [];
   for (let n = 0; n <= 32; n++) {
     const sfx = n === 0 ? '' : String(n);
@@ -38,57 +38,57 @@ function checkBinderfs() {
   if (legacySlots.length > 0) {
     return {
       status: 'ok',
-      detail: `binder legacy (binder_linux con devices=): ${legacySlots.length} slot(s) disponible(s) [${legacySlots.join(', ')}] (0 = /dev/binder sin sufijo). Cada instancia usa un slot; si necesitas mas instancias simultaneas, amplia \`devices=\`.`,
+      detail: `legacy binder (binder_linux with devices=): ${legacySlots.length} slot(s) available [${legacySlots.join(', ')}] (0 = /dev/binder without a suffix). Every instance uses one slot; if you need more simultaneous instances, extend \`devices=\`.`,
     };
   }
   return {
     status: 'fail',
-    detail: `${ctrlPath} no existe — binderfs no esta montado en el host.`,
+    detail: `${ctrlPath} does not exist — binderfs is not mounted on the host.`,
     fix: [
-      'Ejecutar en el HOST (no dentro del contenedor):',
+      'Run on the HOST (not inside the container):',
       '  sudo mkdir -p /dev/binderfs',
       '  sudo mount -t binder binder /dev/binderfs',
-      'Para que sobreviva un reboot, agregar a /etc/fstab:',
+      'To make it survive a reboot, add to /etc/fstab:',
       '  binder /dev/binderfs binder nofail 0 0',
       '',
-      'Si esto falla o el kernel no tiene CONFIG_ANDROID_BINDERFS (chequear con',
-      '"grep BINDERFS /boot/config-$(uname -r)" en el HOST — kernels Debian trixie',
-      'no lo tienen), hace falta el modulo binder_linux legacy en su lugar:',
+      'If this fails or the kernel does not have CONFIG_ANDROID_BINDERFS (check with',
+      '"grep BINDERFS /boot/config-$(uname -r)" on the HOST — Debian trixie kernels',
+      'do not have it), the legacy binder_linux module is needed instead:',
       '  # /etc/modprobe.d/binder-redroid.conf',
       '  options binder_linux devices=binder,hwbinder,vndbinder,binder1,hwbinder1,vndbinder1',
       '  # /etc/modules-load.d/binder-redroid.conf',
       '  binder_linux',
-      'Requiere reboot si el modulo ya estaba cargado con otra config (rmmod suele',
-      'fallar con "Device or resource busy").',
+      'It requires a reboot if the module was already loaded with another config (rmmod',
+      'usually fails with "Device or resource busy").',
     ].join('\n'),
   };
 }
 
 function checkExt4Module() {
-  // Las APEX de Android son imagenes ext4 montadas por loop device. En un host
-  // 100% btrfs el kernel puede no tener ext4 cargado nunca (no aparece ni en
-  // /proc/filesystems) -> mount() falla con ENODEV y el sintoma real se ve
-  // como fallos en cascada de vold/apexd-bootstrap con mensajes enganosos tipo
+  // Android's APEXes are ext4 images mounted through a loop device. On a 100%
+  // btrfs host the kernel may never have ext4 loaded (it does not even appear in
+  // /proc/filesystems) -> mount() fails with ENODEV and the real symptom looks like
+  // cascading failures of vold/apexd-bootstrap with misleading messages such as
   // "cannot execv(...): No such file or directory".
   try {
     const filesystems = fs.readFileSync('/proc/filesystems', 'utf-8');
     if (/\bext4\b/.test(filesystems)) {
-      return { status: 'ok', detail: 'Modulo ext4 disponible (listado en /proc/filesystems).' };
+      return { status: 'ok', detail: 'ext4 module available (listed in /proc/filesystems).' };
     }
     return {
       status: 'fail',
-      detail: 'ext4 no aparece en /proc/filesystems del host — las APEX de Android (montadas por loop) van a fallar con ENODEV.',
+      detail: 'ext4 does not appear in the host\'s /proc/filesystems — Android\'s APEXes (mounted through loop) will fail with ENODEV.',
       fix: [
-        'Ejecutar en el HOST:',
+        'Run on the HOST:',
         '  sudo modprobe ext4',
         '  echo ext4 | sudo tee /etc/modules-load.d/ext4-redroid.conf',
-        'Sintoma tipico si esto falta: el boot de Android muere en segundos con',
-        'errores de "cannot execv" en vold/apexd-bootstrap que parecen binarios',
-        'faltantes pero en realidad es la particion APEX que nunca se monto.',
+        'Typical symptom if this is missing: Android\'s boot dies within seconds with',
+        '"cannot execv" errors in vold/apexd-bootstrap that look like missing binaries',
+        'but are really the APEX partition that was never mounted.',
       ].join('\n'),
     };
   } catch (e) {
-    return { status: 'warn', detail: `No se pudo leer /proc/filesystems: ${e.message}` };
+    return { status: 'warn', detail: `Could not read /proc/filesystems: ${e.message}` };
   }
 }
 
@@ -97,15 +97,15 @@ function checkLoopDevices() {
   if (!fs.existsSync(ctrlPath)) {
     return {
       status: 'fail',
-      detail: `${ctrlPath} no existe.`,
-      fix: 'Ejecutar en el HOST: sudo modprobe loop',
+      detail: `${ctrlPath} does not exist.`,
+      fix: 'Run on the HOST: sudo modprobe loop',
     };
   }
-  return { status: 'ok', detail: `${ctrlPath} presente.` };
+  return { status: 'ok', detail: `${ctrlPath} present.` };
 }
 
-// Bind mount de ./data hereda el filesystem real del host — se puede leer
-// desde /proc/mounts del propio contenedor sin necesitar --pid=host para esto.
+// The ./data bind mount inherits the host's real filesystem — it can be read from
+// the container's own /proc/mounts without needing --pid=host for this.
 function checkDataVolumeFilesystem() {
   try {
     const mounts = fs.readFileSync('/proc/mounts', 'utf-8').split('\n');
@@ -121,13 +121,13 @@ function checkDataVolumeFilesystem() {
     if (best && best.fsType === 'btrfs') {
       return {
         status: 'warn',
-        detail: '/app/data vive en btrfs — hay un gotcha conocido con volumenes de datos de instancias redroid sobre btrfs.',
-        fix: 'Mover el bind mount ./data (y los volumenes de datos de las instancias) a una particion/subvolumen ext4, o crear un subvolumen btrfs dedicado sin copy-on-write (chattr +C) para esa carpeta antes de tener datos.',
+        detail: '/app/data lives on btrfs — there is a known gotcha with redroid instances\' data volumes on btrfs.',
+        fix: 'Move the ./data bind mount (and the instances\' data volumes) to an ext4 partition/subvolume, or create a dedicated btrfs subvolume without copy-on-write (chattr +C) for that folder before having any data.',
       };
     }
-    return { status: 'ok', detail: `/app/data sobre filesystem ${best ? best.fsType : 'desconocido'}.` };
+    return { status: 'ok', detail: `/app/data on filesystem ${best ? best.fsType : 'unknown'}.` };
   } catch (e) {
-    return { status: 'warn', detail: `No se pudo determinar el filesystem de /app/data: ${e.message}` };
+    return { status: 'warn', detail: `Could not determine the filesystem of /app/data: ${e.message}` };
   }
 }
 
@@ -135,15 +135,15 @@ async function checkHwsim() {
   const anyNeedsWifi = images.some((i) => i.needsHwsimWifi);
   try {
     await execFileAsync('modinfo', ['mac80211_hwsim']);
-    return { status: 'ok', detail: 'Modulo mac80211_hwsim disponible para cargar.' };
+    return { status: 'ok', detail: 'mac80211_hwsim module available to load.' };
   } catch (e) {
     return {
       status: anyNeedsWifi ? 'fail' : 'warn',
-      detail: `mac80211_hwsim no esta disponible: ${e.message}`,
+      detail: `mac80211_hwsim is not available: ${e.message}`,
       fix: [
-        'Solo hace falta si vas a usar imagenes con WiFi falso (needsHwsimWifi).',
-        'Ejecutar en el HOST: sudo modprobe mac80211_hwsim radios=6',
-        'Si falla, confirmar que el kernel del host tiene CONFIG_MAC80211_HWSIM (viene habilitado en los kernels estandar de Ubuntu).',
+        'It is only needed if you will use images with fake WiFi (needsHwsimWifi).',
+        'Run on the HOST: sudo modprobe mac80211_hwsim radios=6',
+        'If it fails, confirm that the host kernel has CONFIG_MAC80211_HWSIM (it comes enabled in the standard Ubuntu kernels).',
       ].join('\n'),
     };
   }
@@ -154,14 +154,14 @@ function checkGpu() {
   if (!fs.existsSync(dri)) {
     return {
       status: 'warn',
-      detail: `${dri} no existe en este host — no hay aceleracion de GPU disponible.`,
-      fix: 'Solo relevante para instancias con gpuMode=host. Instalar los drivers de GPU correspondientes en el host (mesa-utils para Intel/AMD, o el driver propietario de NVIDIA) y confirmar que aparecen nodos en /dev/dri.',
+      detail: `${dri} does not exist on this host — no GPU acceleration is available.`,
+      fix: 'Only relevant for instances with gpuMode=host. Install the corresponding GPU drivers on the host (mesa-utils for Intel/AMD, or NVIDIA\'s proprietary driver) and confirm that nodes appear in /dev/dri.',
     };
   }
   const entries = fs.readdirSync(dri);
   return {
     status: 'ok',
-    detail: `${dri} presente (${entries.join(', ')}). La compatibilidad real de gpuMode=host depende del driver instalado — no se puede confirmar en abstracto, probar una instancia y revisar los logs del contenedor.`,
+    detail: `${dri} present (${entries.join(', ')}). The real compatibility of gpuMode=host depends on the installed driver — it cannot be confirmed in the abstract, try an instance and check the container's logs.`,
   };
 }
 
@@ -172,7 +172,7 @@ async function checkHwAccel() {
   if (!hwAccel.encodeSupported(vendor)) {
     return {
       status: anyNeedsHwEnc ? 'warn' : 'ok',
-      detail: `GPU detectada: ${vendor}. El daemon VA-API de hwenc (encode) solo soporta AMD/Intel -- en NVIDIA hace falta el componente separado redroid-nvidia (Fase 2 paso 2 del roadmap), todavia no portado. Las instancias con imagenes de gpuMode=soft o sin hwEncCapable no se ven afectadas.`,
+      detail: `GPU detected: ${vendor}. hwenc's VA-API daemon (encode) only supports AMD/Intel -- on NVIDIA the separate redroid-nvidia component is needed (Phase 2 step 2 of the roadmap), not ported yet. Instances with gpuMode=soft images or without hwEncCapable are not affected.`,
     };
   }
 
@@ -180,13 +180,13 @@ async function checkHwAccel() {
     await hwAccel.ensureDaemonRunning();
     return {
       status: 'ok',
-      detail: `GPU ${vendor} detectada, daemon VA-API (hwenc) corriendo en ${hwAccel.SOCKET_PATH}.`,
+      detail: `${vendor} GPU detected, VA-API daemon (hwenc) running at ${hwAccel.SOCKET_PATH}.`,
     };
   } catch (e) {
     return {
       status: 'fail',
-      detail: `GPU ${vendor} detectada pero el daemon VA-API no pudo iniciar: ${e.message}`,
-      fix: 'Confirmar que el binario esta compilado (backend/native/vaapi-daemon/daemon, ver su Makefile) y que /dev/dri es accesible desde el contenedor del backend.',
+      detail: `${vendor} GPU detected but the VA-API daemon could not start: ${e.message}`,
+      fix: 'Confirm that the binary is built (backend/native/vaapi-daemon/daemon, see its Makefile) and that /dev/dri is accessible from the backend container.',
     };
   }
 }
@@ -195,39 +195,39 @@ async function checkImagesPresent() {
   const localTags = await runtime.listLocalImageTags();
   return images.map((img) => {
     const present = localTags.has(img.dockerImage);
-    const soporte = img.soporte === 'oficial' ? '✅ oficial' : '⚠️ comunidad';
+    const soporte = img.soporte === 'oficial' ? '✅ official' : '⚠️ community';
     const notaSoporte = img.notaSoporte ? ` ${img.notaSoporte}` : '';
     return {
       id: `image-${img.id}`,
-      label: `Imagen presente: ${img.label}`,
+      label: `Image present: ${img.label}`,
       status: present ? 'ok' : 'fail',
       detail: present
-        ? `${img.dockerImage} ya esta en el Docker local. Soporte: ${soporte}.${notaSoporte}`
-        : `${img.dockerImage} no esta en el Docker local. Soporte: ${soporte}.${notaSoporte}`,
+        ? `${img.dockerImage} is already in the local Docker. Support: ${soporte}.${notaSoporte}`
+        : `${img.dockerImage} is not in the local Docker. Support: ${soporte}.${notaSoporte}`,
       fix: present ? undefined : [
-        'Si la imagen fue exportada en otra PC:',
+        'If the image was exported on another PC:',
         `  docker save ${img.dockerImage} | gzip > ${img.id}.tar.gz`,
-        '  # copiar el archivo a esta PC, despues:',
+        '  # copy the file to this PC, then:',
         `  gunzip -c ${img.id}.tar.gz | docker load`,
-        'Si esta pusheada a un registry propio:',
-        `  docker pull <tu-registry>/${img.dockerImage}`,
+        'If it is pushed to your own registry:',
+        `  docker pull <your-registry>/${img.dockerImage}`,
       ].join('\n'),
     };
   });
 }
 
-// Google bloquea GApps en instancias no certificadas si su Android ID (GSF)
-// no se registra a mano en https://www.google.com/android/uncertified dentro
-// de las 48hs del primer boot con GApps. Esto es un paso humano, no algo que
-// el codigo pueda hacer solo — este check solo evita que se pase por alto.
+// Google blocks GApps on uncertified instances if their Android ID (GSF) is not
+// registered by hand at https://www.google.com/android/uncertified within 48
+// hours of the first boot with GApps. This is a human step, not something the
+// code can do on its own — this check only prevents it from being overlooked.
 function checkAndroidIdRegistration() {
   const pending = store.readAll().filter((i) => i.hasGapps && !i.androidIdRegisteredAt);
   if (pending.length === 0) {
     return [{
       id: 'android-id-registration',
-      label: 'Registro de Android ID (GApps)',
+      label: 'Android ID registration (GApps)',
       status: 'ok',
-      detail: 'No hay instancias con GApps pendientes de registrar (o no tenes ninguna con GApps todavia).',
+      detail: 'There are no GApps instances pending registration (or you have none with GApps yet).',
     }];
   }
 
@@ -237,49 +237,49 @@ function checkAndroidIdRegistration() {
     if (!i.androidId) {
       return {
         id: `android-id-${i.id}`,
-        label: `Android ID pendiente: ${i.name}`,
+        label: `Android ID pending: ${i.name}`,
         status: 'warn',
-        detail: `Todavia no se pudo leer el Android ID de "${i.name}" (puede que GMS no haya terminado de inicializar). Se reintenta solo en los primeros minutos tras el arranque; si sigue sin aparecer despues de eso, mirala con GET /api/instances/${i.id}/android-id.`,
+        detail: `The Android ID of "${i.name}" could not be read yet (GMS may not have finished initializing). It retries by itself in the first minutes after startup; if it still does not show up after that, check it with GET /api/instances/${i.id}/android-id.`,
       };
     }
     return {
       id: `android-id-${i.id}`,
-      label: `Android ID sin registrar: ${i.name}`,
+      label: `Android ID not registered: ${i.name}`,
       status: hoursLeft <= 0 ? 'fail' : 'warn',
       detail: hoursLeft <= 0
-        ? `"${i.name}" lleva mas de ${ANDROID_ID_DEADLINE_HOURS}hs sin registrar su Android ID (${i.androidId}) — Google puede haber bloqueado ya el acceso a GApps en esta instancia.`
-        : `"${i.name}" tiene Android ID ${i.androidId} sin registrar. Quedan ~${hoursLeft}hs antes de que Google bloquee GApps en esta instancia.`,
+        ? `"${i.name}" has gone more than ${ANDROID_ID_DEADLINE_HOURS} h without registering its Android ID (${i.androidId}) — Google may already have blocked GApps access on this instance.`
+        : `"${i.name}" has Android ID ${i.androidId} unregistered. About ${hoursLeft} h remain before Google blocks GApps on this instance.`,
       fix: [
-        `1. Copiar el Android ID: ${i.androidId}`,
-        '2. Registrarlo en https://www.google.com/android/uncertified',
-        `3. Marcarlo como hecho: POST /api/instances/${i.id}/android-id/registered (o desde la UI)`,
+        `1. Copy the Android ID: ${i.androidId}`,
+        '2. Register it at https://www.google.com/android/uncertified',
+        `3. Mark it as done: POST /api/instances/${i.id}/android-id/registered (or from the UI)`,
       ].join('\n'),
     };
   });
 }
 
-// Base de datos de combinaciones conocidas (docs/KNOWN-COMBINATIONS.md).
-// Informativo: nunca 'fail' por antiguedad -- la app funciona igual sin ella,
-// solo sabe menos sobre que combinaciones estan validadas.
+// Known-combinations database (docs/KNOWN-COMBINATIONS.md). Informative: never
+// 'fail' because of age -- the app works the same without it, it just knows less
+// about which combinations are validated.
 function checkKnownDb() {
   const knownDbStore = require('./knownDbStore');
   try {
     const cur = knownDbStore.loadCurrent();
     const s = knownDbStore.summarize(cur);
-    const origen = s.source === 'snapshot' ? 'snapshot de esta version' : 'base descargada';
-    const detail = `Base serial ${s.serial} (${s.generatedAt.slice(0, 10)}, ${origen}): ${s.counts.combinaciones} combinacion(es), ${s.counts.oficiales} validada(s) por el proyecto.`;
+    const origen = s.source === 'snapshot' ? 'this version\'s snapshot' : 'downloaded database';
+    const detail = `Database serial ${s.serial} (${s.generatedAt.slice(0, 10)}, ${origen}): ${s.counts.combinaciones} combination(s), ${s.counts.oficiales} validated by the project.`;
     const last = require('./knownDbUpdate').getLastCheck();
     const nueva = last && last.ok && last.disponible
-      ? ` Hay una base mas nueva publicada (serial ${last.serialRemoto}): actualizala desde POST /api/db/update.`
+      ? ` A newer database is published (serial ${last.serialRemoto}): update it with POST /api/db/update.`
       : '';
     if (s.warnings.length) {
-      return { status: 'warn', detail: `${detail}${nueva} Avisos: ${s.warnings.join('; ')}` };
+      return { status: 'warn', detail: `${detail}${nueva} Warnings: ${s.warnings.join('; ')}` };
     }
     return { status: 'ok', detail: `${detail}${nueva}` };
   } catch (e) {
     return {
       status: 'warn',
-      detail: `No se pudo cargar la base de combinaciones conocidas: ${e.message}. Sin ella toda combinacion se trata como "sin soporte conocido".`,
+      detail: `Could not load the known-combinations database: ${e.message}. Without it every combination is treated as "no known support".`,
     };
   }
 }
@@ -293,15 +293,15 @@ async function runAll() {
   ]);
 
   const checks = [
-    { id: 'docker-socket', label: 'Socket de Docker', ...dockerSocket },
-    { id: 'binderfs', label: 'binderfs montado', ...checkBinderfs() },
+    { id: 'docker-socket', label: 'Docker socket', ...dockerSocket },
+    { id: 'binderfs', label: 'binderfs mounted', ...checkBinderfs() },
     { id: 'loop-devices', label: 'Loop devices', ...checkLoopDevices() },
-    { id: 'ext4-module', label: 'Modulo ext4 (montaje de APEX por loop)', ...checkExt4Module() },
-    { id: 'data-fs', label: 'Filesystem de /app/data', ...checkDataVolumeFilesystem() },
-    { id: 'hwsim', label: 'mac80211_hwsim (WiFi falso)', ...hwsim },
+    { id: 'ext4-module', label: 'ext4 module (APEX mounting through loop)', ...checkExt4Module() },
+    { id: 'data-fs', label: '/app/data filesystem', ...checkDataVolumeFilesystem() },
+    { id: 'hwsim', label: 'mac80211_hwsim (fake WiFi)', ...hwsim },
     { id: 'gpu', label: 'GPU / /dev/dri', ...checkGpu() },
-    { id: 'hw-accel', label: 'Aceleracion HW (hwenc, VA-API)', ...hwAccelCheck },
-    { id: 'known-db', label: 'Base de datos de combinaciones conocidas', ...checkKnownDb() },
+    { id: 'hw-accel', label: 'HW acceleration (hwenc, VA-API)', ...hwAccelCheck },
+    { id: 'known-db', label: 'Known-combinations database', ...checkKnownDb() },
     ...imagePresence,
     ...checkAndroidIdRegistration(),
   ];

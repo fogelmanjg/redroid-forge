@@ -1,13 +1,13 @@
-// Herramienta de prueba (solo desarrollo): decodifica un archivo de video con MediaCodec (API NDK, la
-// misma ruta que usa cualquier reproductor) y escribe un CRC32 por frame, en orden de salida, de la
-// imagen I420 compacta y recortada. Se compara con `ffmpeg -pix_fmt yuv420p` (ver
-// android/test/verify_mediacodec.py), asi se prueba el componente Codec2 por el camino real.
+// Test tool (development only): decodes a video file with MediaCodec (NDK API, the
+// same path any player uses) and writes a CRC32 per frame, in output order, of the
+// compact, cropped I420 image. It is compared with `ffmpeg -pix_fmt yuv420p` (see
+// android/test/verify_mediacodec.py), which is how the Codec2 component is tested through the real path.
 //
-//   hwdec_mediacodec_test <archivo> [componente|-] [salida.txt]
-//     componente: nombre Codec2 (ej. c2.hardware.decoder.h264, c2.android.avc.decoder) o "-" para
-//     que Android elija el decoder por tipo MIME.
+//   hwdec_mediacodec_test <file> [component|-] [output.txt]
+//     component: Codec2 name (e.g. c2.hardware.decoder.h264, c2.android.avc.decoder) or "-" to
+//     let Android pick the decoder by MIME type.
 //
-// Se corre desde /data/local/tmp como shell dentro de la instancia.
+// It runs from /data/local/tmp as shell inside the instance.
 #include <dlfcn.h>
 #include <fcntl.h>
 #include <stdint.h>
@@ -44,27 +44,27 @@ static double now() {
 
 int main(int argc, char **argv) {
     if (argc < 2) {
-        fprintf(stderr, "uso: %s <archivo> [componente|-] [salida.txt]\n", argv[0]);
+        fprintf(stderr, "usage: %s <file> [component|-] [output.txt]\n", argv[0]);
         return 2;
     }
     const char *path = argv[1];
-    const bool noHash = getenv("NO_HASH") != nullptr;  // rendimiento puro, sin verificar pixeles
-    const bool p010 = getenv("OUT_P010") != nullptr;  // pedir P010 (10 bits) y hashear las muestras de 16 bits
+    const bool noHash = getenv("NO_HASH") != nullptr;  // pure performance, without verifying pixels
+    const bool p010 = getenv("OUT_P010") != nullptr;  // ask for P010 (10-bit) and hash the 16-bit samples
     const char *name = (argc > 2 && strcmp(argv[2], "-") != 0) ? argv[2] : nullptr;
     FILE *out = argc > 3 ? fopen(argv[3], "w") : stdout;
     crc_init();
 
-    // Los componentes Codec2 le avisan al cliente (trabajo terminado, buffer de entrada liberado) con
-    // llamadas Binder ENTRANTES. Una app real ya tiene un grupo de hilos de Binder (lo arranca zygote); un
-    // binario nativo como este no, y sin el nunca llega ningun aviso: el decoder parece "trabado" despues de
-    // llenar sus primeras ranuras de entrada. Se carga por dlopen para no sumar libbinder_ndk al Android.bp.
+    // Codec2 components notify the client (job done, input buffer released) with
+    // INCOMING Binder calls. A real app already has a Binder thread pool (zygote starts it); a
+    // native binary like this one does not, and without it no notification ever arrives: the decoder looks "stuck" after
+    // filling its first input slots. It is loaded through dlopen so as not to add libbinder_ndk to the Android.bp.
     if (void *bn = dlopen("libbinder_ndk.so", RTLD_NOW)) {
         auto setMax = reinterpret_cast<bool (*)(uint32_t)>(dlsym(bn, "ABinderProcess_setThreadPoolMaxThreadCount"));
         auto start = reinterpret_cast<void (*)()>(dlsym(bn, "ABinderProcess_startThreadPool"));
         if (setMax) setMax(4);
         if (start) start();
     } else {
-        fprintf(stderr, "AVISO: no se pudo cargar libbinder_ndk.so: sin hilos de Binder no llegan los avisos del decoder\n");
+        fprintf(stderr, "WARNING: could not load libbinder_ndk.so: without Binder threads the decoder notifications do not arrive\n");
     }
 
     int fd = open(path, O_RDONLY);
@@ -72,7 +72,7 @@ int main(int argc, char **argv) {
     off_t size = lseek(fd, 0, SEEK_END);
     AMediaExtractor *ex = AMediaExtractor_new();
     if (AMediaExtractor_setDataSourceFd(ex, fd, 0, size) != AMEDIA_OK) {
-        fprintf(stderr, "no se pudo abrir %s\n", path);
+        fprintf(stderr, "could not open %s\n", path);
         return 1;
     }
     AMediaFormat *trackFmt = nullptr;
@@ -88,22 +88,22 @@ int main(int argc, char **argv) {
         }
         AMediaFormat_delete(f);
     }
-    if (!trackFmt) { fprintf(stderr, "sin pista de video\n"); return 1; }
+    if (!trackFmt) { fprintf(stderr, "no video track\n"); return 1; }
 
     AMediaCodec *codec = name ? AMediaCodec_createCodecByName(name) : AMediaCodec_createDecoderByType(mime);
-    if (!codec) { fprintf(stderr, "RESULTADO: no se pudo crear el decoder %s\n", name ? name : mime); return 3; }
-    // Pide I420 planar (COLOR_FormatYUV420Planar = 19): CCodec convierte si el componente entrega otro layout.
+    if (!codec) { fprintf(stderr, "RESULT: could not create the decoder %s\n", name ? name : mime); return 3; }
+    // Asks for planar I420 (COLOR_FormatYUV420Planar = 19): CCodec converts if the component delivers another layout.
     AMediaFormat_setInt32(trackFmt, AMEDIAFORMAT_KEY_COLOR_FORMAT, p010 ? 54 : 19);  // 54 = YUVP010, 19 = I420
     if (AMediaCodec_configure(codec, trackFmt, nullptr, nullptr, 0) != AMEDIA_OK) {
         fprintf(stderr, "RESULTADO: configure fallo (%s)\n", name ? name : mime);
         return 3;
     }
     if (AMediaCodec_start(codec) != AMEDIA_OK) {
-        fprintf(stderr, "RESULTADO: start fallo: el decoder no pudo iniciar (%s)\n", name ? name : mime);
+        fprintf(stderr, "RESULT: start failed: the decoder could not start (%s)\n", name ? name : mime);
         return 3;
     }
 
-    {   // diagnostico: formatos negociados (cantidad de ranuras de entrada, tamano de buffer, etc.)
+    {   // diagnostics: negotiated formats (number of input slots, buffer size, etc.)
         AMediaFormat *fi = AMediaCodec_getInputFormat(codec);
         AMediaFormat *fo = AMediaCodec_getOutputFormat(codec);
         fprintf(stderr, "FORMATO ENTRADA: %s\nFORMATO SALIDA: %s\n", AMediaFormat_toString(fi), AMediaFormat_toString(fo));
@@ -134,8 +134,8 @@ int main(int argc, char **argv) {
     long inOk = 0, inBusy = 0, outTry = 0;
     double lastReport = now();
     while (!outputEos) {
-        if (now() - lastReport > 3.0) {  // diagnostico: si se traba, mostrar donde
-            fprintf(stderr, "... entradas encoladas=%ld sin-buffer-de-entrada=%ld salidas=%ld sin-salida=%ld\n", inOk,
+        if (now() - lastReport > 3.0) {  // diagnostics: if it gets stuck, show where
+            fprintf(stderr, "... inputs queued=%ld no-input-buffer=%ld outputs=%ld no-output=%ld\n", inOk,
                     inBusy, frames, outTry);
             lastReport = now();
             if (now() - t0 > 20.0 && frames == 0) {
@@ -167,7 +167,7 @@ int main(int argc, char **argv) {
                 size_t osz = 0;
                 uint8_t *p = AMediaCodec_getOutputBuffer(codec, oi, &osz);
                 if (width == 0) refresh();
-                if (noHash) {  // solo medir rendimiento: no empaquetar ni hashear (el CRC de un frame 4K cuesta ~10 ms)
+                if (noHash) {  // only measure performance: do not pack or hash (the CRC of a 4K frame costs ~10 ms)
                     fprintf(out, "%ld %lld\n", frames, (long long)info.presentationTimeUs);
                     frames++;
                     AMediaCodec_releaseOutputBuffer(codec, oi, false);
@@ -177,7 +177,7 @@ int main(int argc, char **argv) {
                 const int32_t w = cropR - cropL + 1, h = cropB - cropT + 1;
                 packed.clear();
                 if (p010) {
-                    // P010: muestras de 16 bits; `stride` viene en bytes. Plano Y y despues UV intercalado.
+                    // P010: 16-bit samples; `stride` comes in bytes. Y plane and then interleaved UV.
                     packed.reserve((size_t)w * h * 3);
                     for (int32_t r = 0; r < h; r++) {
                         const uint8_t *row = p + (size_t)(cropT + r) * stride + (size_t)cropL * 2;
@@ -221,7 +221,7 @@ int main(int argc, char **argv) {
         } else if (oi == AMEDIACODEC_INFO_TRY_AGAIN_LATER) {
             outTry++;
         } else if (oi == AMEDIACODEC_INFO_TRY_AGAIN_LATER && inputEos && ++stalls > 2000) {
-            fprintf(stderr, "RESULTADO: el decoder dejo de entregar frames sin avisar fin de stream\n");
+            fprintf(stderr, "RESULT: the decoder stopped delivering frames without signaling end of stream\n");
             break;
         }
     }
@@ -229,8 +229,8 @@ int main(int argc, char **argv) {
     AMediaCodec_stop(codec);
     AMediaCodec_delete(codec);
     AMediaExtractor_delete(ex);
-    fprintf(stderr, "RESULTADO: %s %s -> %ld frames en %.2f s (%.1f fps)%s\n", name ? name : "(por defecto)", mime,
-            frames, dt, frames / dt, outputEos ? "" : " (SIN FIN DE STREAM)");
+    fprintf(stderr, "RESULT: %s %s -> %ld frames in %.2f s (%.1f fps)%s\n", name ? name : "(default)", mime,
+            frames, dt, frames / dt, outputEos ? "" : " (NO END OF STREAM)");
     if (out != stdout) fclose(out);
     return outputEos ? 0 : 1;
 }

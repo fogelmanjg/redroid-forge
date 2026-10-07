@@ -1,13 +1,13 @@
 const runtime = require('./dockerRuntime');
 const store = require('./store');
 
-// Porta android-identity.service.ts de plenum-redroid. El Android ID (GSF) lo
-// asigna Google Play Services solo en cualquier boot, sin que este codigo
-// intervenga — lo unico que hace esto es LEERLO desde el gservices.db que ya
-// vive en el volumen /data, para poder mostrarlo. Hay que registrarlo a mano
-// en https://www.google.com/android/uncertified dentro de las 48hs del primer
-// boot con GApps: si no, Google bloquea el acceso a GApps en esa instancia
-// (ver [[reference_redroid_...]] — dispositivo "no certificado").
+// Ports android-identity.service.ts from plenum-redroid. The Android ID (GSF) is
+// assigned by Google Play Services on its own at any boot, without this code
+// intervening — all this does is READ it from the gservices.db that already lives
+// in the /data volume, so it can be shown. It has to be registered by hand at
+// https://www.google.com/android/uncertified within 48 hours of the first boot
+// with GApps: otherwise Google blocks GApps access on that instance (it is an
+// "uncertified" device).
 function log(msg) { console.log(`[androidIdentity] ${msg}`); }
 
 async function fetchFromVolume(volumeName) {
@@ -40,8 +40,8 @@ async function fetchFromVolume(volumeName) {
   }
 }
 
-// Reintento en 3 tandas: rapido, a los 3min (GMS necesita ese margen para
-// inicializar en el primer boot), y un ultimo intento a los +60s por si acaso.
+// Retry in 3 rounds: quick, at 3 min (GMS needs that margin to initialize on the
+// first boot), and a last attempt at +60 s just in case.
 function scheduleFetch(instanceId) {
   const tryPersist = async () => {
     const instance = store.get(instanceId);
@@ -49,7 +49,7 @@ function scheduleFetch(instanceId) {
     const raw = await fetchFromVolume(instance.volumeName);
     if (raw) {
       store.upsert({ ...instance, androidId: raw });
-      log(`Android ID persistido para ${instanceId}: ${raw}`);
+      log(`Android ID persisted for ${instanceId}: ${raw}`);
       return true;
     }
     return false;

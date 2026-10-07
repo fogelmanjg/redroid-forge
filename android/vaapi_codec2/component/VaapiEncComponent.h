@@ -83,13 +83,13 @@ private:
                           uint64_t drmFormatModifier, unsigned char **outBuf);
 
     std::shared_ptr<VaapiEncInterface> mIntf;
-    // Sin esto, CCodec nunca emite un buffer MediaCodec.BUFFER_FLAG_CODEC_CONFIG
-    // -- consumidores que lo exigen antes del primer frame (ej. el muxer MP4
-    // de scrcpy) fallan con "first video packet is not a config packet"
-    // aunque el bitstream en si sea valido y ya venga con SPS/PPS embebidos
-    // (decodificarlo en vivo, sin pasar por un muxer, nunca lo necesito).
-    // Mismo patron que C2SoftAvcEnc::mSpsPpsHeaderReceived -- se manda una
-    // sola vez, no en cada frame.
+    // Without this, CCodec never emits a MediaCodec.BUFFER_FLAG_CODEC_CONFIG buffer
+    // -- consumers that require it before the first frame (e.g. scrcpy's MP4 muxer)
+    // fail with "first video packet is not a config packet"
+    // even if the bitstream itself is valid and already comes with embedded SPS/PPS
+    // (decoding it live, without going through a muxer, never needed it).
+    // Same pattern as C2SoftAvcEnc::mSpsPpsHeaderReceived -- it is sent
+    // only once, not on every frame.
     bool mCsdSent = false;
 };
 

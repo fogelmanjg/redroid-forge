@@ -1,9 +1,10 @@
-// Modal de contrato genérico (sección 5 de docs/REQUIREMENTS.md): lee un
-// manifest de módulo (JSON servido por /api/modules) y renderiza siempre el
-// mismo diálogo -- título, descripción, disclaimer si es de terceros no
-// libre, qué toca/permisos, y el botón de aceptar -- sin programar una
-// pantalla especial por módulo.
+// Generic contract modal (section 5 of docs/REQUIREMENTS.md): it reads a
+// module manifest (JSON served by /api/modules) and always renders the
+// same dialog -- title, description, disclaimer if it is non-free third
+// party, what it touches/permissions, and the accept button -- without
+// coding a special screen per module.
 const Contracts = (() => {
+  const { t, loc } = I18n;
   const dialog = document.getElementById('contract-dialog');
   const form = document.getElementById('contract-form');
   const els = {
@@ -29,22 +30,22 @@ const Contracts = (() => {
   }
 
   function render(manifest) {
-    els.title.textContent = manifest.nombre;
-    els.descripcion.textContent = manifest.descripcion;
+    els.title.textContent = loc(manifest, 'nombre');
+    els.descripcion.textContent = loc(manifest, 'descripcion');
     els.checkbox.checked = false;
 
-    // Sección 6: todo módulo de terceros no libre lleva el disclaimer
-    // obligatorio de que no es parte de redroid-forge, sin excepción.
+    // Section 6: every non-free third-party module carries the mandatory
+    // disclaimer that it is not part of redroid-forge, no exceptions.
     setHiddenText(
       els.disclaimer,
       manifest.esTerceroNoLibre
-        ? 'Este módulo integra software de terceros no libre — no es parte de redroid-forge. Se instala/ejecuta bajo tu propia responsabilidad.'
+        ? t('contract.disclaimer')
         : null,
     );
-    setHiddenText(els.licencia, manifest.licencia ? `Licencia: ${manifest.licencia}` : null);
+    setHiddenText(els.licencia, manifest.licencia ? t('contract.license', { v: loc(manifest, 'licencia') }) : null);
     if (manifest.origen) {
       els.origen.hidden = false;
-      els.origen.innerHTML = `Origen: <a href="${manifest.origen}" target="_blank" rel="noopener">${manifest.origen}</a>`;
+      els.origen.innerHTML = `${t('contract.origin')}<a href="${manifest.origen}" target="_blank" rel="noopener">${manifest.origen}</a>`;
     } else {
       els.origen.hidden = true;
       els.origen.innerHTML = '';
@@ -52,17 +53,19 @@ const Contracts = (() => {
 
     if (manifest.compatibleCon) {
       els.compatible.hidden = false;
-      els.compatible.textContent = `Compatible con: Android ${manifest.compatibleCon.androidVersion.join('/')}`
-        + ` · GPU ${manifest.compatibleCon.gpuMode.join('/')}`;
+      els.compatible.textContent = t('modules.compatible', {
+        android: manifest.compatibleCon.androidVersion.join('/'),
+        gpu: manifest.compatibleCon.gpuMode.join('/'),
+      });
     } else {
       els.compatible.hidden = true;
     }
 
-    els.quetoca.innerHTML = (manifest.queToca || []).map((item) => `<li>${item}</li>`).join('');
+    els.quetoca.innerHTML = (loc(manifest, 'queToca') || []).map((item) => `<li>${item}</li>`).join('');
   }
 
-  // Muestra el contrato de un manifest y devuelve una promesa que resuelve
-  // en true solo si el usuario acepta Y el backend registra la aceptación.
+  // Shows a manifest's contract and returns a promise that resolves to
+  // true only if the user accepts AND the backend records the acceptance.
   function ask(manifest) {
     return new Promise((resolve, reject) => {
       render(manifest);
@@ -86,13 +89,13 @@ const Contracts = (() => {
             dialog.close();
             if (!res.ok) {
               const body = await res.json().catch(() => null);
-              throw new Error(body?.error || `El backend rechazó la aceptación (HTTP ${res.status})`);
+              throw new Error(body?.error || t('contract.rejected', { status: res.status }));
             }
             resolve(true);
           })
           .catch((err) => {
             dialog.close();
-            reject(err instanceof Error ? err : new Error('No se pudo registrar la aceptación del módulo'));
+            reject(err instanceof Error ? err : new Error(t('contract.failed')));
           });
       }
 
@@ -102,9 +105,9 @@ const Contracts = (() => {
         resolve(false);
       }
 
-      // El <dialog> nativo dispara 'cancel' (no 'submit') al cerrarse con
-      // Escape -- sin este listener, esa vía nunca llamaba a resolve() y
-      // ensureAccepted() quedaba colgado esperando para siempre.
+      // The native <dialog> fires 'cancel' (not 'submit') when closed with
+      // Escape -- without this listener, that path never called resolve() and
+      // ensureAccepted() was left hanging forever.
       function onDialogCancel(e) {
         e.preventDefault();
         onCancel();
@@ -116,9 +119,9 @@ const Contracts = (() => {
     });
   }
 
-  // Pide aceptación para cada manifest pendiente, en orden. Devuelve true
-  // solo si se aceptaron todos -- si cancela cualquiera, corta ahí (la
-  // integración no arranca a medias).
+  // Asks for acceptance of every pending manifest, in order. Returns true
+  // only if all were accepted -- if any is cancelled, it stops there (the
+  // integration does not start halfway).
   async function ensureAccepted(pendingManifests) {
     for (const manifest of pendingManifests) {
       // eslint-disable-next-line no-await-in-loop

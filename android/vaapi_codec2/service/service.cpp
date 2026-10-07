@@ -130,9 +130,9 @@ public:
         encTraits->owner = "vaapi";
 
         std::vector<std::shared_ptr<const C2Component::Traits>> traits = {encTraits};
-        // Un decoder por codec (H.264, HEVC, VP9). Que el framework los ofrezca o no lo decide el
-        // media_codecs.xml de cada instancia, que el backend de redroid-forge arma segun lo que el
-        // hardware del host decodifica de verdad; aca se registran todos.
+        // One decoder per codec (H.264, HEVC, VP9). Whether the framework offers them or not is decided by the
+        // media_codecs.xml of each instance, which the redroid-forge backend builds according to what the
+        // host hardware really decodes; here all of them are registered.
         for (const android::VaapiDecCodec &codec : android::vaapiDecCodecs()) {
             auto decTraits = std::make_shared<C2Component::Traits>();
             decTraits->name = codec.name;

@@ -13,13 +13,13 @@ app.use('/api/db', require('./routes/db'));
 
 const PORT = process.env.PORT || 8080;
 app.listen(PORT, () => {
-  console.log(`redroid-forge escuchando en :${PORT}`);
-  // Consulta (nunca aplica) si hay una base de combinaciones mas nueva: al
-  // abrir y una vez al dia. Desactivable con REDROID_FORGE_DB_CHECK=0.
+  console.log(`redroid-forge listening on :${PORT}`);
+  // Checks (never applies) whether a newer combinations database exists: on
+  // open and once a day. Can be turned off with REDROID_FORGE_DB_CHECK=0.
   require('./lib/knownDbUpdate').startScheduler();
 });
 
-// Última red: un bug en un solo request no puede tumbar el proceso entero
-// (y con el, el manejo de TODAS las instancias corriendo).
+// Last safety net: a bug in a single request cannot bring down the whole process
+// (and with it the management of ALL the running instances).
 process.on('unhandledRejection', (err) => console.error('unhandledRejection:', err));
 process.on('uncaughtException', (err) => console.error('uncaughtException:', err));

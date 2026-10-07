@@ -1,10 +1,10 @@
 const fs = require('fs');
 const path = require('path');
 
-// Primitivas compartidas por store.js (instancias) y moduleAcceptance.js
-// (aceptaciones de modulo) -- mismo patron ("leer con fallback a [] si no
-// existe o esta corrupto" + escritura atomica via tmp+rename) que antes
-// vivia duplicado byte a byte en los dos archivos.
+// Primitives shared by store.js (instances) and moduleAcceptance.js (module
+// acceptances) -- the same pattern ("read with a fallback to [] if it does not
+// exist or is corrupt" + atomic write via tmp+rename) that used to live
+// duplicated byte for byte in both files.
 
 function ensureDirFor(filePath) {
   const dir = path.dirname(filePath);
@@ -21,8 +21,8 @@ function readJsonArray(filePath) {
   }
 }
 
-// Escritura atomica (tmp + rename) para no dejar el archivo corrupto si el
-// proceso muere a mitad de un write.
+// Atomic write (tmp + rename) so as not to leave the file corrupt if the
+// process dies in the middle of a write.
 function writeJsonArray(filePath, data) {
   ensureDirFor(filePath);
   const tmp = `${filePath}.tmp`;

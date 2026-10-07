@@ -1,44 +1,41 @@
 #!/usr/bin/env node
 'use strict';
 
-// Modulo hwenc (etapas 3, 4, 5 y 6 -- ver manifest.json, moduleRunner.js y
-// docs/ARCHITECTURE.md): integra el componente Codec2 de VA-API (proyecto
-// redroid-hwenc, Apache-2.0, mismo autor que redroid-forge) en una instancia
-// recien creada, mientras todavia esta detenida, y lo deja usable en runtime.
+// hwenc module (stages 3, 4, 5 and 6 -- see manifest.json, moduleRunner.js and
+// docs/ARCHITECTURE.md): it integrates the VA-API Codec2 component (the
+// redroid-hwenc project, Apache-2.0, the same author as redroid-forge) into a
+// freshly created instance, while it is still stopped, and leaves it usable at
+// runtime.
 //
-// Primer modulo que corre a traves del runner generico
-// (backend/src/lib/moduleRunner.js) en vez de estar cableado a mano en
-// instances.js -- expone un hook por etapa que declara en su manifest.json
-// ("etapa": [3, 4, 5, 6]), con el nombre fijo que ese runner espera:
-// prepareCreate (3), integrate (4), ensureHostInfraReady (5),
-// ensureRuntimeReady (6, se llamaba ensureHwencReady antes de esta
-// convencion).
+// The first module that runs through the generic runner
+// (backend/src/lib/moduleRunner.js) instead of being wired by hand in
+// instances.js -- it exposes one hook per stage that it declares in its
+// manifest.json ("etapa": [3, 4, 5, 6]), with the fixed name that runner
+// expects: prepareCreate (3), integrate (4), ensureHostInfraReady (5),
+// ensureRuntimeReady (6, it was called ensureHwencReady before this
+// convention).
 //
-// A diferencia de GApps/Magisk (seccion 6 de REQUIREMENTS.md), esto SI es
-// codigo propio 100% libre -- no aplica la restriccion de "nunca alojar el
-// binario". El motivo de bajarlo en vez de compilarlo en el momento es
-// puramente tecnico: son binarios Android/bionic que necesitan el
-// toolchain completo de AOSP para compilarse, no algo que el build normal
-// de redroid-forge pueda hacer.
+// Unlike GApps/Magisk (section 6 of REQUIREMENTS.md), this IS our own 100% free
+// code -- the "never host the binary" restriction does not apply. The reason for
+// downloading it instead of building it on the spot is purely technical: they
+// are Android/bionic binaries that need the complete AOSP toolchain to build,
+// not something redroid-forge's normal build can do.
 //
-// [PENDIENTE] hoy lee los artefactos de una carpeta local
-// (REDROID_HWENC_ARTIFACTS_DIR) porque redroid-hwenc todavia no publica un
-// release -- cuando exista, este modulo tendria que descargarlo de ahi en
-// vez de asumir que ya estan en el disco.
+// [PENDING] today it reads the artifacts from a local folder
+// (REDROID_HWENC_ARTIFACTS_DIR) because redroid-hwenc does not publish a release
+// yet -- when one exists, this module would have to download it from there
+// instead of assuming they are already on disk.
 //
-// [PENDIENTE] usa el CLI de `docker` via child_process -- valido para
-// probar desde el host, pero el backend real de redroid-forge corre en una
-// imagen Alpine sin ese CLI instalado (ver Dockerfile). Portar a
-// dockerode's putArchive() (con uid/gid=0 en los headers del tar) cuando
-// esto se enganche al flujo real de creacion de instancias.
+// It uses the `docker` CLI through child_process (the backend's image installs
+// `docker-cli` for that, see the Dockerfile) -- porting to dockerode's
+// putArchive() (with uid/gid=0 in the tar headers) would remove that dependency.
 //
-// Tier 5.13 de redroid-hwenc (28-29/09): 3 bugs reales encontrados
-// integrando esto como modulo contra la imagen oficial de redroid (no la
-// build custom que se usaba antes) -- nombre de instancia (ya corregido en
-// el binario que baja este modulo), falta la entrada de media_codecs.xml
-// (ya la resuelve patchMediaCodecsXml), y el CSD del encoder (ya corregido
-// en el componente). El unico que sigue sin automatizarse es la property
-// AIDL/HIDL -- ver ensureRuntimeReady() mas abajo.
+// Tier 5.13 of redroid-hwenc (28-29/09): 3 real bugs found integrating this as a
+// module against the official redroid image (not the custom build used before) --
+// the instance name (already fixed in the binary this module downloads), the
+// missing media_codecs.xml entry (patchMediaCodecsXml already solves it), and the
+// encoder's CSD (already fixed in the component). The only one that is still not
+// automated is the AIDL/HIDL property -- see ensureRuntimeReady() below.
 
 const fs = require('fs');
 const os = require('os');
@@ -51,13 +48,12 @@ const execFileAsync = promisify(execFile);
 const ARTIFACTS_DIR = process.env.REDROID_HWENC_ARTIFACTS_DIR
   || '/home/jgustavo/aosp-out-redroid15/target/product/redroid_x86_64/vendor';
 
-// Ruta relativa dentro de ARTIFACTS_DIR -> mismo path dentro de /vendor de
-// la instancia. Cierre transitivo de dependencias calculado a mano el
-// 28/09 (readelf -d sobre el binario + sus .so, resolviendo contra este
-// mismo arbol) -- ver docs/ARCHITECTURE.md para el detalle de como se armo
-// esta lista y por que NO incluye libva/libgbm/libdrm/libEGL (esas son
-// dependencias del daemon del host, no de este binario -- error que se
-// cometio la primera vez, corregido acá).
+// Relative path inside ARTIFACTS_DIR -> the same path inside the instance's
+// /vendor. Transitive closure of dependencies computed by hand on 28/09
+// (readelf -d on the binary + its .so files, resolving against this same tree) --
+// see docs/ARCHITECTURE.md for the detail of how this list was built and why it
+// does NOT include libva/libgbm/libdrm/libEGL (those are dependencies of the
+// host's daemon, not of this binary -- a mistake made the first time, fixed here).
 const FILES = [
   'bin/hw/android.hardware.media.c2-vaapi-service',
   'etc/init/android.hardware.media.c2-vaapi-service.rc',
@@ -83,26 +79,25 @@ const FILES = [
   'lib64/libstagefright_aidl_bufferpool2.so',
 ];
 
-// El backend tiene que sumar esto al Cmd de creacion del contenedor --
-// dispara redroid.c2.sh (ya viene en la imagen oficial de redroid) que
-// habilita debug.stagefright.ccodec. Sin esto el framework filtra TODOS
-// los componentes Codec2 sin importar que esten bien registrados (Tier 5.6
-// de redroid-hwenc).
+// The backend has to add this to the container's creation Cmd -- it triggers
+// redroid.c2.sh (already shipped in the official redroid image), which enables
+// debug.stagefright.ccodec. Without it the framework filters ALL Codec2 components
+// no matter how well they are registered (Tier 5.6 of redroid-hwenc).
 const REQUIRED_BOOT_FLAGS = ['androidboot.use_redroid_c2=1'];
 
 const C2_ENCODER_NAME = 'c2.hardware.encoder.h264';
 
-// Escalones de resolucion estandar (lado largo x lado corto), de menor a mayor.
+// Standard resolution steps (long side x short side), from smallest to largest.
 const RESOLUTION_LADDER = [
   [426, 240], [640, 360], [854, 480], [1280, 720], [1920, 1080], [2560, 1440], [3840, 2160],
 ];
-const MIN_DECODE_LADDER_INDEX = 3; // piso: 720p, aunque la pantalla sea mas chica
+const MIN_DECODE_LADDER_INDEX = 3; // floor: 720p, even if the screen is smaller
 
-// Limite de resolucion que anuncian los decoders por hardware (decidido 06/10/2026): el escalon estandar mas
-// grande que QUEPA en la pantalla de la instancia, redondeando hacia abajo, con piso en 720p. Se compara en
-// orientacion horizontal sin importar si la pantalla es vertical. Que un reproductor ofrezca UHD en una pantalla
-// de 720p no sirve de nada: el compositor igual lo reescala, y el decode y la copia de un 4K cuestan 9 veces mas.
-// Pura (sin E/S) para poder probarla.
+// Resolution limit that the hardware decoders advertise (decided 06/10/2026): the largest standard step that
+// FITS in the instance's screen, rounding down, with a floor at 720p. It is compared in landscape orientation
+// regardless of whether the screen is portrait. A player offering UHD on a 720p screen is pointless: the
+// compositor rescales it anyway, and the decode and copy of a 4K cost 9 times more.
+// Pure (no I/O) so it can be tested.
 function decodeSizeLimit(display) {
   const w = Number(display && display.width);
   const h = Number(display && display.height);
@@ -115,8 +110,8 @@ function decodeSizeLimit(display) {
     }
   }
   const [maxLong, maxShort] = RESOLUTION_LADDER[idx];
-  // XML: ancho y alto maximos por separado (un video vertical tiene el lado largo en el alto), y el limite de
-  // area en bloques de 16x16, que es lo que de verdad deja afuera a un cuadrado de lado largo x lado largo.
+  // XML: maximum width and height separately (a portrait video has the long side in the height), and the area
+  // limit in 16x16 blocks, which is what really leaves out a square of long side x long side.
   const blocks = Math.ceil(maxLong / 16) * Math.ceil(maxShort / 16);
   return { maxLong, maxShort, blocks, label: `${maxShort}p` };
 }
@@ -129,35 +124,36 @@ function limitXml(limit) {
 
 function log(msg) { console.log(`[hwenc-integrate] ${msg}`); }
 
-// Etapa 3 (ver manifest.json y backend/src/lib/moduleRunner.js): que necesita
-// ESTE MODULO al momento de `docker create`, antes de que exista el
-// contenedor. Hasta ahora esto vivia hardcodeado a mano en instances.js
-// (`if (img.hwEncCapable) binds.push(hwAccel.daemonBind())` + el flag de
-// REQUIRED_BOOT_FLAGS sumado aparte, y sin usar en ningun lado) -- el runner
-// generico llama a esta funcion en vez de que instances.js sepa que hwenc
-// existe. El bind del socket del daemon (hwAccel.js, etapa 5) se declara
-// aca, no ahi: es lo que esta instancia necesita para poder hablar con ese
-// daemon una vez arrancada, aunque el daemon en si sea infraestructura
-// separada del host.
+// Stage 3 (see manifest.json and backend/src/lib/moduleRunner.js): what THIS MODULE
+// needs at the moment of `docker create`, before the container exists. Until now this
+// lived hardcoded by hand in instances.js (`if (img.hwEncCapable)
+// binds.push(hwAccel.daemonBind())` + the REQUIRED_BOOT_FLAGS flag added separately,
+// and unused anywhere) -- the generic runner calls this function instead of
+// instances.js knowing that hwenc exists. The bind of the daemon's socket (hwAccel.js,
+// stage 5) is declared here, not there: it is what this instance needs to be able to
+// talk to that daemon once started, even though the daemon itself is separate host
+// infrastructure.
 function prepareCreate() {
   return { binds: [hwAccel.daemonBind()], cmd: REQUIRED_BOOT_FLAGS };
 }
 
-// No reemplaza media_codecs.xml entero -- cada imagen base (oficial,
-// custom, lo que sea) puede traer includes/entradas propias que no
-// queremos pisar. Se extrae el archivo YA presente en la instancia, se le
-// agregan las lineas del encoder y de los decoders que el HOST soporta por hardware (las que
-// todavia no estan), y se reinyecta -- sin esta declaracion, MediaCodecList nunca se entera de que
-// los componentes existen aunque su store AIDL este bien registrado (Tier 5.6 de redroid-hwenc,
-// confirmado en vivo el 28/09 contra la imagen oficial).
+// It does not replace the whole media_codecs.xml -- every base image (official, custom,
+// whatever) may bring its own includes/entries that we do not want to overwrite. The
+// file ALREADY present in the instance is extracted, the lines of the encoder and of
+// the decoders the HOST supports in hardware (the ones that are not there yet) are
+// added to it, and it is injected back -- without this declaration, MediaCodecList
+// never learns that the components exist even though their AIDL store is properly
+// registered (Tier 5.6 of redroid-hwenc, confirmed live on 28/09 against the official
+// image).
 //
-// Pura (sin E/S) para poder probarla: devuelve el XML nuevo, o el mismo si no habia nada que agregar.
+// Pure (no I/O) so it can be tested: it returns the new XML, or the same one if there
+// was nothing to add.
 function addCodecsToXml(original, decoders, limit = null) {
   let xml = original;
   if (!xml.includes(C2_ENCODER_NAME)) {
     const patched = xml.replace(/<Encoders>/, `<Encoders>\n        <MediaCodec name="${C2_ENCODER_NAME}" type="video/avc" />`);
     if (patched === xml) {
-      throw new Error('No se encontro <Encoders> en media_codecs.xml -- formato inesperado, no se pudo parchear');
+      throw new Error('<Encoders> not found in media_codecs.xml -- unexpected format, it could not be patched');
     }
     xml = patched;
   }
@@ -168,11 +164,11 @@ function addCodecsToXml(original, decoders, limit = null) {
         ? `        <MediaCodec name="${d.name}" type="${d.type}">${limitXml(limit)}</MediaCodec>`
         : `        <MediaCodec name="${d.name}" type="${d.type}" />`))
       .join('\n');
-    // La imagen oficial no trae <Decoders> en este archivo (los decoders de software viven en los
-    // <Include>), asi que normalmente se CREA la seccion. Va AL FINAL, despues de los <Include>:
-    // MediaCodecList prefiere el primero que coincide por tipo, y mientras el decode por hardware no
-    // este validado el de software tiene que seguir siendo el predeterminado (el de hardware se elige
-    // por nombre). Pasarlo al principio es el cambio que "enciende" el hardware por defecto.
+    // The official image has no <Decoders> in this file (the software decoders live in the
+    // <Include>s), so the section is normally CREATED. It goes AT THE END, after the <Include>s:
+    // MediaCodecList prefers the first one that matches by type, and while hardware decode is
+    // not validated the software one has to stay the default (the hardware one is chosen by
+    // name). Moving it to the beginning is the change that "turns on" hardware by default.
     let patched;
     if (/<Decoders>/.test(xml)) {
       patched = xml.replace(/<Decoders>/, `<Decoders>\n${lines}`);
@@ -180,7 +176,7 @@ function addCodecsToXml(original, decoders, limit = null) {
       patched = xml.replace(/<\/MediaCodecs>/, `    <Decoders>\n${lines}\n    </Decoders>\n</MediaCodecs>`);
     }
     if (patched === xml) {
-      throw new Error('No se encontro <MediaCodecs> en media_codecs.xml -- formato inesperado, no se pudo parchear');
+      throw new Error('<MediaCodecs> not found in media_codecs.xml -- unexpected format, it could not be patched');
     }
     xml = patched;
   }
@@ -188,25 +184,26 @@ function addCodecsToXml(original, decoders, limit = null) {
 }
 
 async function patchMediaCodecsXml(containerId, ctx = {}) {
-  // Esta etapa (4, crear la instancia) corre ANTES que ensureHostInfraReady (etapa 5, donde arranca el
-  // daemon): sin esto, la primera instancia de un backend recien levantado le preguntaria las
-  // capacidades a un daemon que todavia no existe y no registraria ningun decoder. Es idempotente.
+  // This stage (4, creating the instance) runs BEFORE ensureHostInfraReady (stage 5, where the
+  // daemon starts): without this, the first instance of a freshly started backend would ask a
+  // daemon that does not exist yet for its capabilities and would register no decoder. It is
+  // idempotent.
   await hwAccel.ensureDaemonRunning();
   const caps = await hwAccel.queryHwdecCaps();
   if (caps.codecs.length > 0) {
-    log(`decode por hardware del host (${caps.driver}): ${caps.codecs.map((c) => c.id).join(', ')}`);
+    log(`host hardware decode (${caps.driver}): ${caps.codecs.map((c) => c.id).join(', ')}`);
   } else {
-    log('el host no ofrece decode por hardware (o el daemon no lo informo): no se registran decoders');
+    log('the host offers no hardware decode (or the daemon did not report it): no decoders are registered');
   }
   const decoders = caps.codecs;
   const tmpPath = path.join(os.tmpdir(), `media_codecs-${containerId.slice(0, 12)}.xml`);
   await execFileAsync('docker', ['cp', `${containerId}:/vendor/etc/media_codecs.xml`, tmpPath]);
   const original = fs.readFileSync(tmpPath, 'utf-8');
   const limit = ctx.display ? decodeSizeLimit(ctx.display) : null;
-  if (limit) log(`limite de decode por hardware: ${limit.label} (pantalla ${ctx.display.width}x${ctx.display.height})`);
+  if (limit) log(`hardware decode limit: ${limit.label} (screen ${ctx.display.width}x${ctx.display.height})`);
   const patched = addCodecsToXml(original, decoders, limit);
   if (patched === original) {
-    log('media_codecs.xml ya tiene todas las entradas, no se toca');
+    log('media_codecs.xml already has all the entries, it is left untouched');
     fs.unlinkSync(tmpPath);
     return;
   }
@@ -218,95 +215,90 @@ async function patchMediaCodecsXml(containerId, ctx = {}) {
 
 async function copyIntoContainer(containerId, srcPath, destRelPath) {
   if (!fs.existsSync(srcPath)) {
-    throw new Error(`Falta el artefacto ${srcPath} -- ¿REDROID_HWENC_ARTIFACTS_DIR (${ARTIFACTS_DIR}) es el correcto?`);
+    throw new Error(`Artifact ${srcPath} is missing -- is REDROID_HWENC_ARTIFACTS_DIR (${ARTIFACTS_DIR}) the right one?`);
   }
-  // Nunca se toca srcPath -- chown/chmod van sobre una copia temporal. Esto
-  // no es cosmetico: la primera version de esta funcion hacia chown/chmod
-  // directo sobre srcPath (el propio arbol de ARTIFACTS_DIR/el repo), y
-  // eso rompio en vivo el siguiente build incremental de AOSP el 28/09
-  // (ckati fallaba con "Operation not permitted" sobre archivos que este
-  // modulo habia dejado en root sin querer).
+  // srcPath is never touched -- chown/chmod act on a temporary copy. This is not
+  // cosmetic: the first version of this function did chown/chmod directly on srcPath
+  // (the ARTIFACTS_DIR tree itself/the repo), and that broke the next incremental AOSP
+  // build live on 28/09 (ckati failed with "Operation not permitted" on files that
+  // this module had accidentally left as root).
   const tmpPath = path.join(os.tmpdir(), `hwenc-${containerId.slice(0, 12)}-${path.basename(destRelPath)}`);
   fs.copyFileSync(srcPath, tmpPath);
   await execFileAsync('chown', ['root:root', tmpPath]);
-  // init rechaza cualquier .rc group/world-writable ("Skipping insecure
-  // file") -- los binarios/.so que salen del build de AOSP ya vienen 0644,
-  // pero un archivo estatico propio de este modulo (ej. redroid-nodcc.rc,
-  // creado a mano) puede heredar el umask del host y quedar 0664.
-  // Reproducido en vivo el 29/09 -- mismo bug que ya documenta el DEVLOG de
-  // redroid-hwenc para este mismo archivo. chmod siempre, no solo chown.
+  // init rejects any group/world-writable .rc ("Skipping insecure file") -- the
+  // binaries/.so files that come out of the AOSP build already arrive as 0644, but a
+  // static file of this very module (e.g. redroid-nodcc.rc, created by hand) may
+  // inherit the host's umask and end up 0664. Reproduced live on 29/09 -- the same
+  // bug that redroid-hwenc's DEVLOG already documents for this same file. chmod
+  // always, not only chown.
   const isExecutable = destRelPath.startsWith('bin/');
   await execFileAsync('chmod', [isExecutable ? '0755' : '0644', tmpPath]);
   await execFileAsync('docker', ['cp', tmpPath, `${containerId}:/vendor/${destRelPath}`]);
   fs.unlinkSync(tmpPath);
 }
 
-// containerId tiene que ser de un contenedor CREADO pero NUNCA ARRANCADO
-// (o detenido antes de su primer boot real) -- /vendor deja de ser
-// escribible segundos despues de que Android bootea por primera vez.
+// containerId has to be of a container that is CREATED but NEVER STARTED (or stopped
+// before its first real boot) -- /vendor stops being writable seconds after Android
+// boots for the first time.
 async function integrate(containerId, ctx = {}) {
-  log(`inyectando ${FILES.length} archivos en ${containerId}...`);
+  log(`injecting ${FILES.length} files into ${containerId}...`);
   for (const relPath of FILES) {
     await copyIntoContainer(containerId, path.join(ARTIFACTS_DIR, relPath), relPath);
   }
-  // redroid-nodcc.rc (fix de Tier 5.7 de redroid-hwenc: sin esto Mesa
-  // habilita DCC en el buffer real de SurfaceFlinger y VCN no puede
-  // codificarlo -- "VCN - DCC surfaces not supported") no sale del build de
-  // AOSP, es un archivo estatico de 2 lineas -- vive en este mismo modulo,
-  // no en ARTIFACTS_DIR.
+  // redroid-nodcc.rc (a Tier 5.7 fix of redroid-hwenc: without it Mesa enables DCC on
+  // SurfaceFlinger's real buffer and VCN cannot encode it -- "VCN - DCC surfaces not
+  // supported") does not come out of the AOSP build, it is a static 2-line file -- it
+  // lives in this very module, not in ARTIFACTS_DIR.
   await copyIntoContainer(
     containerId,
     path.join(__dirname, 'redroid-nodcc.rc'),
     'etc/init/redroid-nodcc.rc',
   );
   await patchMediaCodecsXml(containerId, ctx);
-  log('listo -- prepareCreate() ya se encargo de sumar los boot flags requeridos al Cmd del contenedor.');
+  log('done -- prepareCreate() already took care of adding the required boot flags to the container\'s Cmd.');
 }
 
-// Etapa 5 (ver manifest.json y moduleRunner.js): infraestructura del host de
-// la que esta instancia depende para hablar con el encoder, independiente de
-// cualquier instancia puntual. La logica real (spawnear el daemon, detectar
-// si ya esta vivo, etc.) vive en hwAccel.js y no se duplica aca -- este
-// modulo solo expone el hook con el nombre que el runner generico espera,
-// delegando. Es la misma decision que ya explicaba el README de este modulo
-// antes de que existiera un runner generico; ahora ademas queda enganchada
-// al ciclo de vida sin casing especial en instances.js.
+// Stage 5 (see manifest.json and moduleRunner.js): host infrastructure that this
+// instance depends on to talk to the encoder, independent of any particular
+// instance. The real logic (spawning the daemon, detecting whether it is already
+// alive, etc.) lives in hwAccel.js and is not duplicated here -- this module only
+// exposes the hook with the name the generic runner expects, delegating. It is the
+// same decision this module's README already explained before a generic runner
+// existed; now it is also hooked into the lifecycle without special-casing in
+// instances.js.
 async function ensureHostInfraReady() {
   await hwAccel.ensureDaemonRunning();
 }
 
-// Etapa 6 (ver docs/ARCHITECTURE.md): a diferencia de integrate(), esto
-// corre DESPUES del boot, sobre una instancia ya viva -- unico bug de los
-// 3 encontrados en Tier 5.13 que sigue sin resolverse del lado de la
-// imagen/build. media.c2.hal.selection default a "hidl" en este framework
-// (el gate real, ver DEVLOG.md de redroid-hwenc -- el camino via aconfig
-// flag esta compilado afuera con #if 0), asi que Codec2Client nunca busca
-// stores AIDL como la nuestra hasta que se fuerza a "aidl" -- y como
-// GetServiceNames() se cachea una vez por proceso, mediaserver (que ya
-// arranco con el valor viejo) necesita reiniciarse para que tome el nuevo.
-// [PENDIENTE] mover esto a un init trigger propio (redroid.c2.rc ya hace
-// algo parecido gateado en un boot flag) para no depender de esto en
-// runtime.
+// Stage 6 (see docs/ARCHITECTURE.md): unlike integrate(), this runs AFTER the boot, on
+// an already-live instance -- the only one of the 3 bugs found in Tier 5.13 that is
+// still unresolved on the image/build side. media.c2.hal.selection defaults to "hidl"
+// in this framework (the real gate, see redroid-hwenc's DEVLOG.md -- the aconfig flag
+// route is compiled out with #if 0), so Codec2Client never looks for AIDL stores like
+// ours until it is forced to "aidl" -- and since GetServiceNames() is cached once per
+// process, mediaserver (which already started with the old value) needs to be
+// restarted to pick up the new one.
+// [PENDING] move this to an init trigger of its own (redroid.c2.rc already does
+// something similar gated on a boot flag) so as not to depend on this at runtime.
 //
-// Nombre alineado a la convencion generica del runner (STAGE_EXPORT_NAME[6]
-// = "ensureRuntimeReady") -- se llamaba ensureHwencReady() antes de que
-// existiera esa convencion.
+// The name is aligned with the runner's generic convention (STAGE_EXPORT_NAME[6] =
+// "ensureRuntimeReady") -- it was called ensureHwencReady() before that convention
+// existed.
 //
-// `docker exec containerId <argv...>` aterriza como uid=0 tanto en la imagen
-// oficial de redroid como en las imagenes custom con Magisk (confirmado en
-// vivo el 29-30/09 contra ambas) -- no hace falta ningun wrapper `su -c`. Lo
-// que si hace falta es retry con backoff: el runner generico (moduleRunner.js)
-// dispara esta etapa apenas runtime.start() resuelve, sin esperar el boot
-// real de Android, asi que el primer intento (a veces varios) falla con
-// "exec setprop: no such file or directory" simplemente porque /system
-// todavia no esta poblado del todo. Mismo patron que ensureWifiConnected en
-// hwsimWifi.js -- el runner generico no tiene por que saber de tiempos de
-// boot de Android, es conocimiento de este modulo.
+// `docker exec containerId <argv...>` lands as uid=0 both in the official redroid image
+// and in the custom images with Magisk (confirmed live on 29-30/09 against both) -- no
+// `su -c` wrapper is needed. What is needed is a retry with backoff: the generic
+// runner (moduleRunner.js) triggers this stage as soon as runtime.start() resolves,
+// without waiting for Android's real boot, so the first attempt (sometimes several)
+// fails with "exec setprop: no such file or directory" simply because /system is not
+// fully populated yet. The same pattern as ensureWifiConnected in hwsimWifi.js -- the
+// generic runner has no reason to know about Android's boot times, it is this module's
+// knowledge.
 const RUNTIME_READY_MAX_ATTEMPTS = 8;
 const RUNTIME_READY_RETRY_DELAY_MS = 3000;
 
-// `noRetryCodes`: exit codes que son una respuesta definitiva del comando (no
-// un "Android todavia no booteo") y por lo tanto no tiene sentido reintentar.
+// `noRetryCodes`: exit codes that are a definitive answer of the command (not an "Android
+// has not booted yet") and therefore there is no point in retrying.
 async function execAndroidWithRetry(containerId, argv, { noRetryCodes = [] } = {}) {
   let lastErr;
   for (let attempt = 1; attempt <= RUNTIME_READY_MAX_ATTEMPTS; attempt++) {
@@ -329,16 +321,15 @@ async function ensureRuntimeReady(containerId) {
   try {
     await execAndroidWithRetry(containerId, ['pkill', 'mediaserver'], { noRetryCodes: [1] });
   } catch (e) {
-    // pkill devuelve exit 1 (no exit 0) cuando no encuentra ningun proceso
-    // "mediaserver" vivo en ese instante -- confirmado en vivo el 30/09, no
-    // es una falla real: mediaserver puede estar reiniciandose solo (comun
-    // durante el boot de Android, independiente de este pkill). Cualquier
-    // otro codigo si es un error real (ENOENT si /system no estaba listo,
-    // etc.) y se deja propagar.
+    // pkill returns exit 1 (not exit 0) when it finds no "mediaserver" process alive at
+    // that instant -- confirmed live on 30/09, it is not a real failure: mediaserver may
+    // be restarting on its own (common during Android's boot, independent of this pkill).
+    // Any other code is a real error (ENOENT if /system was not ready, etc.) and is left
+    // to propagate.
     if (e.code !== 1) throw e;
-    log(`pkill mediaserver: no habia proceso vivo en ${containerId} (probablemente ya se reinicio solo)`);
+    log(`pkill mediaserver: there was no live process in ${containerId} (it probably already restarted on its own)`);
   }
-  log('media.c2.hal.selection=aidl aplicado, mediaserver reiniciado');
+  log('media.c2.hal.selection=aidl applied, mediaserver restarted');
 }
 
 module.exports = {
@@ -348,7 +339,7 @@ module.exports = {
 if (require.main === module) {
   const containerId = process.argv[2];
   if (!containerId) {
-    console.error('Uso: node integrate.js <containerId>');
+    console.error('Usage: node integrate.js <containerId>');
     process.exit(1);
   }
   integrate(containerId).catch((e) => { console.error(e); process.exit(1); });

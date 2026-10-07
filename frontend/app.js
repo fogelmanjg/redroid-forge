@@ -1,5 +1,6 @@
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => Array.from(document.querySelectorAll(sel));
+const { t, loc } = I18n;
 
 function switchTab(name) {
   $$('.tab-btn').forEach((b) => b.classList.toggle('active', b.dataset.tab === name));
@@ -18,9 +19,9 @@ async function api(path, opts) {
   });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
-    // status + modules (manifests pendientes de aceptar, ver moduleGate.js
-    // en el backend) van en el error para que el llamador pueda mostrar el
-    // modal de contrato sin pedirlo de nuevo.
+    // status + modules (manifests pending acceptance, see moduleGate.js
+    // in the backend) travel in the error so the caller can show the
+    // contract modal without asking for it again.
     throw Object.assign(new Error(body.error || `HTTP ${res.status}`), {
       status: res.status,
       modules: body.modules,
@@ -32,9 +33,9 @@ async function api(path, opts) {
 
 function androidIdCellHtml(inst) {
   if (!inst.hasGapps) return '<span class="muted">-</span>';
-  if (!inst.androidId) return '<span class="muted">esperando boot...</span>';
+  if (!inst.androidId) return `<span class="muted">${t('instances.waitingBoot')}</span>`;
   if (inst.androidIdRegisteredAt) {
-    return `<code>${inst.androidId}</code><br><span class="ok-text">registrado</span>`;
+    return `<code>${inst.androidId}</code><br><span class="ok-text">${t('instances.registered')}</span>`;
   }
   const hoursLeft = Math.round(48 - (Date.now() - new Date(inst.createdAt).getTime()) / 3_600_000);
   const urgent = hoursLeft <= 12;
@@ -42,18 +43,18 @@ function androidIdCellHtml(inst) {
     <code>${inst.androidId}</code>
     <br>
     <span class="${urgent ? 'fail-text' : 'warn-text'}">
-      sin registrar${hoursLeft > 0 ? ` (~${hoursLeft}hs)` : ' (VENCIDO)'}
+      ${t('instances.unregistered')}${hoursLeft > 0 ? ` (~${hoursLeft}h)` : t('instances.expired')}
     </span>
   `;
 }
 
 async function loadInstances() {
   const tbody = $('#instances-table tbody');
-  tbody.innerHTML = '<tr><td colspan="6">Cargando...</td></tr>';
+  tbody.innerHTML = `<tr><td colspan="6">${t('common.loading')}</td></tr>`;
   try {
     const instances = await api('/instances');
     if (instances.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="6">No hay instancias todavia.</td></tr>';
+      tbody.innerHTML = `<tr><td colspan="6">${t('instances.none')}</td></tr>`;
       return;
     }
     tbody.innerHTML = '';
@@ -73,11 +74,11 @@ async function loadInstances() {
         link.href = 'https://www.google.com/android/uncertified';
         link.target = '_blank';
         link.rel = 'noopener';
-        link.textContent = 'Registrar';
+        link.textContent = t('instances.register');
         link.className = 'link-btn';
         actions.appendChild(link);
         const markBtn = document.createElement('button');
-        markBtn.textContent = 'Ya lo registre';
+        markBtn.textContent = t('instances.markRegistered');
         markBtn.className = 'secondary';
         markBtn.addEventListener('click', async () => {
           try {
@@ -110,10 +111,10 @@ async function loadInstances() {
       actions.appendChild(mk('Stop', 'stop'));
       actions.appendChild(mk('Restart', 'restart'));
       const del = document.createElement('button');
-      del.textContent = 'Borrar';
+      del.textContent = t('instances.delete');
       del.className = 'secondary';
       del.addEventListener('click', async () => {
-        if (!confirm(`Borrar la instancia "${inst.name}"? Esto elimina tambien su volumen de datos.`)) return;
+        if (!confirm(t('instances.confirmDelete', { name: inst.name }))) return;
         try {
           await api(`/instances/${inst.id}`, { method: 'DELETE' });
           await loadInstances();
@@ -125,42 +126,42 @@ async function loadInstances() {
       tbody.appendChild(tr);
     }
   } catch (e) {
-    tbody.innerHTML = `<tr><td colspan="6">Error: ${e.message}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="6">${t('common.error', { msg: e.message })}</td></tr>`;
   }
 }
 
 function moduleStatusBadge(m) {
-  if (m.accepted) return `<span class="status-dot ok"></span> Aceptado (v${m.acceptedVersion})`;
-  if (m.acceptedVersion) return `<span class="status-dot warn"></span> Version vieja aceptada (v${m.acceptedVersion}), actual es v${m.version}`;
-  return '<span class="status-dot warn"></span> Pendiente de aceptar';
+  if (m.accepted) return `<span class="status-dot ok"></span> ${t('modules.accepted', { v: m.acceptedVersion })}`;
+  if (m.acceptedVersion) return `<span class="status-dot warn"></span> ${t('modules.oldAccepted', { old: m.acceptedVersion, cur: m.version })}`;
+  return `<span class="status-dot warn"></span> ${t('modules.pending')}`;
 }
 
 async function loadModules() {
   const list = $('#modules-list');
-  list.innerHTML = '<li>Cargando...</li>';
+  list.innerHTML = `<li>${t('common.loading')}</li>`;
   try {
     const modules = await api('/modules');
     list.innerHTML = '';
     for (const m of modules) {
       const li = document.createElement('li');
       li.className = 'doctor-item';
-      const tipo = m.esTerceroNoLibre ? 'Tercero no libre' : 'Propio del proyecto';
+      const tipo = m.esTerceroNoLibre ? t('modules.thirdParty') : t('modules.own');
       li.innerHTML = `
-        <div class="label">${moduleStatusBadge(m)} — <strong>${m.nombre}</strong> <span class="muted">(${tipo}, v${m.version})</span></div>
-        <p class="detail">${m.descripcion}</p>
-        <p class="detail muted">Compatible con: Android ${m.compatibleCon.androidVersion.join('/')} · GPU ${m.compatibleCon.gpuMode.join('/')}</p>
-        <ul>${m.queToca.map((item) => `<li>${item}</li>`).join('')}</ul>
+        <div class="label">${moduleStatusBadge(m)} — <strong>${loc(m, 'nombre')}</strong> <span class="muted">(${tipo}, v${m.version})</span></div>
+        <p class="detail">${loc(m, 'descripcion')}</p>
+        <p class="detail muted">${t('modules.compatible', { android: m.compatibleCon.androidVersion.join('/'), gpu: m.compatibleCon.gpuMode.join('/') })}</p>
+        <ul>${loc(m, 'queToca').map((item) => `<li>${item}</li>`).join('')}</ul>
       `;
       list.appendChild(li);
     }
   } catch (e) {
-    list.innerHTML = `<li>Error: ${e.message}</li>`;
+    list.innerHTML = `<li>${t('common.error', { msg: e.message })}</li>`;
   }
 }
 
 async function loadDoctor() {
   const list = $('#doctor-list');
-  list.innerHTML = '<li>Corriendo diagnostico...</li>';
+  list.innerHTML = `<li>${t('doctor.running')}</li>`;
   try {
     const checks = await api('/doctor');
     list.innerHTML = '';
@@ -175,7 +176,7 @@ async function loadDoctor() {
       list.appendChild(li);
     }
   } catch (e) {
-    list.innerHTML = `<li>Error: ${e.message}</li>`;
+    list.innerHTML = `<li>${t('common.error', { msg: e.message })}</li>`;
   }
 }
 
@@ -186,26 +187,26 @@ $('#btn-run-doctor').addEventListener('click', loadDoctor);
 const dialog = $('#new-instance-dialog');
 $('#btn-new-instance').addEventListener('click', async () => {
   const select = $('#image-select');
-  select.innerHTML = '<option>Cargando...</option>';
+  select.innerHTML = `<option>${t('common.loading')}</option>`;
   try {
     const images = await api('/images');
     select.innerHTML = images
       .map((img) => {
-        const tier = img.soporte === 'oficial' ? '✅ oficial' : '⚠️ comunidad';
-        const notPresent = img.present ? '' : ' (no presente localmente)';
-        return `<option value="${img.id}" ${img.present ? '' : 'disabled'} title="${img.notaSoporte || ''}">${img.label} — ${tier}${notPresent}</option>`;
+        const tier = img.soporte === 'oficial' ? t('image.official') : t('image.community');
+        const notPresent = img.present ? '' : t('image.notPresent');
+        return `<option value="${img.id}" ${img.present ? '' : 'disabled'} title="${loc(img, 'notaSoporte') || ''}">${loc(img, 'label')} — ${tier}${notPresent}</option>`;
       })
       .join('');
   } catch (e) {
-    select.innerHTML = `<option>Error: ${e.message}</option>`;
+    select.innerHTML = `<option>${t('common.error', { msg: e.message })}</option>`;
   }
   dialog.showModal();
 });
 $('#btn-cancel-new-instance').addEventListener('click', () => dialog.close());
 
-// Gate de la Fase 4: si el backend responde 428 con los manifests pendientes
-// (ver moduleGate.js), muestra el/los modal(es) de contrato genérico antes de
-// reintentar -- el backend nunca crea la instancia sin esa aceptación.
+// Phase 4 gate: if the backend answers 428 with the pending manifests
+// (see moduleGate.js), it shows the generic contract modal(s) before
+// retrying -- the backend never creates the instance without that acceptance.
 async function createInstance(name, imageId, form) {
   try {
     await api('/instances', { method: 'POST', body: JSON.stringify({ name, imageId }) });
@@ -237,5 +238,17 @@ $('#new-instance-form').addEventListener('submit', async (e) => {
   const imageId = form.imageId.value;
   await createInstance(name, imageId, form);
 });
+
+// Language: static texts are applied from the I18n table; dynamic views are re-rendered on change.
+const langBtn = $('#btn-lang');
+function syncLangButton() { langBtn.textContent = I18n.lang === 'es' ? 'EN' : 'ES'; }
+langBtn.addEventListener('click', () => I18n.setLang(I18n.lang === 'es' ? 'en' : 'es'));
+document.addEventListener('langchange', () => {
+  syncLangButton();
+  const active = $('.tab-btn.active');
+  if (active) switchTab(active.dataset.tab);
+});
+I18n.apply();
+syncLangButton();
 
 loadInstances();

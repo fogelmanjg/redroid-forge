@@ -82,13 +82,13 @@ C2R VaapiEncInterface::SizeSetter(bool mayBlock, const C2P<C2StreamPictureSizeIn
     return res;
 }
 
-// Recorre un stream Annex-B (delimitado por start codes "00 00 01", que
-// tambien cubre el sufijo de un start code de 4 bytes "00 00 00 01") y
-// devuelve el offset donde termina el bloque inicial de parameter sets
-// (SPS=7 / PPS=8) -- es decir, el limite entre lo que hay que mandar como
-// CSD (C2StreamInitDataInfo) y el primer NAL que no es parameter set.
-// Devuelve 0 si el buffer no arranca con un parameter set (nada que
-// extraer para este frame -- ya se mando el CSD en uno anterior).
+// Walks an Annex-B stream (delimited by "00 00 01" start codes, which
+// also covers the suffix of a 4-byte "00 00 00 01" start code) and
+// returns the offset where the initial block of parameter sets ends
+// (SPS=7 / PPS=8) -- that is, the boundary between what has to be sent as
+// CSD (C2StreamInitDataInfo) and the first NAL that is not a parameter set.
+// Returns 0 if the buffer does not start with a parameter set (nothing to
+// extract for this frame -- the CSD was already sent in an earlier one).
 static size_t findLeadingParameterSetsSize(const unsigned char *data, size_t size) {
     size_t pos = 0;
     while (pos + 4 <= size) {
@@ -304,12 +304,12 @@ void VaapiEncComponent::process(const std::unique_ptr<C2Work> &work,
         work->workletsProcessed = 1u;
         return;
     }
-    // El CSD se arma aca, mientras "coded" todavia es valido -- armarlo
-    // despues de free(coded) mas abajo (como quedo en un primer intento) es
-    // un use-after-free: a veces devuelve el tamano correcto igual (la
-    // memoria liberada no siempre se pisa de inmediato) y a veces
-    // silenciosamente 0/basura, dependiendo de que mas haya tocado ese
-    // bloque mientras tanto. Confirmado con logging temporal el 29/09.
+    // The CSD is built here, while "coded" is still valid -- building it
+    // after the free(coded) further down (as it was in a first attempt) is
+    // a use-after-free: sometimes it still returns the right size (freed
+    // memory is not always overwritten right away) and sometimes
+    // silently 0/garbage, depending on what else touched that
+    // block in the meantime. Confirmed with temporary logging on 29/09.
     std::unique_ptr<C2StreamInitDataInfo::output> csd;
     if (!mCsdSent) {
         size_t csdSize = findLeadingParameterSetsSize(coded, (size_t)codedSize);

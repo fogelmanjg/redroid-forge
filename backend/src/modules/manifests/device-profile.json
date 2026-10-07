@@ -1,15 +1,30 @@
 {
   "id": "device-profile",
-  "nombre": "Perfil de dispositivo (device profile spoofing)",
+  "nombre": "Device profile (device profile spoofing)",
   "esTerceroNoLibre": false,
-  "descripcion": "Sobrescribe build.prop y propiedades relacionadas para que la instancia se identifique como un modelo de dispositivo real (ej. Samsung) en vez del perfil generico de Redroid.",
+  "descripcion": "Overwrites build.prop and related properties so the instance identifies itself as a real device model (e.g. Samsung) instead of Redroid's generic profile.",
   "queToca": [
-    "modifica build.prop y propiedades del sistema dentro del contenedor",
-    "puede requerir reiniciar la instancia para aplicarse por completo"
+    "modifies build.prop and system properties inside the container",
+    "may require restarting the instance to apply completely"
   ],
   "compatibleCon": {
-    "androidVersion": [15],
-    "gpuMode": ["host", "guest"]
+    "androidVersion": [
+      15
+    ],
+    "gpuMode": [
+      "host",
+      "guest"
+    ]
   },
-  "version": 1
+  "version": 1,
+  "i18n": {
+    "es": {
+      "nombre": "Perfil de dispositivo (device profile spoofing)",
+      "descripcion": "Sobrescribe build.prop y propiedades relacionadas para que la instancia se identifique como un modelo de dispositivo real (ej. Samsung) en vez del perfil generico de Redroid.",
+      "queToca": [
+        "modifica build.prop y propiedades del sistema dentro del contenedor",
+        "puede requerir reiniciar la instancia para aplicarse por completo"
+      ]
+    }
+  }
 }

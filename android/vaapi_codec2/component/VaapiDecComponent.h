@@ -1,15 +1,15 @@
 /*
- * Decoders Codec2 por hardware (H.264, HEVC, VP9) respaldados por el daemon VA-API del host,
- * a traves del protocolo hwdec v2 (protocol.h): una sesion persistente por componente.
+ * Hardware Codec2 decoders (H.264, HEVC, VP9) backed by the host's VA-API daemon,
+ * through the hwdec v2 protocol (protocol.h): one persistent session per component.
  *
- * Sigue el modelo de los decoders por software de AOSP (C2SoftAvcDec, C2SoftHevcDec, C2SoftVpxDec):
- *  - la interfaz declara lo que MediaCodec espera de un decoder (demora de salida, tamano maximo,
- *    tamano maximo del buffer de entrada, aspectos de color, formato de pixel, perfiles y niveles);
- *  - el decoder puede devolver un frame mucho despues de recibir su access unit (B-frames): cada
- *    trabajo (C2Work) se deja PENDIENTE hasta que su frame sale, y se completa con finish(indice);
- *  - al fin de stream se vacia el decoder y se completan los trabajos que no tuvieron frame.
+ * It follows the model of AOSP's software decoders (C2SoftAvcDec, C2SoftHevcDec, C2SoftVpxDec):
+ *  - the interface declares what MediaCodec expects from a decoder (output delay, maximum size,
+ *    maximum input buffer size, color aspects, pixel format, profiles and levels);
+ *  - the decoder may return a frame long after receiving its access unit (B-frames): every
+ *    job (C2Work) is left PENDING until its frame comes out, and is completed with finish(index);
+ *  - at end of stream the decoder is drained and the jobs that had no frame are completed.
  *
- * Partes adaptadas de external codec2 de AOSP (Apache-2.0): ver los comentarios en el .cpp.
+ * Parts adapted from AOSP's external codec2 (Apache-2.0): see the comments in the .cpp.
  */
 #ifndef VAAPI_DEC_CODEC2_COMPONENT_H
 #define VAAPI_DEC_CODEC2_COMPONENT_H
@@ -27,14 +27,14 @@
 namespace android {
 
 struct VaapiDecCodec {
-    const char *name;       // nombre del componente Codec2
-    const char *mediaType;  // tipo MIME que decodifica
-    uint32_t wireCodec;     // VAAPI_HWDEC_CODEC_* de protocol.h
-    uint32_t defaultDelay;  // demora de salida inicial (frames); H.264/HEVC reordenan, VP9 no
+    const char *name;       // name of the Codec2 component
+    const char *mediaType;  // MIME type it decodes
+    uint32_t wireCodec;     // VAAPI_HWDEC_CODEC_* from protocol.h
+    uint32_t defaultDelay;  // initial output delay (frames); H.264/HEVC reorder, VP9 does not
 };
 
 const std::vector<VaapiDecCodec> &vaapiDecCodecs();
-const VaapiDecCodec *findVaapiDecCodec(const std::string &name);  // nullptr si no existe
+const VaapiDecCodec *findVaapiDecCodec(const std::string &name);  // nullptr if it does not exist
 
 class VaapiDecInterface : public SimpleInterface<void>::BaseParams {
 public:
@@ -90,19 +90,19 @@ private:
     struct Frame {
         uint32_t width = 0, height = 0;
         bool tenBit = false;
-        int64_t pts = 0;  // el frameIndex del trabajo cuyo access unit origino este frame
-        // El contenido (NV12/P010 compacto): en la memoria compartida con el daemon (valido hasta el proximo
-        // pedido al daemon) o, si no hay, en `owned`.
+        int64_t pts = 0;  // the frameIndex of the job whose access unit originated this frame
+        // The content (compact NV12/P010): in the memory shared with the daemon (valid until the next
+        // request to the daemon) or, if there is none, in `owned`.
         const uint8_t *data = nullptr;
         size_t size = 0;
         std::vector<uint8_t> owned;
     };
 
-    // Conexion con el daemon. Todas se llaman con mLock tomado.
+    // Connection with the daemon. All of them are called with mLock held.
     bool openSessionLocked();
     void unmapShmLocked();
     void closeSessionLocked();
-    // Un mensaje de ida y vuelta: devuelve el status del daemon (<0 = error o conexion caida).
+    // A round-trip message: returns the daemon's status (<0 = error or dropped connection).
     int exchangeLocked(uint32_t msg, const uint8_t *data, uint32_t size, int64_t pts,
                        std::vector<Frame> *frames);
 
@@ -115,15 +115,15 @@ private:
     std::shared_ptr<VaapiDecInterface> mIntf;
     const VaapiDecCodec *mCodec;
 
-    std::mutex mLock;          // protege la sesion (socket) con el daemon
+    std::mutex mLock;          // protects the session (socket) with the daemon
     int mSock = -1;
-    uint8_t *mShm = nullptr;   // memoria compartida con el daemon (solo lectura), o nullptr
+    uint8_t *mShm = nullptr;   // memory shared with the daemon (read-only), or nullptr
     size_t mShmSize = 0;
 
     bool mSignalledError = false;
     bool mSignalledOutputEos = false;
-    uint32_t mWidth = 0, mHeight = 0;  // ultimo tamano de salida informado al framework
-    std::set<uint64_t> mPending;       // trabajos entregados al decoder cuyo frame aun no salio
+    uint32_t mWidth = 0, mHeight = 0;  // last output size reported to the framework
+    std::set<uint64_t> mPending;       // jobs handed to the decoder whose frame has not come out yet
 };
 
 }  // namespace android

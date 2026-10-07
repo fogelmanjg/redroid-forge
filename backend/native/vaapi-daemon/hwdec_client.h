@@ -1,10 +1,10 @@
 /*
- * Cliente de referencia del protocolo hwdec v2 (protocol.h): el mismo contrato que
- * implementara el componente Codec2 de Android (paso 3), pero en C y sin ninguna
- * dependencia de FFmpeg. Sirve para probar el daemon de punta a punta, y como
- * implementacion de referencia para el lado Android.
+ * Reference client of the hwdec v2 protocol (protocol.h): the same contract the Android
+ * Codec2 component implements, but in C and with no FFmpeg dependency whatsoever. It is
+ * used to test the daemon end to end, and as a reference implementation for the Android
+ * side.
  *
- * Reusa HwDecCodec/HwDecFrame/HWDEC_* de hwdec.h (solo tipos; no enlaza libavcodec).
+ * It reuses HwDecCodec/HwDecFrame/HWDEC_* from hwdec.h (types only; it does not link libavcodec).
  */
 #ifndef REDROID_FORGE_HWDEC_CLIENT_H
 #define REDROID_FORGE_HWDEC_CLIENT_H
@@ -14,21 +14,21 @@
 
 typedef struct HwDecClient HwDecClient;
 
-/* NULL si no se pudo conectar o el daemon rechazo el codec (motivo a stderr). */
+/* NULL if it could not connect or the daemon rejected the codec (the reason goes to stderr). */
 HwDecClient *hwdec_client_open(const char *socket_path, HwDecCodec codec);
 
-/* Un access unit. Los frames que libere el decoder quedan en cola: sacarlos con
- * hwdec_client_next_frame(). 0 = ok, <0 = error (los frames ya decodificados igual quedan en cola). */
+/* One access unit. The frames the decoder releases are queued: take them out with
+ * hwdec_client_next_frame(). 0 = ok, <0 = error (the frames already decoded are still queued). */
 int hwdec_client_send(HwDecClient *c, const uint8_t *data, size_t size, int64_t pts);
 int hwdec_client_flush(HwDecClient *c);
 int hwdec_client_eos(HwDecClient *c);
 
-/* HWDEC_OK (frame en *out, valido hasta la proxima llamada) o HWDEC_AGAIN (cola vacia). */
+/* HWDEC_OK (frame in *out, valid until the next call) or HWDEC_AGAIN (empty queue). */
 int hwdec_client_next_frame(HwDecClient *c, HwDecFrame *out);
 
 void hwdec_client_close(HwDecClient *c);
 
-/* Pregunta al daemon que decodifica por hardware. 0 = ok. */
+/* Asks the daemon what it decodes in hardware. 0 = ok. */
 int hwdec_client_caps(const char *socket_path, HwDecCaps *caps);
 
 #endif

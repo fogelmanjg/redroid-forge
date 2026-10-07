@@ -6,9 +6,9 @@ const net = require('net');
 
 const execFileAsync = promisify(execFile);
 
-// Mismo patron que BINDERFS_ROOT en binder.js: directorio real del host,
-// bind-mounteado en docker-compose.yml hacia el contenedor del backend, y
-// hacia cada instancia que lo necesite via el bind que devuelve daemonBind().
+// The same pattern as BINDERFS_ROOT in binder.js: a real directory of the host,
+// bind-mounted in docker-compose.yml into the backend's container, and into every
+// instance that needs it via the bind that daemonBind() returns.
 const VAAPI_ROOT = '/dev/vaapi-helper';
 const SOCKET_PATH = `${VAAPI_ROOT}/socket`;
 const DAEMON_BIN = path.join(__dirname, '..', '..', 'native', 'vaapi-daemon', 'daemon');
@@ -19,20 +19,20 @@ function warn(msg) { console.warn(`[hwAccel] ${msg}`); }
 
 let daemonProcess = null;
 
-// Supervision del daemon: si muere (por ejemplo, un reset del GPU de amdgpu lo aborta con SIGABRT -- "The CS has
-// cancelled because the context is lost"), el encode y el decode por hardware de TODAS las instancias quedan
-// caidos hasta que alguien lo relance. Se relanza solo, con espera creciente para no entrar en un bucle apretado
-// si muere apenas arranca (driver roto, GPU que no vuelve).
+// Daemon supervision: if it dies (for example, an amdgpu GPU reset aborts it with SIGABRT -- "The CS has
+// cancelled because the context is lost"), the hardware encode and decode of ALL the instances stay down until
+// somebody relaunches it. It relaunches itself, with an increasing wait so as not to enter a tight loop if it
+// dies as soon as it starts (a broken driver, a GPU that does not come back).
 const RESTART_MIN_MS = 1000;
 const RESTART_MAX_MS = 30000;
-const STABLE_UPTIME_MS = 60000; // si vivio al menos esto, el proximo reinicio vuelve a empezar desde el minimo
+const STABLE_UPTIME_MS = 60000; // if it lived at least this long, the next restart starts again from the minimum
 let daemonWanted = false;
 let restartTimer = null;
 let restartDelayMs = RESTART_MIN_MS;
 let daemonStartedAt = 0;
 
-// Pura (para probarla): cuanto esperar antes de relanzar, dado cuanto vivio la ultima vez y la espera anterior.
-// Devuelve { wait, next }: esperar `wait` ahora y usar `next` como espera anterior la proxima vez.
+// Pure (so it can be tested): how long to wait before relaunching, given how long it lived last time and the
+// previous wait. It returns { wait, next }: wait `wait` now and use `next` as the previous wait next time.
 function nextRestartDelay(prevDelayMs, uptimeMs) {
   const wait = uptimeMs >= STABLE_UPTIME_MS ? RESTART_MIN_MS : Math.max(RESTART_MIN_MS, prevDelayMs);
   return { wait, next: Math.min(wait * 2, RESTART_MAX_MS) };
@@ -42,29 +42,29 @@ function scheduleDaemonRestart(uptimeMs) {
   if (!daemonWanted || restartTimer) return;
   const { wait, next } = nextRestartDelay(restartDelayMs, uptimeMs);
   restartDelayMs = next;
-  warn(`el daemon VA-API se relanza en ${Math.round(wait / 1000)} s`);
+  warn(`the VA-API daemon is relaunched in ${Math.round(wait / 1000)} s`);
   restartTimer = setTimeout(() => {
     restartTimer = null;
     ensureDaemonRunning().catch((e) => {
-      warn(`no se pudo relanzar el daemon VA-API: ${e.message}`);
+      warn(`could not relaunch the VA-API daemon: ${e.message}`);
       scheduleDaemonRestart(0);
     });
   }, wait);
   if (restartTimer.unref) restartTimer.unref();
 }
 
-// Apagado ordenado: deja de relanzar y mata al daemon.
+// Orderly shutdown: it stops relaunching and kills the daemon.
 function stopDaemon() {
   daemonWanted = false;
   if (restartTimer) { clearTimeout(restartTimer); restartTimer = null; }
   if (daemonProcess) daemonProcess.kill();
 }
 
-// AMD/Intel exponen VA-API encode real (radeonsi/iHD). NVIDIA solo expone
-// decode via nvidia-vaapi-driver (VAEntrypointVLD, no EncSlice) -- el
-// encode en hosts NVIDIA es un componente aparte (redroid-nvidia, Venus-proxy
-// + NVENC, Fase 2 paso 2), no este daemon. Ver README de redroid-hwenc,
-// seccion "Why NVIDIA isn't in the encode table".
+// AMD/Intel expose real VA-API encode (radeonsi/iHD). NVIDIA only exposes
+// decode via nvidia-vaapi-driver (VAEntrypointVLD, not EncSlice) -- encode on
+// NVIDIA hosts is a separate component (redroid-nvidia, Venus-proxy
+// + NVENC, Phase 2 step 2), not this daemon. See redroid-hwenc's README,
+// section "Why NVIDIA isn't in the encode table".
 async function detectGpuVendor() {
   try {
     const { stdout } = await execFileAsync('lspci', ['-nnk']);
@@ -74,7 +74,7 @@ async function detectGpuVendor() {
     if (blocks.some((b) => /Intel/i.test(b))) return 'intel';
     return 'unknown';
   } catch (e) {
-    warn(`lspci fallo, no se pudo detectar el vendor de GPU: ${e.message}`);
+    warn(`lspci failed, the GPU vendor could not be detected: ${e.message}`);
     return 'unknown';
   }
 }
@@ -87,19 +87,19 @@ function isDaemonAlive() {
   return daemonProcess !== null && !daemonProcess.killed && fs.existsSync(SOCKET_PATH);
 }
 
-// Un solo daemon por host, compartido por todas las instancias -- no es un
-// proceso por instancia. Idempotente: no hace nada si ya esta corriendo.
+// A single daemon per host, shared by all the instances -- it is not a process
+// per instance. Idempotent: it does nothing if it is already running.
 async function ensureDaemonRunning() {
   daemonWanted = true;
   if (isDaemonAlive()) return;
 
   if (!fs.existsSync(DAEMON_BIN)) {
-    throw new Error(`Binario del daemon VA-API no encontrado en ${DAEMON_BIN} (deberia compilarse al construir la imagen, ver backend/native/vaapi-daemon/Makefile)`);
+    throw new Error(`VA-API daemon binary not found at ${DAEMON_BIN} (it should be built when the image is built, see backend/native/vaapi-daemon/Makefile)`);
   }
 
   fs.mkdirSync(VAAPI_ROOT, { recursive: true });
   fs.chmodSync(VAAPI_ROOT, 0o777);
-  // Un socket viejo de un daemon anterior que murio sin limpiar bloquea el bind().
+  // An old socket from a previous daemon that died without cleaning up blocks bind().
   fs.rmSync(SOCKET_PATH, { force: true });
 
   daemonProcess = spawn(DAEMON_BIN, [], { stdio: ['ignore', 'pipe', 'pipe'] });
@@ -107,38 +107,38 @@ async function ensureDaemonRunning() {
   daemonProcess.stdout.on('data', (d) => log(d.toString().trim()));
   daemonProcess.stderr.on('data', (d) => warn(d.toString().trim()));
   daemonProcess.on('exit', (code, signal) => {
-    warn(`el daemon VA-API termino (code=${code}, signal=${signal})`);
+    warn(`the VA-API daemon ended (code=${code}, signal=${signal})`);
     daemonProcess = null;
     scheduleDaemonRestart(Date.now() - daemonStartedAt);
   });
 
   const deadline = Date.now() + DAEMON_START_TIMEOUT_MS;
   while (!fs.existsSync(SOCKET_PATH)) {
-    if (!daemonProcess) throw new Error('El daemon VA-API murio antes de abrir su socket -- revisar logs de stderr arriba');
-    if (Date.now() > deadline) throw new Error(`El daemon VA-API no abrio ${SOCKET_PATH} a tiempo`);
+    if (!daemonProcess) throw new Error('The VA-API daemon died before opening its socket -- check the stderr logs above');
+    if (Date.now() > deadline) throw new Error(`The VA-API daemon did not open ${SOCKET_PATH} in time`);
     await new Promise((r) => setTimeout(r, 100));
   }
-  log(`daemon VA-API arriba, escuchando en ${SOCKET_PATH}`);
+  log(`VA-API daemon up, listening on ${SOCKET_PATH}`);
 }
 
-// Bind Docker "/dev/vaapi-helper:/dev/vaapi-helper" -- mismo host path a
-// ambos lados, igual que binderBinds() en binder.js, para que el socket
-// AF_UNIX sea el mismo archivo real visto por el backend y por la instancia.
+// Docker bind "/dev/vaapi-helper:/dev/vaapi-helper" -- the same host path on
+// both sides, like binderBinds() in binder.js, so that the AF_UNIX socket is the
+// same real file seen by the backend and by the instance.
 function daemonBind() {
   return `${VAAPI_ROOT}:${VAAPI_ROOT}`;
 }
 
-// ---- Decode por hardware (protocolo hwdec v2, backend/native/vaapi-daemon/protocol.h) ----
+// ---- Hardware decode (hwdec protocol v2, backend/native/vaapi-daemon/protocol.h) ----
 //
-// Cada host decodifica por hardware solo lo que su GPU ofrece (ej. Polaris: H.264 y HEVC; Iris Xe
-// ademas VP9). El daemon lo averigua con VA-API y lo informa por VAAPI_CMD_HWDEC_CAPS; el modulo
-// hwenc registra en Android SOLO esos decoders (ver integrate.js), para que el reproductor nunca
-// reciba uno que el hardware no puede sostener.
+// Every host decodes in hardware only what its GPU offers (e.g. Polaris: H.264 and HEVC; Iris Xe
+// also VP9). The daemon finds out with VA-API and reports it through VAAPI_CMD_HWDEC_CAPS; the hwenc
+// module registers in Android ONLY those decoders (see integrate.js), so that the player never
+// receives one the hardware cannot sustain.
 const VAAPI_CMD_HWDEC_CAPS = 4;
-const HWDEC_CAPS_RESPONSE_SIZE = 176; // int32 status, u32 reservado, u32 mask, u32 mask10, char[160] driver
-// Indice de codec en el protocolo -> componente Codec2 que existe para ese codec. Los codecs que el
-// hardware puede decodificar pero para los que todavia no hay componente en Android (vp8, mpeg2, vc1,
-// av1) no aparecen: no hay nada que registrar.
+const HWDEC_CAPS_RESPONSE_SIZE = 176; // int32 status, u32 reserved, u32 mask, u32 mask10, char[160] driver
+// Codec index in the protocol -> the Codec2 component that exists for that codec. The codecs the
+// hardware can decode but for which there is no component in Android yet (vp8, mpeg2, vc1, av1) do
+// not appear: there is nothing to register.
 const HWDEC_COMPONENTS = {
   0: { id: 'h264', name: 'c2.hardware.decoder.h264', type: 'video/avc' },
   1: { id: 'hevc', name: 'c2.hardware.decoder.hevc', type: 'video/hevc' },
@@ -159,8 +159,8 @@ function parseHwdecCaps(buf) {
   return { driver, codecs };
 }
 
-// Resuelve siempre: si el daemon no esta, esta compilado sin HWDEC (cierra la conexion sin responder)
-// o no contesta a tiempo, el resultado es "ningun decoder", nunca un error.
+// It always resolves: if the daemon is not there, is built without HWDEC (it closes the connection without
+// answering) or does not answer in time, the result is "no decoder", never an error.
 function queryHwdecCaps({ socketPath = SOCKET_PATH, timeoutMs = 3000 } = {}) {
   return new Promise((resolve) => {
     const none = { driver: null, codecs: [] };

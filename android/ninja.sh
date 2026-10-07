@@ -1,18 +1,18 @@
 #!/bin/bash
-# Compila SOLO con ninja, sin pasar por Soong (ni su analisis de ~20 min y >30 GB de RAM).
-# Sirve mientras solo cambien archivos .cpp/.h ya listados en un Android.bp existente: ninja
-# reconstruye lo que cambio. Si se agrega un archivo fuente o se toca un Android.bp, hay que
-# pasar una vez por android/build.sh (que corre Soong) para regenerar los .ninja.
+# Builds ONLY with ninja, without going through Soong (nor its ~20 min / >30 GB RAM analysis).
+# It works as long as only .cpp/.h files already listed in an existing Android.bp change: ninja
+# rebuilds what changed. If a source file is added or an Android.bp is touched, it has to
+# go through android/build.sh once (which runs Soong) to regenerate the .ninja files.
 #
-# Uso: android/ninja.sh <ruta-de-salida-dentro-de-/out> [log]
-#   ej. android/ninja.sh /out/target/product/redroid_x86_64/vendor/bin/hw/android.hardware.media.c2-vaapi-service
+# Usage: android/ninja.sh <output-path-inside-/out> [log]
+#   e.g. android/ninja.sh /out/target/product/redroid_x86_64/vendor/bin/hw/android.hardware.media.c2-vaapi-service
 #
-# Importante: corre como `jgustavo` (el usuario del ultimo build bueno). Como root, Soong detecta otro
-# usuario de compilacion y rehace todo el analisis; ademas deja archivos de root en /out.
+# Important: run as `jgustavo` (the user of the last good build). As root, Soong detects another
+# build user and redoes the whole analysis; it also leaves root files in /out.
 set -euo pipefail
 AOSP=${AOSP_DIR:-$HOME/aosp-redroid-15}
 HERE=$(cd "$(dirname "$0")" && pwd)
-TARGET=${1:?uso: android/ninja.sh <ruta-de-salida-en-/out> [log]}
+TARGET=${1:?usage: android/ninja.sh <output-path-in-/out> [log]}
 LOG=${2:-/dev/stdout}
 
 mkdir -p "$AOSP/external/vaapi_codec2"

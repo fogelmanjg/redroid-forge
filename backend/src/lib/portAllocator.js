@@ -8,7 +8,7 @@ function nextPort() {
   for (let p = ADB_PORT_START; p <= ADB_PORT_END; p++) {
     if (!used.has(p)) return p;
   }
-  throw new Error('No hay puertos ADB libres en el rango configurado');
+  throw new Error('No free ADB ports in the configured range');
 }
 
 module.exports = { nextPort, ADB_PORT_START, ADB_PORT_END };

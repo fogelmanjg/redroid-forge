@@ -1,65 +1,64 @@
 const path = require('path');
 const manifests = require('./moduleManifests');
 
-// Orquestador generico de modulos con logica de ejecucion real (etapa/entry
-// en su manifest, ver docs/ARCHITECTURE.md) -- Fase 5, generalizado a partir
-// del unico caso real que existia (hwenc, cableado a mano en instances.js).
-// A diferencia de moduleGate.js (que solo decide si un modulo *puede*
-// activarse: compatibilidad + consentimiento), este archivo es el que
-// efectivamente ejecuta el codigo del modulo en el momento del ciclo de vida
-// que le corresponde.
+// Generic orchestrator of modules with real execution logic (etapa/entry in
+// their manifest, see docs/ARCHITECTURE.md) -- Phase 5, generalized from the
+// only real case that existed (hwenc, wired by hand in instances.js). Unlike
+// moduleGate.js (which only decides whether a module *can* be enabled:
+// compatibility + consent), this file is the one that actually executes the
+// module's code at the moment of the lifecycle that corresponds to it.
 //
-// Convencion (documentada tambien en docs/ARCHITECTURE.md): un modulo que
-// declara "etapa": [...] en su manifest expone, desde el archivo que declara
-// en "entry" (resuelto relativo a LA CARPETA DEL MODULO, nunca a este
-// archivo), una funcion con nombre fijo por cada etapa que le aplique. No
-// hace falta exportar las etapas que no declara.
+// Convention (also documented in docs/ARCHITECTURE.md): a module that declares
+// "etapa": [...] (stage) in its manifest exposes, from the file it declares in
+// "entry" (resolved relative to THE MODULE'S FOLDER, never to this file), a
+// function with a fixed name for every stage that applies to it. The stages it
+// does not declare need not be exported.
 function log(msg) { console.log(`[moduleRunner] ${msg}`); }
 function warn(msg) { console.warn(`[moduleRunner] ${msg}`); }
 
 const STAGE_EXPORT_NAME = {
-  // Etapa 3: antes de runtime.create(). Sync o async, sin argumentos --
-  // "que necesita ESTE MODULO para poder crearse", no algo especifico de una
-  // instancia puntual (ancho/alto/dpi/etc. los sigue armando instances.js).
-  // Devuelve `{ binds?: string[], cmd?: string[] }`, puramente aditivo.
+  // Stage 3: before runtime.create(). Sync or async, no arguments -- "what THIS
+  // MODULE needs to be able to be created", not something specific to a
+  // particular instance (width/height/dpi/etc. are still built by instances.js).
+  // It returns `{ binds?: string[], cmd?: string[] }`, purely additive.
   3: 'prepareCreate',
-  // Etapa 4: entre runtime.create() y runtime.start() -- unica ventana en la
-  // que /vendor es escribible (ver ARCHITECTURE.md). Recibe el containerId
-  // ya creado (todavia detenido).
+  // Stage 4: between runtime.create() and runtime.start() -- the only window in
+  // which /vendor is writable (see ARCHITECTURE.md). It receives the
+  // containerId already created (still stopped), and a context
+  // `{ display: { width, height } }`.
   4: 'integrate',
-  // Etapa 5: infraestructura companion del host, independiente de cualquier
-  // instancia puntual (ej. el daemon VA-API de hwAccel.js). Sin argumentos,
-  // idempotente por contrato del propio modulo.
+  // Stage 5: companion infrastructure on the host, independent of any particular
+  // instance (e.g. the VA-API daemon of hwAccel.js). No arguments, idempotent by
+  // the module's own contract.
   5: 'ensureHostInfraReady',
-  // Etapa 6: contra una instancia ya arrancada. Recibe el containerId vivo.
+  // Stage 6: against an instance that has already started. It receives the live containerId.
   6: 'ensureRuntimeReady',
 };
 
-// Cache de `require()` por id de modulo -- mismo criterio que moduleManifests
-// (los manifests/entries son archivos estaticos del repo, no datos de
-// usuario). `_resetForTests()` la limpia para que un test pueda apuntar a un
-// fixture nuevo bajo el mismo id sin arrastrar el require() de una corrida
-// anterior.
+// `require()` cache per module id -- the same criterion as moduleManifests (the
+// manifests/entries are static files of the repo, not user data).
+// `_resetForTests()` clears it so a test can point to a new fixture under the
+// same id without dragging along the require() of a previous run.
 const entryCache = new Map();
 
 function loadEntry(manifest) {
   if (entryCache.has(manifest.id)) return entryCache.get(manifest.id);
   const dir = manifests.moduleDir(manifest.id);
   if (!dir) {
-    throw new Error(`No se pudo resolver la carpeta del modulo "${manifest.id}" para cargar su entry ("${manifest.entry}")`);
+    throw new Error(`Could not resolve the folder of module "${manifest.id}" to load its entry ("${manifest.entry}")`);
   }
-  // eslint-disable-next-line global-require, import/no-dynamic-require -- el
-  // path es dinamico por diseno: cada modulo declara el suyo en su manifest.
+  // eslint-disable-next-line global-require, import/no-dynamic-require -- the
+  // path is dynamic by design: every module declares its own in its manifest.
   const entryModule = require(path.join(dir, manifest.entry));
   entryCache.set(manifest.id, entryModule);
   return entryModule;
 }
 
-// Modulos, de la lista de ids requeridos por la imagen (ver
-// moduleGate.requiredModuleIdsForImage), que ademas declaran "etapa"/"entry"
-// -- los modulos "puramente contrato" (gapps/magisk/wifi-falso hoy, sin
-// logica de ejecucion propia todavia) no tienen "entry", y no rompe nada que
-// no lo tengan: simplemente no participan de ninguna etapa de este runner.
+// Modules, from the list of ids required by the image (see
+// moduleGate.requiredModuleIdsForImage), that also declare "etapa"/"entry" --
+// the "pure contract" modules (gapps/magisk/wifi-falso today, with no execution
+// logic of their own yet) have no "entry", and it breaks nothing that they do
+// not: they simply do not take part in any stage of this runner.
 function modulesForStage(requiredModuleIds, stage) {
   return requiredModuleIds
     .map((id) => manifests.get(id))
@@ -72,17 +71,17 @@ function requireStageFn(manifest, stage) {
   const fn = entryModule[exportName];
   if (typeof fn !== 'function') {
     throw new Error(
-      `El modulo "${manifest.id}" declara etapa ${stage} en su manifest pero su entry `
-      + `("${manifest.entry}") no exporta "${exportName}"`,
+      `Module "${manifest.id}" declares stage ${stage} in its manifest but its entry `
+      + `("${manifest.entry}") does not export "${exportName}"`,
     );
   }
   return fn;
 }
 
-// Etapa 3 -- se llama ANTES de runtime.create(). En serie (no Promise.all):
-// el orden en que varios modulos suman binds/cmd puede importar (ej. flags
-// de boot que se pisan entre si), y son pocos modulos como para que el costo
-// de paralelizar valga la pena.
+// Stage 3 -- called BEFORE runtime.create(). Serially (not Promise.all): the
+// order in which several modules add binds/cmd can matter (e.g. boot flags that
+// override each other), and there are too few modules for the cost of
+// parallelizing to be worth it.
 async function prepareCreate(requiredModuleIds) {
   const binds = [];
   const cmd = [];
@@ -96,23 +95,22 @@ async function prepareCreate(requiredModuleIds) {
   return { binds, cmd };
 }
 
-// Etapa 4 -- se llama DESPUES de runtime.create() y ANTES de runtime.start().
-// Se awaitea en serie y de punta a punta: si un modulo falla, no se sigue con
-// el siguiente ni se llega a start() -- mejor un create() a medio inyectar y
-// visible en el error que un boot con la mitad de los modulos declarados sin
-// aplicarse en silencio.
+// Stage 4 -- called AFTER runtime.create() and BEFORE runtime.start(). It is
+// awaited serially and end to end: if a module fails, the next one is not run
+// nor is start() reached -- better a half-injected create() that is visible in
+// the error than a boot with half of the declared modules silently not applied.
 async function integrate(requiredModuleIds, containerId, ctx = {}) {
   for (const manifest of modulesForStage(requiredModuleIds, 4)) {
     const fn = requireStageFn(manifest, 4);
-    log(`etapa 4: integrando modulo "${manifest.id}" en ${containerId}...`);
+    log(`stage 4: integrating module "${manifest.id}" into ${containerId}...`);
     // eslint-disable-next-line no-await-in-loop
     await fn(containerId, ctx);
   }
 }
 
-// Etapa 5 -- infraestructura del host, se llama antes de start/restart
-// (mismo momento en que instances.js ya llamaba a hwAccel.ensureDaemonRunning
-// a mano). Cada modulo es responsable de que su propio hook sea idempotente.
+// Stage 5 -- host infrastructure, called before start/restart (the same moment
+// at which instances.js already called hwAccel.ensureDaemonRunning by hand).
+// Each module is responsible for making its own hook idempotent.
 async function ensureHostInfraReady(requiredModuleIds) {
   for (const manifest of modulesForStage(requiredModuleIds, 5)) {
     const fn = requireStageFn(manifest, 5);
@@ -121,11 +119,11 @@ async function ensureHostInfraReady(requiredModuleIds) {
   }
 }
 
-// Etapa 6 -- fixups post-boot contra una instancia ya arrancada. Fire-and-
-// forget a proposito, mismo patron que scheduleWifiFixes/hwsimWifi.js: no
-// bloquea la respuesta HTTP del start/restart, y un modulo que falla acá no
-// tiene que tumbar el arranque de la instancia (ya esta viva igual, esto es
-// un ajuste sobre algo que ya funciona, no una precondicion).
+// Stage 6 -- post-boot fixups against an instance that has already started.
+// Fire-and-forget on purpose, the same pattern as scheduleWifiFixes/hwsimWifi.js:
+// it does not block the HTTP response of start/restart, and a module that fails
+// here must not bring down the instance's startup (it is alive anyway, this is
+// an adjustment on something that already works, not a precondition).
 function scheduleRuntimeFixups(requiredModuleIds, containerId) {
   for (const manifest of modulesForStage(requiredModuleIds, 6)) {
     let fn;
@@ -137,12 +135,12 @@ function scheduleRuntimeFixups(requiredModuleIds, containerId) {
       continue;
     }
     Promise.resolve(fn(containerId)).catch((e) => {
-      warn(`etapa 6 del modulo "${manifest.id}" fallo para ${containerId}: ${e.message}`);
+      warn(`stage 6 of module "${manifest.id}" failed for ${containerId}: ${e.message}`);
     });
   }
 }
 
-// Solo para tests.
+// Only for tests.
 function _resetForTests() { entryCache.clear(); }
 
 module.exports = {

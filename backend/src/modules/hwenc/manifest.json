@@ -1,14 +1,14 @@
 {
   "id": "hwenc",
-  "nombre": "Aceleracion de video por hardware (VA-API)",
+  "nombre": "Hardware video acceleration (VA-API)",
   "esTerceroNoLibre": false,
-  "descripcion": "Encode H.264 (AMD/Intel via VA-API) para streaming/captura de pantalla, y decode por hardware de todo lo que el GPU del host ofrezca (H.264, HEVC, VP9 segun el hardware). Los componentes Codec2 viven en la instancia y hablan con un daemon propio corriendo en el host -- de redroid-hwenc.",
+  "descripcion": "H.264 encode (AMD/Intel via VA-API) for screen streaming/capture, and hardware decode of everything the host's GPU offers (H.264, HEVC, VP9 depending on the hardware). The Codec2 components live in the instance and talk to a daemon of our own running on the host -- from redroid-hwenc.",
   "queToca": [
-    "copia un servicio (binario compilado, .rc, politica de seccomp, manifest VINTF) dentro de /vendor de la instancia -- tiene que hacerse ANTES del primer arranque, /vendor queda de solo lectura apenas bootea",
-    "agrega entradas a /vendor/etc/media_codecs.xml para que el framework liste el encoder y SOLO los decoders que el hardware del host decodifica de verdad (el backend se lo pregunta al daemon al crear la instancia)",
-    "agrega el boot flag androidboot.use_redroid_c2=1 al arranque del contenedor (etapa 3, antes hardcodeado a mano en instances.js)",
-    "requiere un proceso propio corriendo en el host (el daemon VA-API), fuera de cualquier contenedor, escuchando en /dev/vaapi-helper/socket -- el backend lo levanta solo si no esta corriendo",
-    "hace un setprop + reinicio de mediaserver despues de cada boot fresco (etapa 6) -- automatizado desde Fase 5, antes se corria a mano"
+    "copies a service (compiled binary, .rc, seccomp policy, VINTF manifest) into the instance's /vendor -- it has to be done BEFORE the first start, /vendor becomes read-only as soon as it boots",
+    "adds entries to /vendor/etc/media_codecs.xml so that the framework lists the encoder and ONLY the decoders the host's hardware really decodes (the backend asks the daemon when the instance is created)",
+    "adds the boot flag androidboot.use_redroid_c2=1 to the container's startup (stage 3, previously hardcoded by hand in instances.js)",
+    "requires a process of its own running on the host (the VA-API daemon), outside any container, listening on /dev/vaapi-helper/socket -- the backend starts it by itself if it is not running",
+    "does a setprop + mediaserver restart after every fresh boot (stage 6) -- automated since Phase 5, before it was run by hand"
   ],
   "compatibleCon": {
     "androidVersion": [
@@ -29,5 +29,18 @@
     6
   ],
   "entry": "./integrate.js",
-  "version": 4
+  "version": 4,
+  "i18n": {
+    "es": {
+      "nombre": "Aceleracion de video por hardware (VA-API)",
+      "descripcion": "Encode H.264 (AMD/Intel via VA-API) para streaming/captura de pantalla, y decode por hardware de todo lo que el GPU del host ofrezca (H.264, HEVC, VP9 segun el hardware). Los componentes Codec2 viven en la instancia y hablan con un daemon propio corriendo en el host -- de redroid-hwenc.",
+      "queToca": [
+        "copia un servicio (binario compilado, .rc, politica de seccomp, manifest VINTF) dentro de /vendor de la instancia -- tiene que hacerse ANTES del primer arranque, /vendor queda de solo lectura apenas bootea",
+        "agrega entradas a /vendor/etc/media_codecs.xml para que el framework liste el encoder y SOLO los decoders que el hardware del host decodifica de verdad (el backend se lo pregunta al daemon al crear la instancia)",
+        "agrega el boot flag androidboot.use_redroid_c2=1 al arranque del contenedor (etapa 3, antes hardcodeado a mano en instances.js)",
+        "requiere un proceso propio corriendo en el host (el daemon VA-API), fuera de cualquier contenedor, escuchando en /dev/vaapi-helper/socket -- el backend lo levanta solo si no esta corriendo",
+        "hace un setprop + reinicio de mediaserver despues de cada boot fresco (etapa 6) -- automatizado desde Fase 5, antes se corria a mano"
+      ]
+    }
+  }
 }

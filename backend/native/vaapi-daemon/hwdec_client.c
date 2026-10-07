@@ -53,12 +53,12 @@ HwDecClient *hwdec_client_open(const char *socket_path, HwDecCodec codec) {
     HwDecOpenRequest rq = {.codec = (uint32_t)codec};
     HwDecOpenResponse rs;
     if (wr(fd, &tag, sizeof(tag)) || wr(fd, &rq, sizeof(rq)) || rd(fd, &rs, sizeof(rs))) {
-        fprintf(stderr, "hwdec_client: el daemon cerro la conexion al abrir (%s)\n", hwdec_codec_name(codec));
+        fprintf(stderr, "hwdec_client: the daemon closed the connection on open (%s)\n", hwdec_codec_name(codec));
         close(fd);
         return NULL;
     }
     if (rs.status != 0) {
-        fprintf(stderr, "hwdec_client: el daemon rechazo %s (el hardware no lo decodifica)\n", hwdec_codec_name(codec));
+        fprintf(stderr, "hwdec_client: the daemon rejected %s (the hardware does not decode it)\n", hwdec_codec_name(codec));
         close(fd);
         return NULL;
     }
@@ -68,11 +68,11 @@ HwDecClient *hwdec_client_open(const char *socket_path, HwDecCodec codec) {
     return c;
 }
 
-/* Lee la respuesta de un mensaje y deja sus frames en la cola. */
+/* Reads a message's response and leaves its frames in the queue. */
 static int read_response(HwDecClient *c) {
     HwDecResponse rs;
     if (rd(c->fd, &rs, sizeof(rs))) return -1;
-    if (c->qoff == c->qlen) c->qoff = c->qlen = 0;  /* cola vacia: se reutiliza el buffer */
+    if (c->qoff == c->qlen) c->qoff = c->qlen = 0;  /* empty queue: the buffer is reused */
     for (uint32_t i = 0; i < rs.nframes; i++) {
         HwDecFrameHeader h;
         if (rd(c->fd, &h, sizeof(h))) return -1;

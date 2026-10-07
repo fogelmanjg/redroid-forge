@@ -1,13 +1,13 @@
-// Regresion de la Fase 3 (docs/ROADMAP.md, paso 4): dos instancias que
-// arrancan/reinician casi al mismo tiempo no deben poder reclamar el mismo
-// par phy/iface de mac80211_hwsim. No levanta Docker/hardware real -- mockea
-// child_process.execFile (usado por hwsimWifi.js para 'iw dev'/'iw phy ...
-// set netns') y dockerRuntime (getPid/exec/inspect) via t.mock, siguiendo el
-// mismo estilo sin dependencias nuevas que moduleContract.test.js.
+// Regression of Phase 3 (docs/ROADMAP.md, step 4): two instances that start/restart
+// at almost the same time must not be able to claim the same phy/iface pair of
+// mac80211_hwsim. It does not start real Docker/hardware -- it mocks
+// child_process.execFile (used by hwsimWifi.js for 'iw dev'/'iw phy ... set netns')
+// and dockerRuntime (getPid/exec/inspect) via t.mock, in the same no-new-dependencies
+// style as moduleContract.test.js.
 //
-// IMPORTANTE (ver descripcion del PR): esto valida el modelo de concurrencia
-// mockeado, no una race real de arranque dual de instancias contra Docker --
-// eso todavia hay que probarlo en hardware real antes de mergear.
+// IMPORTANT (see the PR description): this validates the mocked concurrency model,
+// not a real dual-instance startup race against Docker -- that still has to be
+// tested on real hardware before merging.
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const cp = require('node:child_process');
@@ -16,15 +16,14 @@ const runtime = require('../src/lib/dockerRuntime');
 const store = require('../src/lib/store');
 const hwsimWifi = require('../src/lib/hwsimWifi');
 
-// Simula el estado real del host: un phy que "iw phy X set netns" mueve de
-// verdad deja de aparecer en la proxima lectura de 'iw dev'. A diferencia de
-// darle a cada llamada su propia fixture independiente (eso no probaria
-// nada: cada instancia veria sus propios pares libres y nunca podrian
-// pisarse), esta lista la comparten AMBAS llamadas concurrentes, tal como
-// comparten el mismo netns default del host en la realidad. `claimedBy`
-// registra que instancia se quedo con cada phy, y `collisions` marca si
-// alguna vez dos reclamos intentaron mover el mismo phy -- eso es lo que
-// hace fallar el test si la cola de serializacion no esta.
+// Simulates the host's real state: a phy that "iw phy X set netns" really moves
+// stops appearing in the next read of 'iw dev'. Unlike giving each call its own
+// independent fixture (that would prove nothing: each instance would see its own
+// free pairs and they could never step on each other), this list is shared by BOTH
+// concurrent calls, just as they share the host's same default netns in reality.
+// `claimedBy` records which instance got each phy, and `collisions` flags whether
+// two claims ever tried to move the same phy -- that is what makes the test fail
+// if the serialization queue is not there.
 function makeSharedHostState(pairs) {
   return { free: pairs.map((p) => ({ ...p })), claimedBy: {}, collisions: [] };
 }
@@ -33,10 +32,10 @@ function iwDevOutput(pairs) {
   return pairs.map((p) => `${p.phy.replace('phy', 'phy#')}\n\tInterface ${p.iface}`).join('\n');
 }
 
-// Reproduce la mecanica async real de dockerode/execFile (nunca resuelve en
-// el mismo tick) -- sin esto, dos llamadas a ensureHwsimWifi podrian correr
-// en un orden serializado por pura casualidad del scheduler de microtasks,
-// sin que la cola de runHwsimClaim tenga nada que ver.
+// Reproduces the real async mechanics of dockerode/execFile (it never resolves in
+// the same tick) -- without this, two calls to ensureHwsimWifi could run in a
+// serialized order by pure chance of the microtask scheduler, without the
+// runHwsimClaim queue having anything to do with it.
 function tick() {
   return new Promise((resolve) => setImmediate(resolve));
 }
@@ -49,7 +48,7 @@ function mockExecFile(t, hostState, instanceIdByPid) {
         return cb(null, '', '');
       }
       if (file === 'ip' && args[0] === 'link') {
-        // "ip link set wlan0_fake ..." -- no existe en este fixture.
+        // "ip link set wlan0_fake ..." -- it does not exist in this fixture.
         return cb(new Error('no such device'));
       }
       if (file === 'iw' && args[0] === 'dev') {
@@ -60,12 +59,12 @@ function mockExecFile(t, hostState, instanceIdByPid) {
         const pid = args[4];
         const idx = hostState.free.findIndex((p) => p.phy === phy);
         if (idx === -1) {
-          // Ya lo tiene otra instancia -- es exactamente la colision que
-          // este test existe para detectar.
+          // Another instance already has it -- it is exactly the collision this
+          // test exists to detect.
           hostState.collisions.push({ phy, wantedBy: instanceIdByPid[pid], heldBy: hostState.claimedBy[phy] });
-          return cb(new Error(`${phy} ya no esta libre en el host (doble reclamo)`));
+          return cb(new Error(`${phy} is no longer free on the host (double claim)`));
         }
-        hostState.free.splice(idx, 1); // se mueve al netns del contenedor -> deja de estar libre
+        hostState.free.splice(idx, 1); // it moves into the container's netns -> it stops being free
         hostState.claimedBy[phy] = instanceIdByPid[pid];
         return cb(null, '', '');
       }
@@ -81,13 +80,13 @@ function mockRuntime(t, pidByContainer) {
   });
   t.mock.method(runtime, 'exec', async () => {
     await tick();
-    return ''; // alcanza para que "ip link show wlanX" no tire error y renamedOk de true
+    return ''; // enough for "ip link show wlanX" not to throw and renamedOk to be true
   });
 }
 
-test('ensureHwsimWifi: dos llamadas concurrentes nunca reclaman el mismo par phy', async (t) => {
+test('ensureHwsimWifi: two concurrent calls never claim the same phy pair', async (t) => {
   hwsimWifi._resetHwsimClaimTailForTests();
-  t.mock.method(store, 'readAll', () => []); // sin otras instancias registradas para la nuance de reload
+  t.mock.method(store, 'readAll', () => []); // no other registered instances for the reload nuance
 
   const hostState = makeSharedHostState([
     { phy: 'phy0', iface: 'wlan0' },
@@ -106,8 +105,8 @@ test('ensureHwsimWifi: dos llamadas concurrentes nunca reclaman el mismo par phy
   ]);
 
   assert.deepEqual(hostState.collisions, []);
-  // Los 4 phys del fixture alcanzan exactamente para las 2 instancias (2 cada
-  // una) -- si sobra alguno, alguna se quedo corta sin necesidad.
+  // The fixture's 4 phys are exactly enough for the 2 instances (2 each) -- if any
+  // is left over, one fell short unnecessarily.
   assert.equal(hostState.free.length, 0);
 
   const claimedPairs = Object.entries(hostState.claimedBy).reduce((acc, [phy, owner]) => {
@@ -116,12 +115,12 @@ test('ensureHwsimWifi: dos llamadas concurrentes nunca reclaman el mismo par phy
   }, {});
   assert.equal(claimedPairs['instance-a']?.length, 2);
   assert.equal(claimedPairs['instance-b']?.length, 2);
-  // Los reclamos son disjuntos: ningun phy aparece en las dos listas.
+  // The claims are disjoint: no phy appears in both lists.
   const overlap = claimedPairs['instance-a'].filter((phy) => claimedPairs['instance-b'].includes(phy));
   assert.deepEqual(overlap, []);
 });
 
-test('ensureHwsimWifi: con 3 phys libres para 2 instancias, ninguna se pisa aunque una se quede sin wifi', async (t) => {
+test('ensureHwsimWifi: with 3 free phys for 2 instances, neither steps on the other even if one ends up without wifi', async (t) => {
   hwsimWifi._resetHwsimClaimTailForTests();
   t.mock.method(store, 'readAll', () => []);
 
@@ -135,16 +134,16 @@ test('ensureHwsimWifi: con 3 phys libres para 2 instancias, ninguna se pisa aunq
   mockExecFile(t, hostState, instanceIdByPid);
   mockRuntime(t, pidByContainer);
 
-  // No debe rechazar ninguna de las dos -- a la que le toca menos de 2 phys
-  // libres, ensureHwsimWifi loguea un warning y devuelve sin lanzar.
+  // It must reject neither of the two -- for the one that gets fewer than 2 free
+  // phys, ensureHwsimWifi logs a warning and returns without throwing.
   await assert.doesNotReject(Promise.all([
     hwsimWifi.ensureHwsimWifi('instance-a', 'container-a'),
     hwsimWifi.ensureHwsimWifi('instance-b', 'container-b'),
   ]));
 
   assert.deepEqual(hostState.collisions, []);
-  // El unico phy sobrante (no alcanza para armar un segundo par) queda sin
-  // asignar -- lo importante es que nunca se intento mover el mismo phy dos
-  // veces (eso hubiera quedado registrado en collisions arriba).
+  // The only leftover phy (not enough to build a second pair) stays unassigned --
+  // what matters is that the same phy was never attempted to be moved twice (that
+  // would have been recorded in collisions above).
   assert.equal(hostState.free.length, 1);
 });

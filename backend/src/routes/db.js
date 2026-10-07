@@ -4,8 +4,8 @@ const updater = require('../lib/knownDbUpdate');
 
 const router = express.Router();
 
-// Lectura (sub-paso 2) + consulta/aplicacion de actualizaciones (sub-paso 3,
-// docs/KNOWN-COMBINATIONS.md). Aplicar es SIEMPRE una accion explicita (POST).
+// Reading (sub-step 2) + checking/applying updates (sub-step 3,
+// docs/KNOWN-COMBINATIONS.md). Applying is ALWAYS an explicit action (POST).
 router.get('/', (req, res) => {
   try {
     const cfg = updater.getConfig();
@@ -39,13 +39,13 @@ router.get('/combinaciones', (req, res) => {
   }
 });
 
-// Consulta ahora mismo si hay una base mas nueva (no descarga ni aplica).
+// Checks right now whether there is a newer database (it neither downloads nor applies).
 router.post('/check', async (req, res) => {
   const r = await updater.runCheck();
   res.status(r.ok ? 200 : 502).json(r);
 });
 
-// Descarga, verifica la firma y aplica. Solo por accion del usuario.
+// Downloads, verifies the signature and applies. Only on the user's action.
 router.post('/update', async (req, res) => {
   try {
     const { db } = store.loadCurrent();

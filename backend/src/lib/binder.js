@@ -4,9 +4,9 @@ const store = require('./store');
 
 const BINDERFS_ROOT = '/dev/binderfs';
 
-// Porta ensureBinderDevice() de host-resource-allocator.service.ts. Corre
-// como root dentro del contenedor privilegiado --pid=host, así que no hace
-// falta sudo (a diferencia del original en plenum-redroid).
+// Ports ensureBinderDevice() from host-resource-allocator.service.ts. It runs
+// as root inside the privileged --pid=host container, so sudo is not needed
+// (unlike the original in plenum-redroid).
 function ensureBinderDevice(name) {
   const devPath = `${BINDERFS_ROOT}/${name}`;
   if (fs.existsSync(devPath)) return;
@@ -27,23 +27,23 @@ function ensureBinderDevice(name) {
   fs.chmodSync(devPath, 0o666);
 }
 
-// Slots: sin el offset de convivencia con jg-dashboard v1 de plenum-redroid —
-// acá el store propio es la única fuente de verdad, así que alcanza con
-// tomar el próximo entero libre. En modo binderfs los nodos se crean a pedido,
-// así que cualquier slot >= 1 sirve. En modo legacy (ver abajo) solo sirven
-// los slots cuyos tres nodos ya existen en el host: se prefieren los
-// numerados (1, 2, ...) y se cae al slot 0 (/dev/binder, sin sufijo) si no
-// hay otro -- caso de un host con el default `devices=binder,hwbinder,
-// vndbinder` del modulo (confirmado en n02).
-// REDROID_FORGE_BINDER_RESERVED="1,2,3,50": slots que ya usa OTRO orquestador en el mismo host (ej. el dashboard
-// anterior, durante la migracion). El store de redroid-forge solo conoce sus propias instancias: sin esto, con el
-// registro vacio elegiria el slot 1 y reutilizaria el nodo binder1 de una instancia ajena, dejando dos Android
-// sobre el mismo binder.
+// REDROID_FORGE_BINDER_RESERVED="1,2,3,50": slots already used by ANOTHER orchestrator on the same host (e.g. the
+// previous dashboard, during the migration). redroid-forge's store only knows its own instances: without this,
+// with an empty registry it would pick slot 1 and reuse the binder1 node of a foreign instance, leaving two
+// Androids on the same binder.
 function reservedSlots(env = process.env) {
   return String(env.REDROID_FORGE_BINDER_RESERVED || '')
     .split(',').map((x) => x.trim()).filter((x) => /^\d+$/.test(x)).map(Number);
 }
 
+// Slots: without the coexistence offset with plenum-redroid's jg-dashboard v1 —
+// here our own store is the only source of truth, so it is enough to take the
+// next free integer. In binderfs mode the nodes are created on demand, so any
+// slot >= 1 will do. In legacy mode (see below) only the slots whose three nodes
+// already exist on the host will do: the numbered ones (1, 2, ...) are preferred
+// and it falls back to slot 0 (/dev/binder, no suffix) if there is no other --
+// the case of a host with the module's default `devices=binder,hwbinder,
+// vndbinder` (confirmed on n02).
 function nextFreeSlot({ legacy = useLegacyBinder(), exists = fs.existsSync, reserved = reservedSlots() } = {}) {
   const used = new Set(store.readAll().map((i) => i.binderSlot).filter((s) => s != null));
   for (const r of reserved) used.add(r);
@@ -58,19 +58,19 @@ function nextFreeSlot({ legacy = useLegacyBinder(), exists = fs.existsSync, rese
   const free = candidates.find((n) => !used.has(n) && legacyNodeNames(n).every((name) => exists(`/dev/${name}`)));
   if (free === undefined) {
     throw new Error(
-      'binder legacy: no hay ningun slot libre con sus tres nodos en /dev. ' +
-      'Ampliar "options binder_linux devices=..." (ver Doctor) y recargar el modulo.'
+      'binder legacy: there is no free slot with its three nodes in /dev. ' +
+      'Extend "options binder_linux devices=..." (see Doctor) and reload the module.'
     );
   }
   return free;
 }
 
-// Kernels sin CONFIG_ANDROID_BINDERFS (ej. jgustavo46, ver Doctor): no hay
-// binderfs ni binder-control, los nodos los crea el modulo binder_linux al
-// cargarse, segun su parametro `devices=` (/dev/binderN, /dev/hwbinderN, ...).
-// No se pueden crear en caliente -- si el slot pedido no esta en `devices=`,
-// hay que ampliar ese parametro y recargar el modulo.
-// Slot 0 = nodos sin sufijo (/dev/binder); slot N>=1 = /dev/binderN.
+// Kernels without CONFIG_ANDROID_BINDERFS (e.g. jgustavo46, see Doctor): there is
+// no binderfs or binder-control, the nodes are created by the binder_linux module
+// when it loads, according to its `devices=` parameter (/dev/binderN,
+// /dev/hwbinderN, ...). They cannot be created on the fly -- if the requested slot
+// is not in `devices=`, that parameter has to be extended and the module reloaded.
+// Slot 0 = nodes without a suffix (/dev/binder); slot N>=1 = /dev/binderN.
 function legacyNodeNames(slot) {
   const suffix = slot === 0 ? '' : String(slot);
   return [`binder${suffix}`, `hwbinder${suffix}`, `vndbinder${suffix}`];
@@ -80,9 +80,9 @@ function useLegacyBinder(exists = fs.existsSync) {
   return !exists(`${BINDERFS_ROOT}/binder-control`);
 }
 
-// Devuelve los binds Docker "/dev/binderfs/binderN:/dev/binder" (y hwbinder/vndbinder)
-// para un slot dado, creando los dispositivos si hace falta. En modo legacy el
-// origen es "/dev/binderN" y se exige que ya exista.
+// Returns the Docker binds "/dev/binderfs/binderN:/dev/binder" (and hwbinder/vndbinder)
+// for a given slot, creating the devices if needed. In legacy mode the source is
+// "/dev/binderN" and it must already exist.
 function binderBinds(slot, { legacy = useLegacyBinder(), exists = fs.existsSync } = {}) {
   const targets = ['/dev/binder', '/dev/hwbinder', '/dev/vndbinder'];
   if (legacy) {
@@ -90,8 +90,8 @@ function binderBinds(slot, { legacy = useLegacyBinder(), exists = fs.existsSync 
     const missing = names.filter((n) => !exists(`/dev/${n}`));
     if (missing.length) {
       throw new Error(
-        `binder legacy: faltan /dev/${missing.join(', /dev/')} -- el modulo binder_linux no los creo. ` +
-        'Ampliar "options binder_linux devices=..." (ver Doctor) y recargar el modulo.'
+        `binder legacy: /dev/${missing.join(', /dev/')} missing -- the binder_linux module did not create them. ` +
+        'Extend "options binder_linux devices=..." (see Doctor) and reload the module.'
       );
     }
     return names.map((n, i) => `/dev/${n}:${targets[i]}`);

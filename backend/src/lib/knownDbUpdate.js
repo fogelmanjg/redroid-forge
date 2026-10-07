@@ -4,13 +4,13 @@ const knownDb = require('./knownDb');
 const knownDbStore = require('./knownDbStore');
 const pkg = require('../../package.json');
 
-// Descarga y aplicacion de la base de combinaciones desde el repo externo
-// (docs/KNOWN-COMBINATIONS.md, secciones 4.2 y 4.3). Sub-paso 3 del plan.
+// Download and application of the combinations database from the external repo
+// (docs/KNOWN-COMBINATIONS.md, sections 4.2 and 4.3). Sub-step 3 of the plan.
 //
-// Orden de seguridad: primero se verifica la FIRMA sobre los bytes exactos
-// descargados; recien despues se parsea el JSON. Nada se escribe en disco
-// hasta que la base paso firma + validacion + chequeo de serial/minForge, y la
-// escritura es atomica con la anterior conservada como database.prev.json.
+// Security order: first the SIGNATURE is verified over the exact downloaded
+// bytes; only then is the JSON parsed. Nothing is written to disk until the
+// database has passed signature + validation + serial/minForge check, and the
+// write is atomic with the previous one kept as database.prev.json.
 
 const TRUSTED_KEYS_PATH = path.join(__dirname, '..', '..', 'db', 'trusted-keys.json');
 const DEFAULT_URL = 'https://github.com/fogelmanjg/redroid-forge-db/releases/latest/download';
@@ -25,9 +25,9 @@ class UpdateError extends Error {
   }
 }
 
-// Un fork o un espejo propio puede firmar con otras claves: se apunta a su
-// lista con REDROID_FORGE_DB_TRUSTED_KEYS_FILE (la define quien opera la app,
-// igual que REDROID_FORGE_DB_URL; no viaja dentro de la base descargada).
+// A fork or an own mirror may sign with other keys: point to its list with
+// REDROID_FORGE_DB_TRUSTED_KEYS_FILE (defined by whoever operates the app, like
+// REDROID_FORGE_DB_URL; it does not travel inside the downloaded database).
 function loadTrustedKeys(file = process.env.REDROID_FORGE_DB_TRUSTED_KEYS_FILE || TRUSTED_KEYS_PATH) {
   try {
     const j = JSON.parse(fs.readFileSync(file, 'utf-8'));
@@ -40,7 +40,7 @@ function loadTrustedKeys(file = process.env.REDROID_FORGE_DB_TRUSTED_KEYS_FILE |
 function getConfig(env = process.env) {
   return {
     baseUrl: (env.REDROID_FORGE_DB_URL || DEFAULT_URL).replace(/\/+$/, ''),
-    // El chequeo diario/al abrir se puede desactivar (decidido 05/10/2026).
+    // The daily/on-open check can be turned off (decided 05/10/2026).
     chequeoAutomatico: env.REDROID_FORGE_DB_CHECK !== '0',
   };
 }
@@ -50,26 +50,26 @@ async function fetchBuffer(url, fetchImpl) {
   try {
     res = await fetchImpl(url, { signal: AbortSignal.timeout(TIMEOUT_MS), redirect: 'follow' });
   } catch (e) {
-    throw new UpdateError(`no se pudo conectar a ${url}: ${e.message}`, 'red');
+    throw new UpdateError(`could not connect to ${url}: ${e.message}`, 'red');
   }
-  if (!res.ok) throw new UpdateError(`HTTP ${res.status} al pedir ${url}`, 'http');
+  if (!res.ok) throw new UpdateError(`HTTP ${res.status} requesting ${url}`, 'http');
   const declared = Number(res.headers.get('content-length') || 0);
-  if (declared > MAX_BYTES) throw new UpdateError(`${url} excede ${MAX_BYTES} bytes`, 'tamano');
+  if (declared > MAX_BYTES) throw new UpdateError(`${url} exceeds ${MAX_BYTES} bytes`, 'tamano');
   const buf = Buffer.from(await res.arrayBuffer());
-  if (buf.length > MAX_BYTES) throw new UpdateError(`${url} excede ${MAX_BYTES} bytes`, 'tamano');
+  if (buf.length > MAX_BYTES) throw new UpdateError(`${url} exceeds ${MAX_BYTES} bytes`, 'tamano');
   return buf;
 }
 
-// Consulta liviana (latest.json: solo serial/fecha). No descarga ni aplica.
+// Light query (latest.json: only serial/date). It neither downloads nor applies.
 async function checkForUpdate({ baseUrl, current, fetchImpl = fetch }) {
   const buf = await fetchBuffer(`${baseUrl}/latest.json`, fetchImpl);
   let meta;
   try {
     meta = JSON.parse(buf.toString('utf-8'));
   } catch {
-    throw new UpdateError('latest.json ilegible', 'formato');
+    throw new UpdateError('latest.json unreadable', 'formato');
   }
-  if (!Number.isInteger(meta.serial)) throw new UpdateError('latest.json sin "serial"', 'formato');
+  if (!Number.isInteger(meta.serial)) throw new UpdateError('latest.json without "serial"', 'formato');
   return { disponible: meta.serial > current.serial, serialRemoto: meta.serial, generatedAt: meta.generatedAt || null };
 }
 
@@ -85,30 +85,30 @@ async function applyUpdate({
   cachePath = knownDbStore.CACHE_PATH, fetchImpl = fetch,
 }) {
   if (!trustedKeys.length) {
-    throw new UpdateError('no hay claves de confianza configuradas (build de desarrollo): no se aplica ninguna base descargada', 'sin-claves');
+    throw new UpdateError('no trusted keys configured (development build): no downloaded database is applied', 'sin-claves');
   }
   const [dataBuf, sigBuf] = await Promise.all([
     fetchBuffer(`${baseUrl}/database.json`, fetchImpl),
     fetchBuffer(`${baseUrl}/database.json.sig`, fetchImpl),
   ]);
-  // 1. Firma ANTES de parsear nada.
+  // 1. Signature BEFORE parsing anything.
   if (!knownDb.verifySignature(dataBuf, sigBuf.toString('utf-8').trim(), trustedKeys)) {
-    throw new UpdateError('la firma de la base descargada NO es valida: se descarta', 'firma');
+    throw new UpdateError('the signature of the downloaded database is NOT valid: it is discarded', 'firma');
   }
-  // 2. Forma, serial (anti-rollback) y compatibilidad con esta version.
+  // 2. Shape, serial (anti-rollback) and compatibility with this version.
   let candidate;
   try {
     candidate = JSON.parse(dataBuf.toString('utf-8'));
   } catch {
-    throw new UpdateError('la base descargada no es JSON valido', 'formato');
+    throw new UpdateError('the downloaded database is not valid JSON', 'formato');
   }
-  // Misma base que ya tenemos (con firma valida): no es un error, ya esta al dia.
+  // The same database we already have (with a valid signature): not an error, it is already up to date.
   if (Number.isInteger(candidate.serial) && candidate.serial === current.serial) {
-    return { aplicada: false, serial: current.serial, motivo: 'ya tenes la ultima base publicada' };
+    return { aplicada: false, serial: current.serial, motivo: 'you already have the latest published database' };
   }
   const verdict = knownDb.checkUpdateAcceptable(candidate, current, forgeVersion);
-  if (!verdict.ok) throw new UpdateError(`base rechazada: ${verdict.motivo}`, 'rechazada');
-  // 3. Recien ahora se toca el disco: la anterior queda como .prev.
+  if (!verdict.ok) throw new UpdateError(`database rejected: ${verdict.motivo}`, 'rechazada');
+  // 3. Only now is the disk touched: the previous one stays as .prev.
   if (fs.existsSync(cachePath)) {
     fs.copyFileSync(cachePath, path.join(path.dirname(cachePath), 'database.prev.json'));
   }
@@ -116,13 +116,13 @@ async function applyUpdate({
   return { aplicada: true, serial: candidate.serial, serialAnterior: current.serial };
 }
 
-// ---- estado del chequeo automatico (en memoria) ----
+// ---- state of the automatic check (in memory) ----
 let lastCheck = null;
 
 async function runCheck({ fetchImpl = fetch, config = getConfig(), trustedKeys = loadTrustedKeys() } = {}) {
   const at = new Date().toISOString();
   if (!trustedKeys.length) {
-    lastCheck = { at, ok: false, motivo: 'sin claves de confianza (build de desarrollo): no se consulta' };
+    lastCheck = { at, ok: false, motivo: 'no trusted keys (development build): no query is made' };
     return lastCheck;
   }
   try {
@@ -139,10 +139,10 @@ function getLastCheck() {
   return lastCheck;
 }
 
-// Al abrir la app y una vez al dia. Solo consulta; aplicar es siempre manual.
+// On opening the app and once a day. It only queries; applying is always manual.
 function startScheduler({ config = getConfig(), trustedKeys = loadTrustedKeys(), fetchImpl = fetch } = {}) {
   if (!config.chequeoAutomatico) return null;
-  if (!trustedKeys.length) return null; // sin claves no hay nada que consultar
+  if (!trustedKeys.length) return null; // without keys there is nothing to query
   const run = () => runCheck({ fetchImpl, config, trustedKeys }).catch(() => {});
   const first = setTimeout(run, 5000);
   const every = setInterval(run, CHECK_EVERY_MS);

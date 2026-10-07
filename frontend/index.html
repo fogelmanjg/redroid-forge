@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="es">
+<html lang="en">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -10,23 +10,24 @@
   <header>
     <h1>redroid-forge</h1>
     <nav>
-      <button class="tab-btn active" data-tab="instances">Instancias</button>
-      <button class="tab-btn" data-tab="modules">Módulos</button>
-      <button class="tab-btn" data-tab="doctor">Doctor</button>
-      <button class="tab-btn" data-tab="help">Ayuda</button>
+      <button class="tab-btn active" data-tab="instances" data-i18n="nav.instances">Instances</button>
+      <button class="tab-btn" data-tab="modules" data-i18n="nav.modules">Modules</button>
+      <button class="tab-btn" data-tab="doctor" data-i18n="nav.doctor">Doctor</button>
+      <button class="tab-btn" data-tab="help" data-i18n="nav.help">Help</button>
     </nav>
+    <button id="btn-lang" class="secondary" title="Language / Idioma">ES</button>
   </header>
 
   <main>
     <section id="tab-instances" class="tab active">
       <div class="toolbar">
-        <button id="btn-new-instance">+ Nueva instancia</button>
-        <button id="btn-refresh-instances">Actualizar</button>
+        <button id="btn-new-instance" data-i18n="instances.new">+ New instance</button>
+        <button id="btn-refresh-instances" data-i18n="common.refresh">Refresh</button>
       </div>
       <table id="instances-table">
         <thead>
           <tr>
-            <th>Nombre</th><th>Imagen</th><th>Estado</th><th>ADB</th><th>Android ID (GApps)</th><th>Acciones</th>
+            <th data-i18n="instances.col.name">Name</th><th data-i18n="instances.col.image">Image</th><th data-i18n="instances.col.status">Status</th><th data-i18n="instances.col.adb">ADB</th><th data-i18n="instances.col.androidId">Android ID (GApps)</th><th data-i18n="instances.col.actions">Actions</th>
           </tr>
         </thead>
         <tbody></tbody>
@@ -34,57 +35,52 @@
     </section>
 
     <section id="tab-modules" class="tab">
-      <p class="tab-intro">
-        Catálogo de módulos declarados por manifest (sección 5 de
-        <code>docs/REQUIREMENTS.md</code>). Los que no son 100% software
-        libre necesitan aceptar su contrato antes de que el backend los
-        active — ver la columna Estado.
-      </p>
+      <p class="tab-intro" data-i18n="modules.intro"></p>
       <div class="toolbar">
-        <button id="btn-refresh-modules">Actualizar</button>
+        <button id="btn-refresh-modules" data-i18n="common.refresh">Refresh</button>
       </div>
       <ul id="modules-list" class="doctor-list"></ul>
     </section>
 
     <section id="tab-doctor" class="tab">
       <div class="toolbar">
-        <button id="btn-run-doctor">Correr diagnostico</button>
+        <button id="btn-run-doctor" data-i18n="doctor.run">Run diagnostics</button>
       </div>
       <ul id="doctor-list" class="doctor-list"></ul>
     </section>
 
     <section id="tab-help" class="tab">
-      <h2>Como llevar la imagen a esta PC</h2>
-      <p>Si la imagen redroid se armo en otra maquina:</p>
-      <pre>docker save &lt;imagen&gt; | gzip &gt; imagen.tar.gz
-# copiar el archivo a esta PC, despues:
-gunzip -c imagen.tar.gz | docker load</pre>
-      <p>Si esta pusheada a un registry propio: <code>docker pull &lt;tu-registry&gt;/&lt;imagen&gt;</code></p>
+      <h2 data-i18n="help.imageTitle"></h2>
+      <p data-i18n="help.imageIntro"></p>
+      <pre>docker save &lt;image&gt; | gzip &gt; image.tar.gz
+<span data-i18n="help.imageCopy"></span>
+gunzip -c image.tar.gz | docker load</pre>
+      <p><span data-i18n="help.registry"></span> <code>docker pull &lt;your-registry&gt;/&lt;image&gt;</code></p>
 
-      <h2>Requisitos de host</h2>
+      <h2 data-i18n="help.reqTitle"></h2>
       <ul>
-        <li>Docker instalado y corriendo.</li>
-        <li>binderfs montado en <code>/dev/binderfs</code> (ver tab Doctor para el comando exacto).</li>
-        <li><code>mac80211_hwsim</code> disponible si vas a usar imagenes con WiFi falso.</li>
-        <li>GPU + drivers si queres aceleracion (<code>gpuMode=host</code>).</li>
+        <li data-i18n="help.req1"></li>
+        <li data-i18n="help.req2"></li>
+        <li data-i18n="help.req3"></li>
+        <li data-i18n="help.req4"></li>
       </ul>
 
-      <h2>Levantar este manager</h2>
+      <h2 data-i18n="help.startTitle"></h2>
       <pre>docker compose up -d --build</pre>
-      <p>La tab Doctor va a decirte exactamente que falta configurar en este host, con el comando para arreglarlo.</p>
+      <p data-i18n="help.startNote"></p>
     </section>
   </main>
 
   <dialog id="new-instance-dialog">
     <form id="new-instance-form" method="dialog">
-      <h2>Nueva instancia</h2>
-      <label>Nombre <input name="name" required pattern="[a-z0-9-]+" placeholder="mi-instancia" /></label>
-      <label>Imagen
+      <h2 data-i18n="new.title">New instance</h2>
+      <label><span data-i18n="new.name">Name</span> <input name="name" required pattern="[a-z0-9-]+" placeholder="my-instance" data-i18n-placeholder="new.namePlaceholder" /></label>
+      <label><span data-i18n="new.image">Image</span>
         <select name="imageId" id="image-select"></select>
       </label>
       <div class="dialog-actions">
-        <button type="button" id="btn-cancel-new-instance">Cancelar</button>
-        <button type="submit">Crear</button>
+        <button type="button" id="btn-cancel-new-instance" data-i18n="common.cancel">Cancel</button>
+        <button type="submit" data-i18n="new.create">Create</button>
       </div>
     </form>
   </dialog>
@@ -97,19 +93,20 @@ gunzip -c imagen.tar.gz | docker load</pre>
       <p id="contract-licencia" class="contract-meta" hidden></p>
       <p id="contract-origen" class="contract-meta" hidden></p>
       <p id="contract-compatible" class="contract-meta" hidden></p>
-      <h3>Qué toca / permisos que declara</h3>
+      <h3 data-i18n="contract.touches">What it touches / permissions it declares</h3>
       <ul id="contract-quetoca"></ul>
       <label class="contract-checkbox">
         <input type="checkbox" id="contract-checkbox" required />
-        Leí y entiendo lo anterior, y acepto activar este módulo.
+        <span data-i18n="contract.confirm"></span>
       </label>
       <div class="dialog-actions">
-        <button type="button" id="btn-cancel-contract">Cancelar</button>
-        <button type="submit" id="btn-accept-contract">Aceptar</button>
+        <button type="button" id="btn-cancel-contract" data-i18n="common.cancel">Cancel</button>
+        <button type="submit" id="btn-accept-contract" data-i18n="contract.accept">Accept</button>
       </div>
     </form>
   </dialog>
 
+  <script src="i18n.js"></script>
   <script src="contracts.js"></script>
   <script src="app.js"></script>
 </body>

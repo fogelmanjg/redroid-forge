@@ -2,13 +2,13 @@ const runtime = require('./dockerRuntime');
 
 function log(msg) { console.log(`[deviceProfile] ${msg}`); }
 
-// Porta DEVICE_PROFILES/buildDeviceProfileScript de jg-dashboard
-// (redroid.service.ts) -- ver docs/ROADMAP.md Fase 3 paso 1. Play Store
-// filtra que apps/juegos mostrar segun la identidad de dispositivo
-// autoreportada (brand/manufacturer/model/fingerprint); la identidad
-// generica "redroid" la rechazan algunos. 'samsung' imita un Galaxy A55 real
-// aceptado. Nunca se toca ro.hardware/ro.boot.hardware -- son las que cargan
-// el HAL de GPU, tocarlas rompe el renderizado.
+// Ports DEVICE_PROFILES/buildDeviceProfileScript from jg-dashboard
+// (redroid.service.ts) -- see docs/ROADMAP.md Phase 3 step 1. The Play Store
+// filters which apps/games to show according to the self-reported device
+// identity (brand/manufacturer/model/fingerprint); some reject the generic
+// "redroid" identity. 'samsung' mimics a real, accepted Galaxy A55.
+// ro.hardware/ro.boot.hardware are never touched -- they are the ones that load
+// the GPU HAL, touching them breaks rendering.
 const DEFAULT_PROFILE = 'redroid';
 
 const DEVICE_PROFILES = {
@@ -17,10 +17,11 @@ const DEVICE_PROFILES = {
   },
 };
 
-// Dos convenciones de ruta segun generacion de imagen: Android 15 suma /etc/
-// bajo product y system_ext, Android 11 no -- se prueban todas, el script
-// saltea con `[ -f ]` las que no existan en la imagen puntual (mismo criterio
-// que jg-dashboard, confirmado ahi con `find / -iname build.prop`).
+// Two path conventions depending on the image generation: Android 15 adds /etc/
+// under product and system_ext, Android 11 does not -- all of them are tried, the
+// script skips with `[ -f ]` the ones that do not exist in the particular image
+// (the same criterion as jg-dashboard, confirmed there with `find / -iname
+// build.prop`).
 const BUILD_PROP_FILES = [
   '/system/build.prop',
   '/system/system_ext/build.prop',
@@ -35,33 +36,32 @@ const BUILD_PROP_FILES = [
 
 const BACKUP_SUFFIX = '.rf-pre-spoof.bak';
 
-// Hibrido: identidad del perfil (brand/device/model) + build id/version real
-// de la imagen -- copiar el fingerprint literal de un dispositivo real
-// generaria una inconsistencia interna entre el SDK real de la imagen y el
-// que declara el fingerprint (ver memoria del proyecto de origen).
+// Hybrid: the profile's identity (brand/device/model) + the image's real build
+// id/version -- copying a real device's literal fingerprint would create an
+// internal inconsistency between the image's real SDK and the one the fingerprint
+// declares (see the originating project's notes).
 function androidFingerprint(profile, androidVersion) {
   return `${profile.brand}/${profile.device}/${profile.device}:${androidVersion}`
     + '/BP1A.250505.005.D1/eng.redroid-forge:userdebug/test-keys';
 }
 
-// Arma el script de shell que edita (perfil != null) o revierte (perfil ==
-// null) build.prop. Antes de la primera mutacion de cada archivo lo respalda
-// a <archivo>.rf-pre-spoof.bak dentro del propio contenedor -- asi revertir
-// al perfil 'redroid' restaura el original real en vez de reconstruir
-// valores por defecto (que varian por imagen/arquitectura).
+// Builds the shell script that edits (profile != null) or reverts (profile ==
+// null) build.prop. Before the first mutation of each file it backs it up to
+// <file>.rf-pre-spoof.bak inside the container itself -- so reverting to the
+// 'redroid' profile restores the real original instead of rebuilding default
+// values (which vary per image/architecture).
 //
-// El exit code final tiene que reflejar si de verdad se pudo escribir algo,
-// no solo "el script no crasheo" -- runtime.exec() ya rechaza si el exit
-// code es != 0 (ver dockerRuntime.js), asi que de esto depende que
-// applyDeviceProfile() tire error quiere de verdad. La version anterior
-// terminaba cada linea en "; true" para que un archivo AUSENTE (legitimo,
-// no toda imagen tiene todas las particiones) no tumbara el script -- pero
-// eso de paso neutralizaba tambien un `sed` que fallara de verdad (ej. el
-// remount de arriba fallo y el filesystem sigue de solo lectura): el script
-// terminaba en exit 0 igual, y el caller lo reportaba como aplicado con
-// exito sin haber tocado nada (hallazgo real de code review, PR #3). Ahora
-// se acumula el resultado real en la variable de shell `ok`, y solo el
-// "archivo ausente" se tolera sin tocarla.
+// The final exit code has to reflect whether something could really be written,
+// not just "the script did not crash" -- runtime.exec() already rejects if the
+// exit code is != 0 (see dockerRuntime.js), so applyDeviceProfile() really
+// throwing an error depends on this. The previous version ended every line with
+// "; true" so that an ABSENT file (legitimate, not every image has every
+// partition) would not bring the script down -- but that also neutralized a
+// `sed` that really failed (e.g. the remount above failed and the filesystem is
+// still read-only): the script ended in exit 0 anyway, and the caller reported it
+// as successfully applied without having touched anything (a real code-review
+// finding, PR #3). Now the real result is accumulated in the shell variable `ok`,
+// and only the "absent file" is tolerated without touching it.
 function buildDeviceProfileScript(profile, androidVersion) {
   const lines = ['ok=1', 'mount -o remount,rw / || ok=0'];
   for (const file of BUILD_PROP_FILES) {
@@ -74,22 +74,22 @@ function buildDeviceProfileScript(profile, androidVersion) {
         `-e 's/^(ro\\.[a-zA-Z0-9_.]*\\.device)=.*/\\1=${profile.device}/'`,
         `-e 's/^(ro\\.[a-zA-Z0-9_.]*\\.name)=.*/\\1=${profile.name}/'`,
         `-e 's/^(ro\\.[a-zA-Z0-9_.]*\\.model)=.*/\\1=${profile.model}/'`,
-        // delimitador # (no /): el fingerprint trae barras sin escapar
+        // delimiter # (not /): the fingerprint carries unescaped slashes
         `-e 's#^(ro\\.[a-zA-Z0-9_.]*\\.fingerprint)=.*#\\1=${fingerprint}#'`,
       ].join(' ');
-      // Si el archivo no existe: se saltea sin tocar `ok` (legitimo). Si
-      // existe: el backup y el sed tienen que salir bien los dos, sino
-      // `ok=0` -- una falla real ya no queda escondida detras de un ";true".
+      // If the file does not exist: it is skipped without touching `ok`
+      // (legitimate). If it exists: the backup and the sed both have to succeed,
+      // otherwise `ok=0` -- a real failure no longer stays hidden behind a ";true".
       lines.push(`[ -f '${file}' ] && { { [ -f '${backup}' ] || cp '${file}' '${backup}'; } && sed -i -E ${subs} '${file}' || ok=0; }`);
     } else {
-      // Sin backup no hay nada que revertir para este archivo -- no es una
-      // falla (puede que esa particion nunca haya tenido spoof aplicado).
+      // Without a backup there is nothing to revert for this file -- it is not a
+      // failure (that partition may never have had a spoof applied).
       lines.push(`[ -f '${backup}' ] && { cp '${backup}' '${file}' || ok=0; }`);
     }
   }
-  // Exit code final = si `ok` sigue en 1 -- lo unico que puede haberlo
-  // bajado a 0 es un remount/cp/sed que de verdad fallo con el archivo
-  // presente, nunca un archivo ausente.
+  // Final exit code = whether `ok` is still 1 -- the only thing that can have
+  // lowered it to 0 is a remount/cp/sed that really failed with the file present,
+  // never an absent file.
   lines.push('[ "$ok" = "1" ]');
   return lines.join('\n');
 }
@@ -98,22 +98,21 @@ function resolveProfile(profileKey) {
   const key = profileKey || DEFAULT_PROFILE;
   if (key === DEFAULT_PROFILE) return { key, profile: null };
   const profile = DEVICE_PROFILES[key];
-  if (!profile) throw new Error(`Perfil de dispositivo desconocido: "${key}"`);
+  if (!profile) throw new Error(`Unknown device profile: "${key}"`);
   return { key, profile };
 }
 
-// Aplica (perfil nombrado) o revierte (profileKey=undefined/'redroid') un
-// perfil de dispositivo dentro de una instancia YA CORRIENDO -- "mount -o
-// remount,rw /" necesita el overlay que arma el init de Android, no se puede
-// hacer con el contenedor todavia detenido (etapa 4 de ARCHITECTURE.md no
-// aplica aca). Sigue el mismo patron que ensureWifiConnected/
-// ensureEth0Routing en hwsimWifi.js: 'su -c' para actuar como root dentro del
-// contenedor privilegiado.
+// Applies (a named profile) or reverts (profileKey=undefined/'redroid') a device
+// profile inside an ALREADY RUNNING instance -- "mount -o remount,rw /" needs the
+// overlay that Android's init sets up, it cannot be done with the container still
+// stopped (stage 4 of ARCHITECTURE.md does not apply here). It follows the same
+// pattern as ensureWifiConnected/ensureEth0Routing in hwsimWifi.js: 'su -c' to
+// act as root inside the privileged container.
 async function applyDeviceProfile(containerId, androidVersion, profileKey) {
   const { key, profile } = resolveProfile(profileKey);
   const script = buildDeviceProfileScript(profile, androidVersion);
   await runtime.exec(containerId, ['su', '-c', script]);
-  log(`perfil "${key}" aplicado en el contenedor ${containerId}`);
+  log(`profile "${key}" applied in container ${containerId}`);
   return key;
 }
 

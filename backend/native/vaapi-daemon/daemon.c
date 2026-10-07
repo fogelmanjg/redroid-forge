@@ -31,10 +31,10 @@
 #include <va/va_drmcommon.h>
 #include <va/va_enc_h264.h>
 #include <va/va_vpp.h>
-/* Segun la version de Alpine/Debian, libdrm-dev deja drm_fourcc.h en <drm/...> (Alpine 3.24,
- * Debian), solo en <libdrm/...> (Alpine 3.23), o ambos: se cubren los casos (con el -I que
- * agrega el Makefile desde pkg-config). Confirmado el 06/10/2026: server01 tenia una imagen
- * alpine:latest 3.23 en cache y el build fallaba ahi, mientras que en 3.24 compilaba. */
+/* Depending on the Alpine/Debian version, libdrm-dev puts drm_fourcc.h in <drm/...> (Alpine 3.24,
+ * Debian), only in <libdrm/...> (Alpine 3.23), or both: all cases are covered (with the -I that the
+ * Makefile adds from pkg-config). Confirmed on 06/10/2026: server01 had an alpine:latest 3.23 image
+ * cached and the build failed there, while on 3.24 it compiled. */
 #if __has_include(<drm/drm_fourcc.h>)
 #include <drm/drm_fourcc.h>
 #else
@@ -523,18 +523,18 @@ static int convert_rgba_to_nv12(vaapi_state_t *st, VASurfaceID rgba_surface,
     return 0;
 }
 
-/* Normaliza TODOS los start codes Annex-B de un bitstream a 4 bytes
- * (00 00 00 01). Hace falta porque el driver Intel (iHD) emite start codes de
- * 3 bytes (00 00 01) y radeonsi de 4: el parser del CSD de MPEG4Writer (usado
- * por screenrecord y por el muxer MP4 de scrcpy) exige 4 bytes y aborta con
- * "FORTIFY: write: count 18446744073709551615 > SSIZE_MAX" si recibe 3 --
- * confirmado en vivo el 05/10/2026 en un Iris Xe (n02), mientras que el
- * stream crudo (--output-format=h264) decodificaba perfecto. Es seguro hacerlo
- * sobre todo el buffer: por las reglas de emulation-prevention, la secuencia
- * 00 00 01 no puede aparecer dentro del payload de un NAL, asi que cada
- * ocurrencia es un start code. Un 00 00 01 ya precedido por 00 se deja como
- * esta (ya es de 4 bytes, o lleva trailing_zero_8bits).
- * Devuelve un buffer nuevo (malloc) y libera `in`. */
+/* Normalizes ALL the Annex-B start codes of a bitstream to 4 bytes
+ * (00 00 00 01). It is needed because the Intel driver (iHD) emits 3-byte start codes
+ * (00 00 01) and radeonsi 4-byte ones: the CSD parser of MPEG4Writer (used by screenrecord
+ * and by the MP4 muxer of scrcpy) requires 4 bytes and aborts with
+ * "FORTIFY: write: count 18446744073709551615 > SSIZE_MAX" if it receives 3 --
+ * confirmed live on 05/10/2026 on an Iris Xe (n02), while the raw
+ * stream (--output-format=h264) decoded perfectly. It is safe to do it
+ * over the whole buffer: by the emulation-prevention rules, the sequence
+ * 00 00 01 cannot appear inside a NAL payload, so every
+ * occurrence is a start code. A 00 00 01 already preceded by 00 is left as
+ * it is (it is already 4 bytes, or it carries trailing_zero_8bits).
+ * Returns a new buffer (malloc) and frees `in`. */
 static unsigned char *normalize_start_codes(unsigned char *in, size_t n, size_t *out_n) {
     size_t cap = n + n / 3 + 4;
     unsigned char *out = malloc(cap);
@@ -933,18 +933,18 @@ static void handle_decode(int have_decode, int conn_fd) {
 
 #ifdef HAVE_HWDEC
 /* ------------------------------------------------------------------ *
- * hwdec (protocolo v2, ver protocol.h): decode por hardware con estado.
- * Una conexion persistente = una sesion = un hilo. El encode y el decode
- * NVIDIA de arriba siguen atendiendose en serie en el hilo principal.
+ * hwdec (protocol v2, see protocol.h): stateful hardware decode.
+ * One persistent connection = one session = one thread. The encode and the NVIDIA decode
+ * above are still served serially on the main thread.
  * ------------------------------------------------------------------ */
 _Static_assert((int)HWDEC_H264 == (int)VAAPI_HWDEC_CODEC_H264 && (int)HWDEC_HEVC == (int)VAAPI_HWDEC_CODEC_HEVC &&
                (int)HWDEC_VP9 == (int)VAAPI_HWDEC_CODEC_VP9 && (int)HWDEC_VP8 == (int)VAAPI_HWDEC_CODEC_VP8 &&
                (int)HWDEC_MPEG2 == (int)VAAPI_HWDEC_CODEC_MPEG2 && (int)HWDEC_VC1 == (int)VAAPI_HWDEC_CODEC_VC1 &&
                (int)HWDEC_AV1 == (int)VAAPI_HWDEC_CODEC_AV1 && (int)HWDEC_NCODECS == (int)VAAPI_HWDEC_CODEC_COUNT,
-               "los ids de codec de protocol.h y hwdec.h tienen que coincidir");
+               "the codec ids of protocol.h and hwdec.h have to match");
 _Static_assert(sizeof(HwDecRequest) == 16 && sizeof(HwDecFrameHeader) == 24 &&
                sizeof(HwDecResponse) == 8 && sizeof(HwDecCapsResponse) == 176,
-               "layout de protocol.h inesperado (Android y el daemon deben coincidir)");
+               "unexpected protocol.h layout (Android and the daemon must match)");
 
 #define HWDEC_MAX_AU_SIZE (32u * 1024 * 1024)
 
@@ -957,7 +957,7 @@ static int io_read_all(int fd, void *buf, size_t len) {
     size_t got = 0;
     while (got < len) {
         ssize_t n = read(fd, (char *)buf + got, len - got);
-        if (n == 0) return 0;               /* el cliente cerro */
+        if (n == 0) return 0;               /* the client closed */
         if (n < 0) { if (errno == EINTR) continue; return -1; }
         got += (size_t)n;
     }
@@ -980,7 +980,7 @@ static int io_write_all(int fd, const void *buf, size_t len) {
     return 0;
 }
 
-/* Frames pendientes de enviar: [HwDecFrameHeader][bytes] repetido. */
+/* Frames pending to be sent: [HwDecFrameHeader][bytes] repeated. */
 typedef struct {
     unsigned char *buf;
     size_t len, cap;
@@ -1006,10 +1006,10 @@ static int fq_append(FrameQueue *q, const HwDecFrame *f) {
     return 0;
 }
 
-/* Vacia lo que el decoder tenga listo. Devuelve 0, o <0 si hubo un error real. */
-static __thread uint64_t tl_ns_queue;  /* tiempo en fq_append del hilo actual (REDROID_FORGE_HWDEC_STATS) */
+/* Drains whatever the decoder has ready. Returns 0, or <0 if there was a real error. */
+static __thread uint64_t tl_ns_queue;  /* time in fq_append of the current thread (REDROID_FORGE_HWDEC_STATS) */
 
-/* Memoria compartida (memfd) de la sesion hwdec, si el cliente la pidio: los frames se escriben ahi directamente. */
+/* Shared memory (memfd) of the hwdec session, if the client asked for it: the frames are written there directly. */
 typedef struct {
     uint8_t *base;
     size_t cap, off;
@@ -1042,7 +1042,7 @@ static int hwdec_drain(HwDecSession *s, FrameQueue *q) {
     for (;;) {
         int r;
         if (tl_shm) {
-            /* Modo memoria compartida: el frame se baja directo a su lugar; en la cola solo queda el encabezado. */
+            /* Shared memory mode: the frame is downloaded straight into place; only the header stays in the queue. */
             r = hwdec_receive_to(s, &f, tl_shm->base + tl_shm->off, tl_shm->cap - tl_shm->off);
             if (r == HWDEC_AGAIN || r == HWDEC_EOF) return 0;
             if (r < 0) return r;
@@ -1060,7 +1060,7 @@ static int hwdec_drain(HwDecSession *s, FrameQueue *q) {
     }
 }
 
-/* Respuesta de apertura con el fd de la memoria compartida adjunto (SCM_RIGHTS). */
+/* Open response with the shared memory fd attached (SCM_RIGHTS). */
 static int send_open_resp_fd(int sock, const HwDecOpenResponse *resp, int fd) {
     struct iovec iov = {.iov_base = (void *)resp, .iov_len = sizeof(*resp)};
     union {
@@ -1079,7 +1079,7 @@ static int send_open_resp_fd(int sock, const HwDecOpenResponse *resp, int fd) {
     return n == (ssize_t)sizeof(*resp) ? 0 : -1;
 }
 
-#define HWDEC_SHM_MIB 512u  /* memoria virtual: solo se toca (y ocupa RAM) lo que escriben los frames */
+#define HWDEC_SHM_MIB 512u  /* virtual memory: only what the frames write is touched (and takes up RAM) */
 
 static void *hwdec_stream_thread(void *arg) {
     int fd = (int)(intptr_t)arg;
@@ -1088,8 +1088,8 @@ static void *hwdec_stream_thread(void *arg) {
     HwDecSession *s = NULL;
     unsigned char *au = NULL;
     size_t au_cap = 0;
-    /* Configuracion del stream (VAAPI_HWDEC_MSG_CONFIG): pendiente de anteponer al proximo AU, y la ultima
-     * conocida para repetirla tras un reinicio del decoder. */
+    /* Stream configuration (VAAPI_HWDEC_MSG_CONFIG): pending to be prepended to the next AU, and the last
+     * known one to repeat it after a decoder restart. */
     unsigned char *cfg = NULL, *last_cfg = NULL, *joined = NULL;
     size_t cfg_len = 0, last_cfg_len = 0, joined_cap = 0;
     int need_replay = 1;
@@ -1108,8 +1108,8 @@ static void *hwdec_stream_thread(void *arg) {
         goto done;
     }
     if (open_req.flags & VAAPI_HWDEC_OPEN_SHM) {
-        /* El cliente sabe usar memoria compartida: memfd + mmap, y el fd viaja con la respuesta. Si algo falla
-         * se sigue con frames inline (el cliente lo sabe por shm_mib == 0). */
+        /* The client can use shared memory: memfd + mmap, and the fd travels with the response. If something fails
+         * it goes on with inline frames (the client knows by shm_mib == 0). */
         const size_t cap = (size_t)HWDEC_SHM_MIB << 20;
         memfd = (int)syscall(SYS_memfd_create, "redroid-forge-hwdec", 1u /* MFD_CLOEXEC */);
         if (memfd >= 0 && ftruncate(memfd, (off_t)cap) == 0) {
@@ -1128,17 +1128,17 @@ static void *hwdec_stream_thread(void *arg) {
     } else if (io_write_all(fd, &open_resp, sizeof(open_resp)) != 0) {
         goto done;
     }
-    fprintf(stderr, "hwdec: sesion abierta (%s%s)\n", hwdec_codec_name((HwDecCodec)open_req.codec),
-            shm.base ? ", memoria compartida" : "");
+    fprintf(stderr, "hwdec: session open (%s%s)\n", hwdec_codec_name((HwDecCodec)open_req.codec),
+            shm.base ? ", shared memory" : "");
 
     for (;;) {
         HwDecRequest rq;
         const uint64_t tw0 = stats ? mono_ns() : 0;
-        if (io_read_all(fd, &rq, sizeof(rq)) != 1) break;   /* cerro la conexion: se cierra la sesion */
+        if (io_read_all(fd, &rq, sizeof(rq)) != 1) break;   /* the connection closed: the session is closed */
         if (stats) ns_wait += mono_ns() - tw0;
         FrameQueue q = {0};
         int status = 0, stop = 0;
-        shm.off = 0;  /* los frames de la respuesta anterior ya los copio el cliente */
+        shm.off = 0;  /* the client has already copied the frames of the previous response */
 
         switch (rq.msg) {
         case VAAPI_HWDEC_MSG_AU: {
@@ -1150,14 +1150,14 @@ static void *hwdec_stream_thread(void *arg) {
                 au_cap = rq.size;
             }
             if (io_read_all(fd, au, rq.size) != 1) { stop = 1; status = -4; break; }
-            /* Diagnostico (REDROID_FORGE_HWDEC_DEBUG=1): primeros bytes de cada access unit que llega. Sirve
-             * para ver en que formato lo entrega Android (Annex-B con 00 00 00 01, o con prefijo de largo). */
+            /* Diagnostics (REDROID_FORGE_HWDEC_DEBUG=1): first bytes of every access unit that arrives. It is used
+             * to see in what format Android delivers it (Annex-B with 00 00 00 01, or with a length prefix). */
             if (getenv("REDROID_FORGE_HWDEC_DEBUG")) {
                 char hex[3 * 24 + 1] = {0};
                 for (uint32_t i = 0; i < rq.size && i < 24; i++) snprintf(hex + 3 * i, 4, "%02x ", au[i]);
                 fprintf(stderr, "hwdec: AU pts=%lld size=%u: %s\n", (long long)rq.pts, rq.size, hex);
             }
-            /* Antepone la configuracion (SPS/PPS) pendiente, o la ultima conocida si el decoder se reinicio. */
+            /* Prepends the pending configuration (SPS/PPS), or the last known one if the decoder restarted. */
             const unsigned char *send_buf = au;
             size_t send_len = rq.size;
             const unsigned char *pre = cfg_len ? cfg : (need_replay ? last_cfg : NULL);
@@ -1186,12 +1186,12 @@ static void *hwdec_stream_thread(void *arg) {
         }
         case VAAPI_HWDEC_MSG_CONFIG: {
             if (rq.size == 0 || rq.size > HWDEC_MAX_AU_SIZE) { status = -2; stop = 1; break; }
-            /* Android entrega los parametros en VARIOS buffers de configuracion (H.264: primero el SPS y
-             * despues el PPS; HEVC: VPS, SPS, PPS). Mientras ningun access unit los haya consumido se
-             * ACUMULAN; el primer CONFIG despues de un AU empieza un juego nuevo. */
-            /* Solo H.264 y HEVC llevan la configuracion DENTRO del bitstream (SPS/PPS/VPS en Annex-B) y necesitan
-             * que se antepongan. En VP8/VP9/AV1 el "CSD" de Android es el CodecPrivate del contenedor (para VP9
-             * empieza con 0x01, no con la marca de sincronizacion 0x49): anteponerlo vuelve invalido el frame. */
+            /* Android delivers the parameters in SEVERAL configuration buffers (H.264: first the SPS and
+             * then the PPS; HEVC: VPS, SPS, PPS). As long as no access unit has consumed them they are
+             * ACCUMULATED; the first CONFIG after an AU starts a new set. */
+            /* Only H.264 and HEVC carry the configuration INSIDE the bitstream (SPS/PPS/VPS in Annex-B) and need it
+             * prepended. In VP8/VP9/AV1 Android's "CSD" is the container's CodecPrivate (for VP9
+             * it starts with 0x01, not with the 0x49 sync marker): prepending it makes the frame invalid. */
             if (open_req.codec != VAAPI_HWDEC_CODEC_H264 && open_req.codec != VAAPI_HWDEC_CODEC_HEVC) {
                 unsigned char *skip = malloc(rq.size);
                 if (!skip) { status = -3; stop = 1; break; }
@@ -1220,9 +1220,9 @@ static void *hwdec_stream_thread(void *arg) {
         case VAAPI_HWDEC_MSG_EOS:
             status = hwdec_send_eos(s);
             if (status == 0) status = hwdec_drain(s, &q);
-            /* Despues de vaciar, libavcodec queda en estado EOF y rechaza mas entrada. El componente de
-             * Android tambien pide vaciar a mitad de stream (drain sin EOS, p. ej. al cambiar de
-             * resolucion), asi que el decoder se reinicia para poder seguir decodificando. */
+            /* After draining, libavcodec is left in the EOF state and rejects more input. Android's
+             * component also asks to drain mid-stream (drain without EOS, e.g. on a change of
+             * resolution), so the decoder is restarted to be able to keep decoding. */
             hwdec_flush(s);
             need_replay = 1;
             break;
@@ -1249,8 +1249,8 @@ done:
     if (memfd >= 0) close(memfd);
     if (stats && nresp) {
         fprintf(stderr,
-                "hwdec-stats[daemon]: %llu respuestas | por respuesta (ms): espera_de_android=%.2f armar_cola=%.2f "
-                "escritura_al_socket=%.2f\n",
+                "hwdec-stats[daemon]: %llu responses | per response (ms): android_wait=%.2f queue_build=%.2f "
+                "socket_write=%.2f\n",
                 (unsigned long long)nresp, (double)ns_wait / nresp / 1e6, (double)tl_ns_queue / nresp / 1e6,
                 (double)ns_write / nresp / 1e6);
     }
@@ -1279,7 +1279,7 @@ static void handle_hwdec_caps(int conn_fd) {
 }
 #endif /* HAVE_HWDEC */
 
-/* Devuelve 1 si la conexion pasa a otro hilo (que la cierra), 0 si hay que cerrarla aca. */
+/* Returns 1 if the connection moves to another thread (which closes it), 0 if it has to be closed here. */
 static int handle_connection(vaapi_state_t *st, int have_encode, int have_decode, int conn_fd) {
     VaapiCommand cmd;
     ssize_t n = read(conn_fd, &cmd, sizeof(cmd));
@@ -1311,8 +1311,8 @@ static int handle_connection(vaapi_state_t *st, int have_encode, int have_decode
 #else
     case VAAPI_CMD_HWDEC:
     case VAAPI_CMD_HWDEC_CAPS:
-        fprintf(stderr, "hwdec pedido, pero este daemon se compilo sin HAVE_HWDEC\n");
-        break; /* se cierra la conexion: el cliente lo ve como un rechazo limpio */
+        fprintf(stderr, "hwdec requested, but this daemon was compiled without HAVE_HWDEC\n");
+        break; /* the connection is closed: the client sees it as a clean rejection */
 #endif
     default:
         fprintf(stderr, "handle_connection: unknown command tag %d\n", (int)cmd);
@@ -1350,12 +1350,12 @@ int main(void) {
         HwDecCaps caps;
         have_hwdec = (hwdec_probe(hwdec_node(), &caps) == 0);
         if (have_hwdec) {
-            fprintf(stderr, "hwdec: %s; decodifica por hardware:", caps.driver);
+            fprintf(stderr, "hwdec: %s; decodes in hardware:", caps.driver);
             for (int i = 0; i < HWDEC_NCODECS; i++)
                 if (caps.supported[i]) fprintf(stderr, " %s%s", hwdec_codec_name((HwDecCodec)i), caps.supported_10bit[i] ? "(+10b)" : "");
             fputc('\n', stderr);
         } else {
-            fprintf(stderr, "hwdec: este host no ofrece decode por hardware via VA-API\n");
+            fprintf(stderr, "hwdec: this host offers no hardware decode through VA-API\n");
         }
     }
 #endif

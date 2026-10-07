@@ -1,7 +1,7 @@
 const Docker = require('dockerode');
 
-// Adapter puro sobre dockerode — porta container-runtime.service.ts de
-// plenum-redroid, sin el resto de sus dependencias.
+// A pure adapter over dockerode — it ports container-runtime.service.ts from
+// plenum-redroid, without the rest of its dependencies.
 const docker = new Docker({ socketPath: '/var/run/docker.sock' });
 
 async function listLocalImageTags() {
@@ -13,10 +13,10 @@ async function listLocalImageTags() {
   return tags;
 }
 
-// Redroid necesita acceso directo a /dev/binder* (montado via binds) y, para
-// gpuMode=host, al resto de los dispositivos de GPU del host — plenum-redroid
-// resuelve esto con Privileged:true en vez de listar /dev/dri a mano (ver
-// instance-orchestrator.service.ts:170), se mantiene el mismo criterio acá.
+// Redroid needs direct access to /dev/binder* (mounted via binds) and, for
+// gpuMode=host, to the rest of the host's GPU devices — plenum-redroid solves
+// this with Privileged:true instead of listing /dev/dri by hand (see
+// instance-orchestrator.service.ts:170), and the same criterion is kept here.
 async function create({ name, image, cmd, binds, adbPort, memoryMb }) {
   const container = await docker.createContainer({
     name,
@@ -38,7 +38,7 @@ async function start(containerId) {
   try {
     await docker.getContainer(containerId).start();
   } catch (e) {
-    if (e.statusCode !== 304) throw e; // 304 = ya estaba corriendo
+    if (e.statusCode !== 304) throw e; // 304 = it was already running
   }
 }
 
@@ -58,8 +58,8 @@ async function remove(containerId, { force = false } = {}) {
   await c.remove({ force, v: true });
 }
 
-// `docker rm -v` solo borra volumenes anonimos — los nombrados (como los que
-// usa este manager, uno por instancia) hay que borrarlos aparte.
+// `docker rm -v` only deletes anonymous volumes — the named ones (like those this
+// manager uses, one per instance) have to be deleted separately.
 async function removeVolume(name) {
   await docker.getVolume(name).remove().catch((e) => {
     if (e.statusCode !== 404) throw e;
@@ -80,9 +80,9 @@ async function getBridgeIp(containerId) {
   return info.NetworkSettings?.Networks?.bridge?.IPAddress;
 }
 
-// Equivalente a `docker exec <containerId> <cmd>` pero vía dockerode en vez
-// de shellear al CLI de docker (no está instalado en la imagen del manager).
-// Rechaza si el comando termina con exit code != 0, igual que el CLI.
+// Equivalent to `docker exec <containerId> <cmd>` but through dockerode instead
+// of shelling out to the docker CLI. It rejects if the command ends with an exit
+// code != 0, just like the CLI.
 async function exec(containerId, cmd, timeoutMs = 15000) {
   const e = await docker.getContainer(containerId).exec({
     Cmd: cmd,
@@ -99,7 +99,7 @@ async function exec(containerId, cmd, timeoutMs = 15000) {
   });
   const { ExitCode } = await e.inspect();
   if (ExitCode !== 0) {
-    throw Object.assign(new Error(`exec "${cmd.join(' ')}" salio con codigo ${ExitCode}: ${out}`), { exitCode: ExitCode, output: out });
+    throw Object.assign(new Error(`exec "${cmd.join(' ')}" exited with code ${ExitCode}: ${out}`), { exitCode: ExitCode, output: out });
   }
   return out;
 }
@@ -115,11 +115,10 @@ async function ensureImage(image) {
   });
 }
 
-// Corre un contenedor de un solo uso hasta que termina y devuelve su stdout —
-// equivalente a `docker run --rm ...` pero via dockerode (el CLI no esta
-// instalado en la imagen del manager). Tty:true evita el framing binario
-// multiplexado que trae container.logs() para stdout/stderr separados, que
-// acá no hace falta distinguir.
+// Runs a single-use container until it finishes and returns its stdout —
+// equivalent to `docker run --rm ...` but through dockerode. Tty:true avoids the
+// multiplexed binary framing that container.logs() brings for separate
+// stdout/stderr, which does not need to be distinguished here.
 async function runEphemeral(image, cmd, binds, timeoutMs = 30000) {
   await ensureImage(image);
   const container = await docker.createContainer({
