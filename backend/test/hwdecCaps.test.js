@@ -7,7 +7,7 @@ const path = require('path');
 const hwAccel = require('../src/lib/hwAccel');
 const { addCodecsToXml } = require('../src/modules/hwenc/integrate');
 
-// Respuesta del daemon (HwDecCapsResponse de protocol.h, 176 bytes).
+// The daemon's response (HwDecCapsResponse of protocol.h, 176 bytes).
 function capsResponse({ status = 0, mask = 0, mask10 = 0, driver = 'Mesa test' } = {}) {
   const b = Buffer.alloc(176);
   b.writeInt32LE(status, 0);
@@ -18,20 +18,20 @@ function capsResponse({ status = 0, mask = 0, mask10 = 0, driver = 'Mesa test' }
 }
 const bit = (...idx) => idx.reduce((m, i) => m | (1 << i), 0);
 
-test('parseHwdecCaps: solo devuelve los codecs que tienen componente en Android', () => {
-  // h264(0) hevc(1) vp9(2) vp8(3) mpeg2(4) vc1(5) av1(6): vp8/mpeg2/vc1/av1 no tienen componente todavia
+test('parseHwdecCaps: it only returns the codecs that have a component in Android', () => {
+  // h264(0) hevc(1) vp9(2) vp8(3) mpeg2(4) vc1(5) av1(6): vp8/mpeg2/vc1/av1 have no component yet
   const r = hwAccel.parseHwdecCaps(capsResponse({ mask: bit(0, 1, 2, 3, 4, 5, 6), mask10: bit(1, 2, 6) }));
   assert.deepStrictEqual(r.codecs.map((c) => c.id), ['h264', 'hevc', 'vp9']);
   assert.deepStrictEqual(r.codecs.map((c) => c.tenBit), [false, true, true]);
   assert.strictEqual(r.driver, 'Mesa test');
 });
 
-test('parseHwdecCaps: Polaris (h264 + hevc) no ofrece vp9', () => {
+test('parseHwdecCaps: Polaris (h264 + hevc) does not offer vp9', () => {
   const r = hwAccel.parseHwdecCaps(capsResponse({ mask: bit(0, 1, 4, 5), mask10: bit(1) }));
   assert.deepStrictEqual(r.codecs.map((c) => c.id), ['h264', 'hevc']);
 });
 
-test('parseHwdecCaps: status de error o respuesta corta = ningun codec', () => {
+test('parseHwdecCaps: an error status or a short response = no codec', () => {
   assert.deepStrictEqual(hwAccel.parseHwdecCaps(capsResponse({ status: -1, mask: bit(0) })).codecs, []);
   assert.strictEqual(hwAccel.parseHwdecCaps(Buffer.alloc(10)), null);
 });
@@ -43,7 +43,7 @@ async function withServer(handler, fn) {
   try { await fn(sock); } finally { server.close(); }
 }
 
-test('queryHwdecCaps: habla el protocolo (envia el tag 4) y entiende la respuesta', async () => {
+test('queryHwdecCaps: speaks the protocol (it sends tag 4) and understands the response', async () => {
   let tag;
   await withServer((c) => {
     c.once('data', (d) => { tag = d.readUInt32LE(0); c.end(capsResponse({ mask: bit(0, 2) })); });
@@ -54,7 +54,7 @@ test('queryHwdecCaps: habla el protocolo (envia el tag 4) y entiende la respuest
   assert.strictEqual(tag, 4);
 });
 
-test('queryHwdecCaps: daemon sin HWDEC (cierra sin responder), caido o mudo = ningun decoder', async () => {
+test('queryHwdecCaps: a daemon without HWDEC (it closes without answering), down or mute = no decoder', async () => {
   await withServer((c) => c.end(), async (sock) => {
     assert.deepStrictEqual((await hwAccel.queryHwdecCaps({ socketPath: sock })).codecs, []);
   });
@@ -77,7 +77,7 @@ const DEC = [
   { name: 'c2.hardware.decoder.hevc', type: 'video/hevc' },
 ];
 
-test('addCodecsToXml: agrega el encoder y solo los decoders del host', () => {
+test('addCodecsToXml: adds the encoder and only the host\'s decoders', () => {
   const out = addCodecsToXml(XML, DEC);
   assert.match(out, /c2\.hardware\.encoder\.h264/);
   assert.match(out, /c2\.hardware\.decoder\.h264/);
@@ -86,19 +86,19 @@ test('addCodecsToXml: agrega el encoder y solo los decoders del host', () => {
   assert.match(out, /<Decoders>[\s\S]*c2\.hardware\.decoder\.hevc[\s\S]*c2\.android\.avc\.decoder[\s\S]*<\/Decoders>/);
 });
 
-test('addCodecsToXml: es idempotente y respeta lo que ya estaba', () => {
+test('addCodecsToXml: it is idempotent and respects what was already there', () => {
   const once = addCodecsToXml(XML, DEC);
   assert.strictEqual(addCodecsToXml(once, DEC), once);
   assert.match(once, /c2\.android\.avc\.decoder/);
 });
 
-test('addCodecsToXml: sin decoders de hardware solo agrega el encoder y no toca <Decoders>', () => {
+test('addCodecsToXml: without hardware decoders it only adds the encoder and does not touch <Decoders>', () => {
   const out = addCodecsToXml(XML, []);
   assert.match(out, /c2\.hardware\.encoder\.h264/);
   assert.doesNotMatch(out, /c2\.hardware\.decoder/);
 });
 
-// El archivo REAL de la imagen oficial de redroid: solo <Encoders> y varios <Include>, sin <Decoders>.
+// The REAL file of the official redroid image: only <Encoders> and several <Include>, without <Decoders>.
 const XML_OFICIAL = `<?xml version="1.0" encoding="utf-8" ?>
 <!-- <!ELEMENT Decoders (MediaCodec|Include)*> <!ELEMENT Encoders (MediaCodec|Include)*> -->
 <MediaCodecs>
@@ -109,14 +109,14 @@ const XML_OFICIAL = `<?xml version="1.0" encoding="utf-8" ?>
     <Include href="media_codecs_google_video.xml" />
 </MediaCodecs>`;
 
-test('addCodecsToXml: la imagen oficial no trae <Decoders>: se crea al final, despues de los <Include>', () => {
+test('addCodecsToXml: the official image has no <Decoders>: it is created at the end, after the <Include>s', () => {
   const out = addCodecsToXml(XML_OFICIAL, DEC);
   assert.match(out, /<Include href="media_codecs_google_video.xml" \/>\s*<Decoders>[\s\S]*c2\.hardware\.decoder\.h264[\s\S]*<\/Decoders>\s*<\/MediaCodecs>/);
   assert.match(out, /c2\.hardware\.encoder\.h264/);
-  assert.strictEqual(addCodecsToXml(out, DEC), out); // idempotente tambien aca
+  assert.strictEqual(addCodecsToXml(out, DEC), out); // idempotent here too
 });
 
-test('addCodecsToXml: formato inesperado falla en voz alta', () => {
+test('addCodecsToXml: an unexpected format fails loudly', () => {
   assert.throws(() => addCodecsToXml('<MediaCodecs></MediaCodecs>', []), /Encoders/);
   assert.throws(() => addCodecsToXml('<otra><Encoders></Encoders></otra>', DEC), /MediaCodecs/);
 });
