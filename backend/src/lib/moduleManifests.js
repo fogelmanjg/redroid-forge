@@ -4,81 +4,81 @@ const path = require('path');
 let MODULES_DIR = path.join(__dirname, '..', 'modules');
 let MANIFESTS_DIR = path.join(MODULES_DIR, 'manifests');
 
-// Schema del manifest de modulo (seccion 5 de docs/REQUIREMENTS.md). Se
-// valida a mano en vez de sumar una dependencia de JSON Schema — son pocos
-// campos y el proyecto ya evita dependencias pesadas por decision de stack.
+// Schema of the module manifest (section 5 of docs/REQUIREMENTS.md). It is
+// validated by hand instead of adding a JSON Schema dependency — there are few
+// fields and the project already avoids heavy dependencies by stack decision.
 function validateManifest(m, sourceLabel) {
   const errors = [];
   const isNonEmptyString = (v) => typeof v === 'string' && v.trim().length > 0;
 
-  if (!isNonEmptyString(m.id)) errors.push('falta "id"');
-  if (!isNonEmptyString(m.nombre)) errors.push('falta "nombre"');
-  if (!isNonEmptyString(m.descripcion)) errors.push('falta "descripcion"');
-  if (typeof m.esTerceroNoLibre !== 'boolean') errors.push('"esTerceroNoLibre" debe ser boolean');
+  if (!isNonEmptyString(m.id)) errors.push('missing "id"');
+  if (!isNonEmptyString(m.nombre)) errors.push('missing "nombre"');
+  if (!isNonEmptyString(m.descripcion)) errors.push('missing "descripcion"');
+  if (typeof m.esTerceroNoLibre !== 'boolean') errors.push('"esTerceroNoLibre" must be a boolean');
 
-  // Seccion 6: un modulo de terceros no libre siempre declara de donde sale
-  // y bajo que licencia, para el disclaimer obligatorio del contrato.
+  // Section 6: a non-free third-party module always declares where it comes
+  // from and under which license, for the contract's mandatory disclaimer.
   if (m.esTerceroNoLibre) {
-    if (!isNonEmptyString(m.licencia)) errors.push('los modulos de terceros no libres requieren "licencia"');
-    if (!isNonEmptyString(m.origen)) errors.push('los modulos de terceros no libres requieren "origen"');
+    if (!isNonEmptyString(m.licencia)) errors.push('non-free third-party modules require "licencia"');
+    if (!isNonEmptyString(m.origen)) errors.push('non-free third-party modules require "origen"');
   }
 
   if (!Array.isArray(m.queToca) || m.queToca.length === 0) {
-    errors.push('"queToca" debe ser un array no vacio');
+    errors.push('"queToca" must be a non-empty array');
   }
 
   if (!m.compatibleCon || typeof m.compatibleCon !== 'object') {
-    errors.push('falta "compatibleCon"');
+    errors.push('missing "compatibleCon"');
   } else {
     if (!Array.isArray(m.compatibleCon.androidVersion) || m.compatibleCon.androidVersion.length === 0) {
-      errors.push('"compatibleCon.androidVersion" debe ser un array no vacio');
+      errors.push('"compatibleCon.androidVersion" must be a non-empty array');
     }
     if (!Array.isArray(m.compatibleCon.gpuMode) || m.compatibleCon.gpuMode.length === 0) {
-      errors.push('"compatibleCon.gpuMode" debe ser un array no vacio');
+      errors.push('"compatibleCon.gpuMode" must be a non-empty array');
     }
   }
 
   if (!Number.isInteger(m.version) || m.version < 1) {
-    errors.push('"version" debe ser un entero >= 1');
+    errors.push('"version" must be an integer >= 1');
   }
 
   if (errors.length > 0) {
-    throw new Error(`Manifest de modulo invalido (${sourceLabel}): ${errors.join('; ')}`);
+    throw new Error(`Invalid module manifest (${sourceLabel}): ${errors.join('; ')}`);
   }
 }
 
 let cache = null;
-// id -> carpeta absoluta que contiene el manifest.json de ese modulo. Los
-// modulos con logica de ejecucion (ver moduleRunner.js) necesitan esto para
-// resolver su "entry" (ej. "./integrate.js") relativo a SU PROPIA carpeta,
-// no a este archivo. No se expone junto al manifest (list()/get()) para no
-// filtrar paths absolutos del disco a quien consuma esos objetos (ej. el
-// frontend, via el 428 de moduleGate.js) -- se pide aparte con moduleDir().
+// id -> absolute folder that contains that module's manifest.json. Modules with
+// execution logic (see moduleRunner.js) need this to resolve their "entry"
+// (e.g. "./integrate.js") relative to THEIR OWN folder, not to this file. It is
+// not exposed together with the manifest (list()/get()) so as not to leak
+// absolute disk paths to whoever consumes those objects (e.g. the frontend,
+// via moduleGate.js's 428) -- it is requested separately with moduleDir().
 let dirCache = null;
 
 function loadOne(manifestPath, sourceLabel, byId, dirById) {
   const raw = JSON.parse(fs.readFileSync(manifestPath, 'utf-8'));
   validateManifest(raw, sourceLabel);
   if (byId.has(raw.id)) {
-    throw new Error(`Manifest de modulo duplicado: id "${raw.id}" repetido en ${sourceLabel}`);
+    throw new Error(`Duplicate module manifest: id "${raw.id}" repeated in ${sourceLabel}`);
   }
   byId.set(raw.id, raw);
   dirById.set(raw.id, path.dirname(manifestPath));
 }
 
-// Dos fuentes de manifest, a proposito no unificadas en una sola carpeta:
+// Two manifest sources, deliberately not unified in a single folder:
 //
-// 1. Archivos planos en MANIFESTS_DIR (gapps.json, magisk.json, etc.) -- los
-//    modulos "puramente contrato" de la Fase 4, sin logica de ejecucion
-//    propia. Se mantienen donde estan (en vez de moverlos a una carpeta por
-//    modulo) para no generar conflictos de merge con otro trabajo que pueda
-//    estar tocando esos mismos archivos en paralelo.
-// 2. `<MODULES_DIR>/<id>/manifest.json` -- modulos con logica real (ver
-//    backend/src/modules/hwenc/), que ya viven en su propia carpeta junto a
-//    su "entry" y demas archivos. Mismo schema, se valida igual.
+// 1. Flat files in MANIFESTS_DIR (gapps.json, magisk.json, etc.) -- the "pure
+//    contract" modules of Phase 4, with no execution logic of their own. They
+//    stay where they are (instead of being moved to a per-module folder) so as
+//    not to create merge conflicts with other work that may be touching those
+//    same files in parallel.
+// 2. `<MODULES_DIR>/<id>/manifest.json` -- modules with real logic (see
+//    backend/src/modules/hwenc/), which already live in their own folder next to
+//    their "entry" and other files. The same schema, validated the same way.
 //
-// La unicidad de "id" se valida contra las dos fuentes juntas (un mismo id
-// no puede repetirse ni dentro de una fuente ni entre ambas).
+// "id" uniqueness is validated against both sources together (the same id
+// cannot repeat within one source or across both).
 function loadAll() {
   if (cache) return cache;
   const byId = new Map();
@@ -94,7 +94,7 @@ function loadAll() {
     .filter((d) => d.isDirectory() && d.name !== manifestsDirName);
   for (const dir of moduleDirs) {
     const manifestPath = path.join(MODULES_DIR, dir.name, 'manifest.json');
-    if (!fs.existsSync(manifestPath)) continue; // no toda carpeta bajo modules/ es un modulo (ej. modules/manifests/ ya excluida arriba)
+    if (!fs.existsSync(manifestPath)) continue; // not every folder under modules/ is a module (e.g. modules/manifests/ is already excluded above)
     loadOne(manifestPath, path.join(dir.name, 'manifest.json'), byId, dirById);
   }
 
@@ -111,17 +111,17 @@ function get(id) {
   return loadAll().get(id) || null;
 }
 
-// Carpeta absoluta que contiene el manifest.json (y, si lo tiene, el "entry")
-// del modulo -- null si el modulo no existe.
+// Absolute folder that contains the module's manifest.json (and, if it has one,
+// its "entry") -- null if the module does not exist.
 function moduleDir(id) {
   loadAll();
   return dirCache.get(id) || null;
 }
 
-// `compatibleCon` decide si un modulo se puede ofrecer/activar para una
-// imagen dada. Reusa los mismos campos `androidVersion`/`gpuMode` que el
-// catalogo (backend/images.json) ya suma desde la Fase 1 para el tier de
-// soporte, en vez de introducir metadata de compatibilidad nueva.
+// `compatibleCon` decides whether a module can be offered/enabled for a given
+// image. It reuses the same `androidVersion`/`gpuMode` fields the catalog
+// (backend/images.json) has had since Phase 1 for the support tier, instead of
+// introducing new compatibility metadata.
 function isCompatible(manifest, image) {
   if (!manifest || !image) return false;
   return (
@@ -130,28 +130,28 @@ function isCompatible(manifest, image) {
   );
 }
 
-// Explica por que no es compatible (o null si lo es), para no romper en
-// silencio — mismo criterio de transparencia que el resto del proyecto.
+// Explains why it is not compatible (or null if it is), so as not to break
+// silently — the same transparency criterion as the rest of the project.
 function incompatibilityReason(manifest, image) {
   if (!manifest.compatibleCon.androidVersion.includes(image.androidVersion)) {
-    return `"${manifest.nombre}" no esta declarado compatible con Android ${image.androidVersion}`
-      + ` (compatible con: ${manifest.compatibleCon.androidVersion.join(', ')}).`;
+    return `"${manifest.nombre}" is not declared compatible with Android ${image.androidVersion}`
+      + ` (compatible with: ${manifest.compatibleCon.androidVersion.join(', ')}).`;
   }
   if (!manifest.compatibleCon.gpuMode.includes(image.gpuMode)) {
-    return `"${manifest.nombre}" no esta declarado compatible con gpuMode="${image.gpuMode}"`
-      + ` (compatible con: ${manifest.compatibleCon.gpuMode.join(', ')}).`;
+    return `"${manifest.nombre}" is not declared compatible with gpuMode="${image.gpuMode}"`
+      + ` (compatible with: ${manifest.compatibleCon.gpuMode.join(', ')}).`;
   }
   return null;
 }
 
-// Solo para tests: los manifests son archivos estaticos del repo, no datos
-// de usuario, asi que en produccion la cache nunca necesita invalidarse.
+// Only for tests: the manifests are static files of the repo, not user data, so
+// in production the cache never needs to be invalidated.
 function _resetCache() { cache = null; dirCache = null; }
 
-// Solo para tests: apunta el descubrimiento a un `modules/` de prueba (con su
-// propio `manifests/` adentro), para poder probar modulos con `entry` real
-// (que hacen `require()` de un archivo) sin fixtures que toquen Docker/
-// child_process. Pasar null restaura la carpeta real del repo.
+// Only for tests: points the discovery at a test `modules/` (with its own
+// `manifests/` inside), so modules with a real `entry` (which `require()` a
+// file) can be tested without fixtures that touch Docker/child_process.
+// Passing null restores the repo's real folder.
 function _setModulesRootForTests(dir) {
   MODULES_DIR = dir || path.join(__dirname, '..', 'modules');
   MANIFESTS_DIR = path.join(MODULES_DIR, 'manifests');
@@ -159,10 +159,10 @@ function _setModulesRootForTests(dir) {
 }
 
 module.exports = {
-  // OJO: no se exporta MANIFESTS_DIR -- pasa a ser mutable con
-  // _setModulesRootForTests, y un valor tomado al cargar el modulo quedaria
-  // desactualizado despues de un cambio de raiz. Nada fuera de este archivo
-  // lo consumia, asi que se da de baja en vez de exponerlo como getter.
+  // NOTE: MANIFESTS_DIR is not exported -- it becomes mutable with
+  // _setModulesRootForTests, and a value taken when the module loads would be
+  // stale after a root change. Nothing outside this file consumed it, so it is
+  // dropped instead of being exposed as a getter.
   list,
   get,
   moduleDir,

@@ -1,6 +1,6 @@
-// Cobertura de la Fase 4 (sistema de contrato de modulo). No levanta Docker
-// ni contenedores redroid reales -- todo lo que toca esta capa es diseno y
-// codigo puro (schema, registro de aceptacion, gating), ver docs/ROADMAP.md.
+// Coverage of Phase 4 (the module contract system). It does not start Docker
+// or real redroid containers -- everything this layer touches is design and
+// pure code (schema, acceptance record, gating), see docs/ROADMAP.md.
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -12,14 +12,14 @@ const acceptance = require('../src/lib/moduleAcceptance');
 const moduleGate = require('../src/lib/moduleGate');
 const hwAccel = require('../src/lib/hwAccel');
 
-// Aisla el registro de aceptacion en un archivo temporal por test, para no
-// pisar backend/data/module-acceptances.json real ni depender de estado
-// dejado por una corrida anterior.
+// Isolates the acceptance record in a temporary file per test, so as not to
+// overwrite the real backend/data/module-acceptances.json nor depend on state
+// left by a previous run.
 //
-// Async (antes no lo era): moduleGate.check ahora puede llamar a
-// hwAccel.detectGpuVendor() por dentro (hostGpuVendor de hwenc), asi que
-// `fn` puede devolver una promesa -- si el finally corriera antes de que esa
-// promesa resuelva, el store temporal se restaura al real a mitad del test.
+// Async (it was not before): moduleGate.check can now call
+// hwAccel.detectGpuVendor() inside (hwenc's hostGpuVendor), so `fn` may return a
+// promise -- if the finally ran before that promise resolved, the temporary store
+// would be restored to the real one halfway through the test.
 async function withTempAcceptanceStore(fn) {
   const tmpFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'rf-acceptance-')), 'module-acceptances.json');
   acceptance._setStoreFileForTests(tmpFile);
@@ -30,179 +30,179 @@ async function withTempAcceptanceStore(fn) {
   }
 }
 
-// Fixtures de imagen -- no dependen de backend/images.json para no acoplar
-// los tests al catalogo real, que puede cambiar.
-const imgOficialConGappsYMagisk = { id: 'fixture-15-full', androidVersion: 15, gpuMode: 'host', hasGapps: true, hasMagisk: true, needsHwsimWifi: false };
-const imgSinModulos = { id: 'fixture-15-plain', androidVersion: 15, gpuMode: 'host', hasGapps: false, hasMagisk: false, needsHwsimWifi: false };
+// Image fixtures -- they do not depend on backend/images.json so as not to couple
+// the tests to the real catalog, which may change.
+const imgOfficialWithGappsAndMagisk = { id: 'fixture-15-full', androidVersion: 15, gpuMode: 'host', hasGapps: true, hasMagisk: true, needsHwsimWifi: false };
+const imgWithoutModules = { id: 'fixture-15-plain', androidVersion: 15, gpuMode: 'host', hasGapps: false, hasMagisk: false, needsHwsimWifi: false };
 const imgGappsAndroid11 = { id: 'fixture-11-gapps', androidVersion: 11, gpuMode: 'host', hasGapps: true, hasMagisk: false, needsHwsimWifi: false };
-const imgGappsGuestNoSoportado = { id: 'fixture-99-gapps-guest', androidVersion: 99, gpuMode: 'guest', hasGapps: true, hasMagisk: false, needsHwsimWifi: false };
+const imgGappsGuestUnsupported = { id: 'fixture-99-gapps-guest', androidVersion: 99, gpuMode: 'guest', hasGapps: true, hasMagisk: false, needsHwsimWifi: false };
 const imgHwEncCapable = {
   id: 'fixture-15-hwenc', androidVersion: 15, gpuMode: 'host', hasGapps: false, hasMagisk: false, needsHwsimWifi: false, hwEncCapable: true,
 };
 
-test('moduleManifests: el catalogo tiene los 6 modulos de la seccion 5 de REQUIREMENTS.md + hwenc', () => {
-  // hwenc (Fase 5) vive en su propia carpeta (backend/src/modules/hwenc/
-  // manifest.json), no en backend/src/modules/manifests/ como los otros
-  // seis -- este test tambien cubre que moduleManifests.loadAll() descubre
-  // las dos fuentes (ver comentario ahi).
+test('moduleManifests: the catalog has the 6 modules of section 5 of REQUIREMENTS.md + hwenc', () => {
+  // hwenc (Phase 5) lives in its own folder (backend/src/modules/hwenc/
+  // manifest.json), not in backend/src/modules/manifests/ like the other
+  // six -- this test also covers that moduleManifests.loadAll() discovers
+  // both sources (see the comment there).
   const ids = manifests.list().map((m) => m.id).sort();
   assert.deepEqual(ids, ['cpu-ram', 'device-profile', 'gapps', 'gpu-mode', 'hwenc', 'magisk', 'wifi-falso']);
 });
 
-test('moduleManifests: hwenc se descubre desde su propia carpeta, con etapa/entry', () => {
+test('moduleManifests: hwenc is discovered from its own folder, with etapa/entry', () => {
   const hwenc = manifests.get('hwenc');
-  assert.ok(hwenc, 'el manifest de hwenc tendria que existir');
+  assert.ok(hwenc, 'the hwenc manifest should exist');
   assert.deepEqual(hwenc.etapa, [3, 4, 5, 6]);
   assert.equal(hwenc.entry, './integrate.js');
 });
 
-test('moduleManifests.moduleDir: resuelve la carpeta de un modulo plano y de uno con carpeta propia', () => {
+test('moduleManifests.moduleDir: resolves the folder of a flat module and of one with its own folder', () => {
   assert.match(manifests.moduleDir('gapps'), /modules[/\\]manifests$/);
   assert.match(manifests.moduleDir('hwenc'), /modules[/\\]hwenc$/);
-  assert.equal(manifests.moduleDir('no-existe'), null);
+  assert.equal(manifests.moduleDir('does-not-exist'), null);
 });
 
-test('moduleManifests: rechaza un manifest sin los campos requeridos', () => {
-  assert.throws(() => manifests.validateManifest({ id: 'x' }, 'fixture'), /Manifest de modulo invalido/);
+test('moduleManifests: rejects a manifest without the required fields', () => {
+  assert.throws(() => manifests.validateManifest({ id: 'x' }, 'fixture'), /Invalid module manifest/);
 });
 
-test('moduleManifests: un modulo de terceros no libre exige licencia y origen', () => {
+test('moduleManifests: a non-free third-party module requires license and source', () => {
   assert.throws(
     () => manifests.validateManifest({
       id: 'x', nombre: 'X', descripcion: 'd', esTerceroNoLibre: true,
       queToca: ['a'], compatibleCon: { androidVersion: [15], gpuMode: ['host'] }, version: 1,
     }, 'fixture'),
-    /requieren "licencia"/,
+    /require "licencia"/,
   );
 });
 
-test('moduleManifests: acepta un manifest propio (no libre=false) sin licencia/origen', () => {
+test('moduleManifests: accepts an own manifest (non-free=false) without license/source', () => {
   assert.doesNotThrow(() => manifests.validateManifest({
     id: 'x', nombre: 'X', descripcion: 'd', esTerceroNoLibre: false,
     queToca: ['a'], compatibleCon: { androidVersion: [15], gpuMode: ['host'] }, version: 1,
   }, 'fixture'));
 });
 
-test('moduleManifests.isCompatible: compara androidVersion y gpuMode contra compatibleCon', () => {
+test('moduleManifests.isCompatible: compares androidVersion and gpuMode against compatibleCon', () => {
   const manifest = manifests.get('gapps');
-  assert.equal(manifests.isCompatible(manifest, imgOficialConGappsYMagisk), true);
-  assert.equal(manifests.isCompatible(manifest, imgGappsGuestNoSoportado), false);
+  assert.equal(manifests.isCompatible(manifest, imgOfficialWithGappsAndMagisk), true);
+  assert.equal(manifests.isCompatible(manifest, imgGappsGuestUnsupported), false);
 });
 
-test('moduleManifests.incompatibilityReason: explica por que, no rompe en silencio', () => {
+test('moduleManifests.incompatibilityReason: explains why, it does not break silently', () => {
   const manifest = manifests.get('gapps');
-  const reason = manifests.incompatibilityReason(manifest, imgGappsGuestNoSoportado);
+  const reason = manifests.incompatibilityReason(manifest, imgGappsGuestUnsupported);
   assert.match(reason, /Android 99/);
 });
 
-test('moduleAcceptance: sin registro previo, un modulo no esta aceptado', () => withTempAcceptanceStore(() => {
+test('moduleAcceptance: with no previous record, a module is not accepted', () => withTempAcceptanceStore(() => {
   assert.equal(acceptance.isAccepted('gapps', 1), false);
   assert.equal(acceptance.latestFor('gapps'), null);
 }));
 
-test('moduleAcceptance: aceptar la version actual la deja vigente', () => withTempAcceptanceStore(() => {
-  acceptance.record({ moduleId: 'gapps', version: 1, instanceName: 'mi-instancia' });
+test('moduleAcceptance: accepting the current version makes it current', () => withTempAcceptanceStore(() => {
+  acceptance.record({ moduleId: 'gapps', version: 1, instanceName: 'my-instance' });
   assert.equal(acceptance.isAccepted('gapps', 1), true);
   const latest = acceptance.latestFor('gapps');
-  assert.equal(latest.instanceName, 'mi-instancia');
+  assert.equal(latest.instanceName, 'my-instance');
   assert.equal(latest.userId, 'local');
 }));
 
-test('moduleAcceptance: si el manifest sube de version, la aceptacion vieja deja de valer', () => withTempAcceptanceStore(() => {
+test('moduleAcceptance: if the manifest goes up a version, the old acceptance stops counting', () => withTempAcceptanceStore(() => {
   acceptance.record({ moduleId: 'gapps', version: 1 });
   assert.equal(acceptance.isAccepted('gapps', 1), true);
-  assert.equal(acceptance.isAccepted('gapps', 2), false); // el manifest subio a v2 en algun punto
+  assert.equal(acceptance.isAccepted('gapps', 2), false); // the manifest went up to v2 at some point
 }));
 
-test('moduleGate.check: bloquea (428) si la imagen requiere un modulo sin aceptar', () => withTempAcceptanceStore(async () => {
-  const result = await moduleGate.check(imgOficialConGappsYMagisk);
+test('moduleGate.check: blocks (428) if the image requires a module that is not accepted', () => withTempAcceptanceStore(async () => {
+  const result = await moduleGate.check(imgOfficialWithGappsAndMagisk);
   assert.equal(result.ok, false);
   assert.equal(result.httpStatus, 428);
   const ids = result.modules.map((m) => m.id).sort();
   assert.deepEqual(ids, ['gapps', 'magisk']);
 }));
 
-test('moduleGate.check: permite crear/arrancar una vez aceptados todos los modulos requeridos', () => withTempAcceptanceStore(async () => {
+test('moduleGate.check: allows creating/starting once all the required modules are accepted', () => withTempAcceptanceStore(async () => {
   acceptance.record({ moduleId: 'gapps', version: manifests.get('gapps').version });
   acceptance.record({ moduleId: 'magisk', version: manifests.get('magisk').version });
-  const result = await moduleGate.check(imgOficialConGappsYMagisk);
+  const result = await moduleGate.check(imgOfficialWithGappsAndMagisk);
   assert.equal(result.ok, true);
 }));
 
-test('moduleGate.check: una imagen sin modulos requeridos nunca queda bloqueada', () => withTempAcceptanceStore(async () => {
-  const result = await moduleGate.check(imgSinModulos);
+test('moduleGate.check: an image without required modules is never blocked', () => withTempAcceptanceStore(async () => {
+  const result = await moduleGate.check(imgWithoutModules);
   assert.equal(result.ok, true);
 }));
 
-test('moduleGate.check: no ofrece/permite el modulo si la imagen no cumple compatibleCon', () => withTempAcceptanceStore(async () => {
-  // Aceptar el contrato no alcanza si la imagen es incompatible -- el gate
-  // tiene que rechazar por compatibilidad (409) antes de mirar aceptacion.
+test('moduleGate.check: it does not offer/allow the module if the image does not meet compatibleCon', () => withTempAcceptanceStore(async () => {
+  // Accepting the contract is not enough if the image is incompatible -- the gate
+  // has to reject for compatibility (409) before looking at acceptance.
   acceptance.record({ moduleId: 'gapps', version: manifests.get('gapps').version });
-  const result = await moduleGate.check(imgGappsGuestNoSoportado);
+  const result = await moduleGate.check(imgGappsGuestUnsupported);
   assert.equal(result.ok, false);
   assert.equal(result.httpStatus, 409);
-  assert.match(result.error, /no se puede usar la imagen/i);
+  assert.match(result.error, /cannot be used/i);
 }));
 
-// Gate de la Fase 4 (docs/ROADMAP.md): activar GApps tiene que exigir leer y
-// aceptar un contrato generado desde su manifest antes de que el backend
-// ejecute nada. Este test reproduce ese flujo end-to-end a nivel de la logica
-// pura (sin Docker real, ver nota arriba).
-test('gate de la Fase 4: GApps queda bloqueado hasta aceptar su manifest, despues se habilita', () => withTempAcceptanceStore(async () => {
-  const antesDeAceptar = await moduleGate.check(imgGappsAndroid11);
-  assert.equal(antesDeAceptar.ok, false);
-  assert.equal(antesDeAceptar.httpStatus, 428);
-  assert.equal(antesDeAceptar.modules[0].id, 'gapps');
+// Phase 4 gate (docs/ROADMAP.md): activating GApps has to require reading and
+// accepting a contract generated from its manifest before the backend runs
+// anything. This test reproduces that flow end to end at the level of the pure
+// logic (without real Docker, see the note above).
+test('Phase 4 gate: GApps stays blocked until its manifest is accepted, then it is enabled', () => withTempAcceptanceStore(async () => {
+  const beforeAccepting = await moduleGate.check(imgGappsAndroid11);
+  assert.equal(beforeAccepting.ok, false);
+  assert.equal(beforeAccepting.httpStatus, 428);
+  assert.equal(beforeAccepting.modules[0].id, 'gapps');
 
-  acceptance.record({ moduleId: 'gapps', version: antesDeAceptar.modules[0].version, instanceName: 'mi-instancia-gapps' });
+  acceptance.record({ moduleId: 'gapps', version: beforeAccepting.modules[0].version, instanceName: 'my-gapps-instance' });
 
-  const despuesDeAceptar = await moduleGate.check(imgGappsAndroid11);
-  assert.equal(despuesDeAceptar.ok, true);
+  const afterAccepting = await moduleGate.check(imgGappsAndroid11);
+  assert.equal(afterAccepting.ok, true);
 }));
 
-// Fase 5: hwenc pasa a requerirse igual que gapps/magisk/wifi-falso cuando la
-// imagen declara hwEncCapable=true (ver moduleGate.requiredModuleIdsForImage)
-// -- mismo flujo de consentimiento generico, aunque hwenc sea un modulo
-// propio (esTerceroNoLibre=false) y no de terceros.
-test('moduleGate.requiredModuleIdsForImage: suma "hwenc" cuando la imagen declara hwEncCapable', () => {
+// Phase 5: hwenc becomes required just like gapps/magisk/wifi-falso when the
+// image declares hwEncCapable=true (see moduleGate.requiredModuleIdsForImage)
+// -- the same generic consent flow, even though hwenc is an own module
+// (esTerceroNoLibre=false) and not a third-party one.
+test('moduleGate.requiredModuleIdsForImage: adds "hwenc" when the image declares hwEncCapable', () => {
   assert.deepEqual(moduleGate.requiredModuleIdsForImage(imgHwEncCapable), ['hwenc']);
-  assert.deepEqual(moduleGate.requiredModuleIdsForImage(imgSinModulos), []);
+  assert.deepEqual(moduleGate.requiredModuleIdsForImage(imgWithoutModules), []);
 });
 
-test('moduleGate.check: hwenc queda bloqueado hasta aceptar su manifest, igual que gapps/magisk', (t) => withTempAcceptanceStore(async () => {
-  // hwenc declara compatibleCon.hostGpuVendor: ["amd","intel"] -- sin
-  // mockear esto, check() dispararia un lspci real contra la maquina que
-  // corre los tests.
+test('moduleGate.check: hwenc stays blocked until its manifest is accepted, just like gapps/magisk', (t) => withTempAcceptanceStore(async () => {
+  // hwenc declares compatibleCon.hostGpuVendor: ["amd","intel"] -- without
+  // mocking this, check() would trigger a real lspci against the machine running
+  // the tests.
   t.mock.method(hwAccel, 'detectGpuVendor', async () => 'amd');
 
-  const antesDeAceptar = await moduleGate.check(imgHwEncCapable);
-  assert.equal(antesDeAceptar.ok, false);
-  assert.equal(antesDeAceptar.httpStatus, 428);
-  assert.equal(antesDeAceptar.modules[0].id, 'hwenc');
+  const beforeAccepting = await moduleGate.check(imgHwEncCapable);
+  assert.equal(beforeAccepting.ok, false);
+  assert.equal(beforeAccepting.httpStatus, 428);
+  assert.equal(beforeAccepting.modules[0].id, 'hwenc');
 
-  acceptance.record({ moduleId: 'hwenc', version: antesDeAceptar.modules[0].version });
+  acceptance.record({ moduleId: 'hwenc', version: beforeAccepting.modules[0].version });
 
-  const despuesDeAceptar = await moduleGate.check(imgHwEncCapable);
-  assert.equal(despuesDeAceptar.ok, true);
+  const afterAccepting = await moduleGate.check(imgHwEncCapable);
+  assert.equal(afterAccepting.ok, true);
 }));
 
-// Regresion del hallazgo real de code review: antes de este fix, hwenc no
-// validaba compatibleCon.hostGpuVendor en absoluto (isCompatible/
-// incompatibilityReason solo miran androidVersion/gpuMode, que son atributos
-// de la IMAGEN, no del host) -- hwenc podia "aceptarse" y el runner
-// arrancaba igual el daemon VA-API (AMD/Intel-only) en un host NVIDIA.
-test('moduleGate.check: rechaza (409) un modulo con hostGpuVendor si el host no coincide, incluso ya aceptado', (t) => withTempAcceptanceStore(async () => {
+// Regression of the real code-review finding: before this fix, hwenc did not
+// validate compatibleCon.hostGpuVendor at all (isCompatible/
+// incompatibilityReason only look at androidVersion/gpuMode, which are
+// attributes of the IMAGE, not of the host) -- hwenc could be "accepted" and the
+// runner would still start the VA-API daemon (AMD/Intel-only) on an NVIDIA host.
+test('moduleGate.check: rejects (409) a module with hostGpuVendor if the host does not match, even if already accepted', (t) => withTempAcceptanceStore(async () => {
   t.mock.method(hwAccel, 'detectGpuVendor', async () => 'nvidia');
   acceptance.record({ moduleId: 'hwenc', version: manifests.get('hwenc').version });
 
   const result = await moduleGate.check(imgHwEncCapable);
   assert.equal(result.ok, false);
   assert.equal(result.httpStatus, 409);
-  assert.match(result.error, /GPU "nvidia"/);
+  assert.match(result.error, /"nvidia" GPU/);
 }));
 
-test('moduleGate.check: una imagen sin modulos con hostGpuVendor nunca llama a detectGpuVendor', (t) => withTempAcceptanceStore(async () => {
+test('moduleGate.check: an image without modules with hostGpuVendor never calls detectGpuVendor', (t) => withTempAcceptanceStore(async () => {
   const spy = t.mock.method(hwAccel, 'detectGpuVendor', async () => 'nvidia');
-  await moduleGate.check(imgSinModulos);
+  await moduleGate.check(imgWithoutModules);
   assert.equal(spy.mock.calls.length, 0);
 }));
