@@ -1,16 +1,32 @@
 {
   "id": "wifi-falso",
-  "nombre": "WiFi falso (hwsim)",
+  "nombre": "Fake WiFi (hwsim)",
   "esTerceroNoLibre": false,
-  "descripcion": "Simula una interfaz WiFi real dentro de la instancia usando mac80211_hwsim, para apps que no funcionan sin una conexion WiFi detectada.",
+  "descripcion": "Simulates a real WiFi interface inside the instance using mac80211_hwsim, for apps that do not work without a detected WiFi connection.",
   "queToca": [
-    "carga el modulo de kernel mac80211_hwsim en el host",
-    "mueve interfaces de radio (phys) del netns del host al netns de la instancia",
-    "ejecuta comandos dentro del contenedor (svc wifi, cmd wifi connect-network) para forzar la conexion"
+    "loads the mac80211_hwsim kernel module on the host",
+    "moves radio interfaces (phys) from the host's netns to the instance's netns",
+    "runs commands inside the container (svc wifi, cmd wifi connect-network) to force the connection"
   ],
   "compatibleCon": {
-    "androidVersion": [15],
-    "gpuMode": ["host", "guest"]
+    "androidVersion": [
+      15
+    ],
+    "gpuMode": [
+      "host",
+      "guest"
+    ]
   },
-  "version": 1
+  "version": 1,
+  "i18n": {
+    "es": {
+      "nombre": "WiFi falso (hwsim)",
+      "descripcion": "Simula una interfaz WiFi real dentro de la instancia usando mac80211_hwsim, para apps que no funcionan sin una conexion WiFi detectada.",
+      "queToca": [
+        "carga el modulo de kernel mac80211_hwsim en el host",
+        "mueve interfaces de radio (phys) del netns del host al netns de la instancia",
+        "ejecuta comandos dentro del contenedor (svc wifi, cmd wifi connect-network) para forzar la conexion"
+      ]
+    }
+  }
 }

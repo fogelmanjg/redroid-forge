@@ -59,7 +59,7 @@ test('queryHwdecCaps: a daemon without HWDEC (it closes without answering), down
     assert.deepStrictEqual((await hwAccel.queryHwdecCaps({ socketPath: sock })).codecs, []);
   });
   assert.deepStrictEqual((await hwAccel.queryHwdecCaps({ socketPath: '/tmp/no-existe-' + process.pid })).codecs, []);
-  await withServer(() => { /* nunca responde */ }, async (sock) => {
+  await withServer(() => { /* never answers */ }, async (sock) => {
     assert.deepStrictEqual((await hwAccel.queryHwdecCaps({ socketPath: sock, timeoutMs: 200 })).codecs, []);
   });
 });

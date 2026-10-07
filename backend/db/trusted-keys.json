@@ -1,5 +1,5 @@
 {
-  "comentario": "Claves publicas ed25519 (PEM, SPKI) autorizadas a firmar la base de combinaciones (docs/KNOWN-COMBINATIONS.md 4.3). Lista corta a proposito: cada clave puede publicar cualquier base. Un fork o espejo propio puede usar otra lista con REDROID_FORGE_DB_TRUSTED_KEYS_FILE. Si esta lista queda vacia, la app no consulta ni aplica bases descargadas.",
+  "comentario": "ed25519 public keys (PEM, SPKI) authorized to sign the combinations database (docs/KNOWN-COMBINATIONS.md 4.3). A deliberately short list: every key can publish any database. A fork or own mirror can use another list with REDROID_FORGE_DB_TRUSTED_KEYS_FILE. If this list is empty, the app neither queries nor applies downloaded databases.",
   "keys": [
     {
       "id": "mantenedor-2026-10",

@@ -1,15 +1,32 @@
 {
   "id": "cpu-ram",
-  "nombre": "CPU / RAM asignados",
+  "nombre": "CPU / RAM allocation",
   "esTerceroNoLibre": false,
-  "descripcion": "Limita la memoria y CPU que Docker le asigna al contenedor de la instancia.",
+  "descripcion": "Limits the memory and CPU that Docker assigns to the instance's container.",
   "queToca": [
-    "aplica limites de memoria/CPU a nivel del contenedor Docker (HostConfig.Memory / CPU shares)",
-    "una instancia sin limite puede consumir toda la memoria/CPU disponible del host"
+    "applies memory/CPU limits at the Docker container level (HostConfig.Memory / CPU shares)",
+    "an instance without a limit can consume all of the host's available memory/CPU"
   ],
   "compatibleCon": {
-    "androidVersion": [11, 13, 15],
-    "gpuMode": ["host", "guest"]
+    "androidVersion": [
+      11,
+      13,
+      15
+    ],
+    "gpuMode": [
+      "host",
+      "guest"
+    ]
   },
-  "version": 1
+  "version": 1,
+  "i18n": {
+    "es": {
+      "nombre": "CPU / RAM asignados",
+      "descripcion": "Limita la memoria y CPU que Docker le asigna al contenedor de la instancia.",
+      "queToca": [
+        "aplica limites de memoria/CPU a nivel del contenedor Docker (HostConfig.Memory / CPU shares)",
+        "una instancia sin limite puede consumir toda la memoria/CPU disponible del host"
+      ]
+    }
+  }
 }
