@@ -91,7 +91,16 @@ typedef struct {
      * modifier alongside the buffer; forwarding it here lets the daemon use
      * VA-API's modifier-aware DRM_PRIME_2 import instead of guessing LINEAR. */
     uint64_t drm_format_modifier;
+    /* Target bitrate in bits per second (what MediaCodec asked for), 0 = not specified. The
+     * encoder is constant-QP underneath; the daemon steers the QP of every frame to reach this
+     * average (ratectl.h). With 0 it keeps its historical fixed QP. A request WITHOUT these last
+     * 8 bytes (an older Android component, EncodeRequestV1 in size) is accepted as 0. */
+    uint32_t bitrate;
+    uint32_t reserved;
 } EncodeRequest;
+
+/* Size of EncodeRequest before `bitrate` existed. */
+#define ENCODE_REQUEST_V1_SIZE 32
 
 typedef struct {
     int32_t status;      /* 0 = ok, negative = error (see vaErrorStr equivalents server-side) */

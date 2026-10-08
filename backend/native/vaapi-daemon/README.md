@@ -103,6 +103,13 @@ downloaded straight into it and the frame headers carry no payload. The frames o
 those of the next, so the client copies them before its next request. Without the flag the frames travel
 inline through the socket, as before.
 
+### Encoder rate control
+
+The encoder is all-intra and runs in constant-QP mode; `ratectl.h` picks the QP of every frame so the average
+reaches the bitrate in `EncodeRequest.bitrate` (what MediaCodec/scrcpy asked for). Without a bitrate (an older
+Android component) it keeps its historical QP 26. Check the controller on its own with
+`cc -O2 -o /tmp/ratectl-test test/ratectl-test.c -I. -lm && /tmp/ratectl-test`.
+
 ### Runtime options (environment variables)
 
 | Variable | Effect |
@@ -110,4 +117,5 @@ inline through the socket, as before.
 | `REDROID_FORGE_DRM_NODE` | DRM render node to use (default `/dev/dri/renderD128`). |
 | `REDROID_FORGE_HWDEC_DOWNLOAD` | How a decoded frame is brought from the GPU to RAM: `derive-sse` (default: `vaDeriveImage` + SSE4.1 non-temporal loads), `derive`, `getimage` (`vaGetImage`) or `ffmpeg` (`av_hwframe_transfer_data`). The first frame of every session is also downloaded through ffmpeg and compared byte by byte; if the direct download fails or differs, that session goes back to the ffmpeg path and says so on stderr. |
 | `REDROID_FORGE_HWDEC_STATS` | If set, every session prints its average time per stage (send, GPU wait, download, copy) when it closes, and the daemon prints the wait/queue/socket averages. |
+| `REDROID_FORGE_ENCODE_STATS` | If set, the daemon prints the real encoded bitrate (against the target) every 5 s. |
 | `REDROID_FORGE_HWDEC_DEBUG` | If set, logs the first bytes of every access unit that arrives (to see how Android delivers it). |

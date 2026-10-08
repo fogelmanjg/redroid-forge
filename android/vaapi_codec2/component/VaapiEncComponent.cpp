@@ -38,6 +38,12 @@ VaapiEncInterface::VaapiEncInterface(const std::shared_ptr<C2ReflectorHelper> &h
                          .withSetter(SizeSetter)
                          .build());
 
+    addParameter(DefineParam(mBitrate, C2_PARAMKEY_BITRATE)
+                         .withDefault(new C2StreamBitrateInfo::output(0u, 4000000))
+                         .withFields({C2F(mBitrate, value).inRange(4096, 500000000)})
+                         .withSetter(Setter<decltype(*mBitrate)>::NonStrictValueWithNoDeps)
+                         .build());
+
     addParameter(DefineParam(mInputUsage, C2_PARAMKEY_INPUT_STREAM_USAGE)
                          .withConstValue(new C2StreamUsageTuning::input(
                                  0u,
@@ -177,6 +183,7 @@ long VaapiEncComponent::encodeViaDaemon(int dmabufFd, uint32_t width, uint32_t h
     req.offset_uv = offsetUv;
     req.dmabuf_size = dmabufSize;
     req.drm_format_modifier = drmFormatModifier;
+    req.bitrate = mIntf->bitrate();
 
     char cmsgBuf[CMSG_SPACE(sizeof(int))];
     struct iovec iov = {.iov_base = &req, .iov_len = sizeof(req)};

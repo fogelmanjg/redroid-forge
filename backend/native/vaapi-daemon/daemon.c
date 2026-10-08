@@ -48,6 +48,7 @@
 
 #include "protocol.h"
 #include "decode_h264.h"
+#include "ratectl.h"
 
 #ifdef HAVE_HWDEC
 #include <pthread.h>
@@ -439,9 +440,18 @@ static int vaapi_state_init(vaapi_state_t *st) {
     fprintf(stderr, "Using entrypoint %s\n",
             st->entrypoint == VAEntrypointEncSlice ? "VAEntrypointEncSlice" : "VAEntrypointEncSliceLP");
 
-    VAConfigAttrib attrib = {.type = VAConfigAttribRTFormat, .value = VA_RT_FORMAT_YUV420};
+    /* Constant QP on purpose: ratectl.h picks the QP of every frame, so the driver must not run its own
+     * rate control (asked for explicitly when the driver advertises it; otherwise CQP is the default). */
+    VAConfigAttrib attrib[2] = {{.type = VAConfigAttribRTFormat, .value = VA_RT_FORMAT_YUV420},
+                                {.type = VAConfigAttribRateControl}};
+    int nattrib = 1;
+    vaGetConfigAttributes(st->dpy, VAProfileH264ConstrainedBaseline, st->entrypoint, &attrib[1], 1);
+    if (attrib[1].value != VA_ATTRIB_NOT_SUPPORTED && (attrib[1].value & VA_RC_CQP)) {
+        attrib[1].value = VA_RC_CQP;
+        nattrib = 2;
+    }
     CHECK_VA(vaCreateConfig(st->dpy, VAProfileH264ConstrainedBaseline, st->entrypoint,
-                             &attrib, 1, &st->config_id),
+                             attrib, nattrib, &st->config_id),
              "vaCreateConfig");
 
     /* VPP config for the RGBA->NV12 conversion stage (Tier 5.8). No RT
@@ -555,8 +565,17 @@ static unsigned char *normalize_start_codes(unsigned char *in, size_t n, size_t 
 /* Imports the client's dma-buf as surfaces[0], runs the same encode
  * sequence tier2/tier3 already proved, and returns malloc'd Annex-B H.264
  * bytes (caller frees). Returns byte count, or -1 on error. */
+static RateCtl g_rate_ctl;  /* encode requests are served one at a time */
+
+static int64_t now_ns(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (int64_t)ts.tv_sec * 1000000000LL + ts.tv_nsec;
+}
+
 static long encode_one_frame(vaapi_state_t *st, int dmabuf_fd, const EncodeRequest *req,
                               unsigned char **out_buf) {
+    const int qp = rc_next_qp(&g_rate_ctl, now_ns(), req->bitrate, req->width, req->height);
     if (vaapi_state_ensure_resolution(st, req->width, req->height) != 0) return -1;
 
     uint32_t import_stride = req->stride_y;
@@ -684,7 +703,7 @@ static long encode_one_frame(vaapi_state_t *st, int dmabuf_fd, const EncodeReque
     seq.intra_period = 1;
     seq.intra_idr_period = 1;
     seq.ip_period = 0;
-    seq.bits_per_second = 2000000;
+    seq.bits_per_second = req->bitrate ? req->bitrate : 2000000;
     seq.max_num_ref_frames = 1;
     seq.picture_width_in_mbs = mb_width;
     seq.picture_height_in_mbs = mb_height;
@@ -706,7 +725,7 @@ static long encode_one_frame(vaapi_state_t *st, int dmabuf_fd, const EncodeReque
         pic.ReferenceFrames[i].flags = VA_PICTURE_H264_INVALID;
     }
     pic.coded_buf = coded_buf;
-    pic.pic_init_qp = 26;
+    pic.pic_init_qp = qp;
     pic.pic_fields.bits.idr_pic_flag = 1;
     pic.pic_fields.bits.reference_pic_flag = 1;
     pic.pic_fields.bits.entropy_coding_mode_flag = 1;
@@ -780,6 +799,18 @@ static long encode_one_frame(vaapi_state_t *st, int dmabuf_fd, const EncodeReque
     vaDestroySurfaces(st->dpy, &st->surfaces[0], 1);
 
     out = normalize_start_codes(out, total, &total);
+    rc_frame_done(&g_rate_ctl, now_ns(), total, qp);
+    if (getenv("REDROID_FORGE_ENCODE_STATS")) {
+        static int64_t t0; static uint64_t frames, bytes;
+        int64_t t = now_ns();
+        if (!t0 || t - t0 > 5000000000LL) {
+            if (t0 && frames) fprintf(stderr, "encode-stats: %.2f Mbps over %.1f s (%llu frames, target %.2f Mbps, last qp %d)\n",
+                                      bytes * 8.0 / ((t - t0) / 1e9) / 1e6, (t - t0) / 1e9, (unsigned long long)frames,
+                                      req->bitrate / 1e6, qp);
+            t0 = t; frames = 0; bytes = 0;
+        }
+        frames++; bytes += total;
+    }
     *out_buf = out;
     return (long)total;
 }
@@ -799,8 +830,9 @@ static int recv_request(int conn_fd, EncodeRequest *req, int *out_dmabuf_fd) {
     msg.msg_control = cmsg_buf;
     msg.msg_controllen = sizeof(cmsg_buf);
 
+    memset(req, 0, sizeof(*req));  /* fields an older client does not send stay 0 */
     ssize_t n = recvmsg(conn_fd, &msg, 0);
-    if (n != (ssize_t)sizeof(*req)) {
+    if (n != (ssize_t)sizeof(*req) && n != ENCODE_REQUEST_V1_SIZE) {
         if (n < 0) perror("recvmsg");
         else fprintf(stderr, "recvmsg: short read (%zd of %zu bytes)\n", n, sizeof(*req));
         return -1;
