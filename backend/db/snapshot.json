@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "serial": 4,
-  "generatedAt": "2026-10-07T13:11:09Z",
+  "serial": 5,
+  "generatedAt": "2026-10-08T02:00:17Z",
   "minForgeVersion": "0.1.0",
   "bases": [
     {
@@ -40,50 +40,50 @@
             {
               "id": "doctor",
               "resultado": "ok",
-              "detalle": "binder legacy slots 1-2, daemon VA-API con radeonsi"
+              "detalle": "binder legacy slots 1-2, VA-API daemon with radeonsi"
             },
             {
               "id": "hwenc.encoder-registrado",
               "resultado": "ok",
-              "detalle": "c2.hardware.encoder.h264 listado en dumpsys media.player"
+              "detalle": "c2.hardware.encoder.h264 listed in dumpsys media.player"
             },
             {
               "id": "hwenc.screenrecord-frames",
               "resultado": "ok",
-              "detalle": "74 frames H.264 en 5 s, imagen correcta"
+              "detalle": "74 H.264 frames in 5 s, correct picture"
             },
             {
               "id": "hwenc.decoders-registrados",
               "resultado": "ok",
-              "detalle": "c2.hardware.decoder.h264 y .hevc registrados (el daemon informa solo lo que la GPU decodifica); VP9 no se registra"
+              "detalle": "c2.hardware.decoder.h264 and .hevc registered (the daemon reports only what the GPU decodes); VP9 is not registered"
             },
             {
               "id": "hwenc.decode-h264",
               "resultado": "ok",
-              "detalle": "H.264 High con B-frames, 720p (300 frames) y 1080p (180): idénticos a ffmpeg por MediaCodec; 0,64 s de CPU por 100 frames contra 2,44 s del decoder de software"
+              "detalle": "H.264 High with B-frames, 720p (300 frames) and 1080p (180): identical to ffmpeg through MediaCodec; 0.64 s of CPU per 100 frames against 2.44 s for the software decoder"
             },
             {
               "id": "hwenc.decode-hevc",
               "resultado": "ok",
-              "detalle": "HEVC 1080p, 180 frames idénticos a ffmpeg; 0,72 s de CPU por 100 frames contra 2,14 s del software"
+              "detalle": "HEVC 1080p, 180 frames identical to ffmpeg; 0.72 s of CPU per 100 frames against 2.14 s for software"
             },
             {
               "id": "hwenc.decode-hevc-10bit",
               "resultado": "ok",
-              "detalle": "HEVC Main10 1080p, 150 frames idénticos a ffmpeg con salida de 8 bits (los 8 bits altos); no hay HDR real"
+              "detalle": "HEVC Main10 1080p, 150 frames identical to ffmpeg with 8-bit output (the high 8 bits); there is no real HDR"
             },
             {
               "id": "hwenc.decode-vp9",
               "resultado": "omitido",
-              "detalle": "la GPU (UVD/VCE) no decodifica VP9 por hardware: Android usa su decoder de software"
+              "detalle": "the GPU (UVD/VCE) does not decode VP9 in hardware: Android uses its software decoder"
             },
             {
               "id": "hwenc.scrcpy-visual",
               "resultado": "ok",
-              "detalle": "SmartTube 1080p60 AVC 7,7 Mbps visto por scrcpy entre dos ciudades y dos ISP: calidad impecable, tironeo muy leve, 0 frames descartados por el reproductor"
+              "detalle": "SmartTube 1080p60 AVC 7.7 Mbps watched through scrcpy between two cities and two ISPs: flawless quality, very slight stutter, 0 frames dropped by the player"
             }
           ],
-          "notas": "Decode por hardware de H.264 y HEVC (8 y 10 bits) verificado bit a bit contra ffmpeg. Los chequeos de encode se heredan de la validación del módulo v3 (el encoder no cambió). En uso real con SmartTube 1080p60 y scrcpy hubo dos cuelgues intermitentes del VCE (ring vce0 timeout, reset del GPU) en ~16 min: ver problemasConocidos.",
+          "notas": "Hardware decode of H.264 and HEVC (8 and 10 bits) verified bit by bit against ffmpeg. The encode checks are inherited from the validation of module v3 (the encoder did not change). In real use with SmartTube 1080p60 and scrcpy there were two intermittent VCE hangs (ring vce0 timeout, GPU reset) in ~16 min: see problemasConocidos.",
           "evidencia": "https://github.com/fogelmanjg/redroid-forge/pull/15"
         },
         {
@@ -99,55 +99,55 @@
             {
               "id": "doctor",
               "resultado": "ok",
-              "detalle": "binder legacy slot 0 (devices= por default), daemon VA-API con iHD, modificador Y_TILED"
+              "detalle": "binder legacy slot 0 (devices= by default), VA-API daemon with iHD, Y_TILED modifier"
             },
             {
               "id": "hwenc.encoder-registrado",
               "resultado": "ok",
-              "detalle": "c2.hardware.encoder.h264 listado en dumpsys media.player"
+              "detalle": "c2.hardware.encoder.h264 listed in dumpsys media.player"
             },
             {
               "id": "hwenc.screenrecord-frames",
               "resultado": "ok",
-              "detalle": "209 frames H.264 Constrained Baseline 1000x600 en MP4 valido; el daemon registro 209 encodes"
+              "detalle": "209 H.264 Constrained Baseline 1000x600 frames in a valid MP4; the daemon logged 209 encodes"
             },
             {
               "id": "hwenc.scrcpy-visual",
               "resultado": "ok",
-              "detalle": "visto en vivo por scrcpy, imagen limpia y fluida"
+              "detalle": "watched live through scrcpy, clean and smooth picture"
             },
             {
               "id": "hwenc.decoders-registrados",
               "resultado": "ok",
-              "detalle": "c2.hardware.decoder.h264, .hevc y .vp9 registrados (el iHD decodifica además vp8, mpeg2, vc1 y av1, para los que todavía no hay componente)"
+              "detalle": "c2.hardware.decoder.h264, .hevc and .vp9 registered (iHD also decodes vp8, mpeg2, vc1 and av1, for which there is no component yet)"
             },
             {
               "id": "hwenc.decode-h264",
               "resultado": "ok",
-              "detalle": "720p (300 frames) y 1080p (180): idénticos a ffmpeg; 1,99 s de CPU por 100 frames contra 5,32 s del software (2,7x menos)"
+              "detalle": "720p (300 frames) and 1080p (180): identical to ffmpeg; 1.99 s of CPU per 100 frames against 5.32 s for software (2.7x less)"
             },
             {
               "id": "hwenc.decode-hevc",
               "resultado": "ok",
-              "detalle": "HEVC 1080p, 180 frames idénticos; 1,80 s por 100 frames contra 4,87 s (2,7x menos)"
+              "detalle": "HEVC 1080p, 180 identical frames; 1.80 s per 100 frames against 4.87 s (2.7x less)"
             },
             {
               "id": "hwenc.decode-hevc-10bit",
               "resultado": "ok",
-              "detalle": "HEVC Main10 1080p, 150 frames idénticos con salida de 8 bits"
+              "detalle": "HEVC Main10 1080p, 150 identical frames with 8-bit output"
             },
             {
               "id": "hwenc.decode-vp9",
               "resultado": "ok",
-              "detalle": "VP9 720p (240 frames) idénticos; 1080p: 1,72 s por 100 frames contra 2,46 s del software (solo 1,4x menos)"
+              "detalle": "VP9 720p (240 frames) identical; 1080p: 1.72 s per 100 frames against 2.46 s for software (only 1.4x less)"
             },
             {
               "id": "hwenc.decode-vp9-10bit",
               "resultado": "ok",
-              "detalle": "VP9 perfil 2 720p, 150 frames idénticos con salida de 8 bits"
+              "detalle": "VP9 profile 2 720p, 150 identical frames with 8-bit output"
             }
           ],
-          "notas": "Requirio dos arreglos propios de Intel: intel-media-driver en la imagen del backend y normalizacion de start codes Annex-B a 4 bytes en el daemon (iHD emite 3 y el parser de CSD de MPEG4Writer exige 4). Instancia 1000x600 con tope de 3 GB, uso real ~1,6 GB. Decode por hardware verificado en la misma máquina el 07/10/2026 (CPU de notebook). La descarga directa por vaDeriveImage pasó la autoverificación en Intel. El ahorro de CPU con VP9 es modesto porque el decoder de software es muy eficiente.",
+          "notas": "It required two Intel-specific fixes: intel-media-driver in the backend image and normalization of Annex-B start codes to 4 bytes in the daemon (iHD emits 3 and MPEG4Writer's CSD parser requires 4). 1000x600 instance with a 3 GB cap, real use ~1.6 GB. Hardware decode verified on the same machine on 07/10/2026 (laptop CPU). The direct download through vaDeriveImage passed the self-check on Intel. The CPU saving with VP9 is modest because the software decoder is very efficient.",
           "evidencia": "https://github.com/fogelmanjg/redroid-forge/pull/15"
         }
       ],
@@ -158,15 +158,15 @@
             "vendor": "amd",
             "gpu": "Radeon RX 480 (Polaris10)"
           },
-          "descripcion": "Con decode y encode (scrcpy) a la vez en 1080p60 se vio dos veces en ~16 min un timeout del VCE (ring vce0 timeout) que resetea el GPU y reinicia Android. El daemon se relanza solo. Sin reproducir con solo decode; se sospecha de la reactivación del VCE tras estar inactivo o del driver/VA-API viejo de esa generación."
+          "descripcion": "With decode and encode (scrcpy) at the same time at 1080p60, a VCE timeout (ring vce0 timeout) that resets the GPU and restarts Android was seen twice in ~16 min. The daemon relaunches by itself. Not reproduced with decode only; suspected causes are the VCE waking up after being idle, or the old driver/VA-API of that generation."
         },
         {
           "id": "encoder-sin-control-de-bitrate",
-          "descripcion": "El encoder usa QP fijo y no respeta el bitrate que pide scrcpy: a 720p60 produce ~50 Mbps. Anda, pero consume mucha subida en conexiones remotas. Mejora pendiente."
+          "descripcion": "The encoder uses a fixed QP and does not respect the bitrate scrcpy asks for: at 720p60 it produces ~50 Mbps. It works, but uses a lot of upload on remote connections. Improvement pending."
         },
         {
           "id": "hdr-y-10-bits-salen-como-8-bits",
-          "descripcion": "El video de 10 bits (HDR) se decodifica por hardware pero sale como 8 bits: el gralloc de redroid reinicia Android al asignar buffers P010. No hay HDR real ni por scrcpy."
+          "descripcion": "10-bit video (HDR) is decoded in hardware but comes out as 8-bit: redroid's gralloc restarts Android when allocating P010 buffers. There is no real HDR, not even through scrcpy."
         }
       ]
     }
