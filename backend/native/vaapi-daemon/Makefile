@@ -34,7 +34,7 @@ endif
 # libdrm's -I (pkg-config): see the comment of the drm_fourcc.h include in daemon.c.
 LIBDRM_CFLAGS := $(shell pkg-config --cflags libdrm 2>/dev/null)
 
-daemon: daemon.c decode_h264.c decode_h264.h protocol.h hwdec.c hwdec.h Makefile
+daemon: daemon.c decode_h264.c decode_h264.h protocol.h ratectl.h hwdec.c hwdec.h Makefile
 	$(CC) $(CFLAGS) $(LIBDRM_CFLAGS) $(HWDEC_CFLAGS) -o daemon daemon.c decode_h264.c $(HWDEC_SRCS) $(LDLIBS) $(HWDEC_LIBS)
 
 # Step 1 of hwdecode (docs/ROADMAP.md, Phase 2, step 5): a hardware decode session

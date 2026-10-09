@@ -31,6 +31,7 @@ struct VaapiEncInterface : public SimpleInterface<void>::BaseParams {
 
     uint32_t width() const { return mSize->width; }
     uint32_t height() const { return mSize->height; }
+    uint32_t bitrate() const { return mBitrate->value; }
 
 private:
     static C2R SizeSetter(bool mayBlock, const C2P<C2StreamPictureSizeInfo::input> &oldMe,
@@ -38,6 +39,9 @@ private:
     static C2R ProfileLevelSetter(bool mayBlock, C2P<C2StreamProfileLevelInfo::output> &me);
 
     std::shared_ptr<C2StreamPictureSizeInfo::input> mSize;
+    // The bitrate MediaCodec asks for (KEY_BIT_RATE, also changed at run time). It travels to
+    // the daemon with every frame, which steers the QP of each frame to reach it on average.
+    std::shared_ptr<C2StreamBitrateInfo::output> mBitrate;
     // Tier 5.7 finding: without this, GraphicBufferSource/gralloc has no hint
     // that the input Surface feeds a hardware video encoder, so it allocates
     // buffers with DCC (Delta Color Compression) enabled on this AMD GPU --

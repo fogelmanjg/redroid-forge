@@ -206,8 +206,14 @@ Venus-proxy, NVENC), with already-known driver quirks (e.g. the scanline artifac
    decode and encode at the same time, 0 frames dropped by the player, the daemon at 10-20 % of a core,
    impeccable quality and a very slight stutter in scrcpy. What is recorded as an improvement, not as a
    blocker:
-   - **The encoder ignores the bitrate** (fixed QP 26, no rate control; `EncodeRequest` does not carry it
-     and the Android component does not read it). scrcpy asks for 8 Mbps and the daemon encodes at ~50 Mbps
+   - ✅ **Done (07/10/2026): the encoder now honors the bitrate.** It used to ignore it (fixed QP 26; `EncodeRequest` did not carry it
+     and the Android component did not read it). Now the component declares `C2_PARAMKEY_BITRATE` and sends it with every frame
+     (`EncodeRequest.bitrate`; an older component without the field is accepted as "not specified" and keeps QP 26), and
+     the daemon steers the QP of every frame (`ratectl.h`: all-intra sizes follow `C * 2^(-QP/6)`, complexity re-estimated
+     per frame, a decaying debt term, budget measured in time so variable-rate sources work). The hardware stays in CQP, so
+     it works the same on any driver. Measured on Iris Xe with `screenrecord` over scrolling content: asked 2 / 8 Mbps
+     -> 2.3 / 7.5 Mbps (it was ~50 Mbps at 720p60); a bitrate above what the content needs just floors at QP 14. Simulation
+     test: `test/ratectl-test.c`; `REDROID_FORGE_ENCODE_STATS=1` prints the real bitrate every 5 s. Original finding: scrcpy asks for 8 Mbps and the daemon encodes at ~50 Mbps
      at 720p60: it explains the very high quality and the slight stutter on the remote upload. Solution:
      CBR/VBR control in the daemon (bitrate and fps field in the protocol, a rate-control attribute in
      `vaCreateConfig`, VA-API miscellaneous parameter buffers). Encode phase, after the first version. A
