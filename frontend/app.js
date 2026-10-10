@@ -48,26 +48,30 @@ function androidIdCellHtml(inst) {
   `;
 }
 
-async function loadInstances() {
+// `silent`: the periodic refresh does not flash "Loading..." over the table.
+async function loadInstances({ silent = false } = {}) {
   const tbody = $('#instances-table tbody');
-  tbody.innerHTML = `<tr><td colspan="6">${t('common.loading')}</td></tr>`;
+  if (!silent) tbody.innerHTML = `<tr><td colspan="6">${t('common.loading')}</td></tr>`;
   try {
     const instances = await api('/instances');
     if (instances.length === 0) {
       tbody.innerHTML = `<tr><td colspan="6">${t('instances.none')}</td></tr>`;
       return;
     }
-    tbody.innerHTML = '';
+    // Built off-screen and swapped in one go, so a refresh never leaves the table half drawn.
+    const rows = document.createDocumentFragment();
     for (const inst of instances) {
       const tr = document.createElement('tr');
       tr.innerHTML = `
         <td>${inst.name}</td>
         <td>${inst.dockerImage}</td>
-        <td>${inst.status}</td>
+        <td class="status-cell"></td>
         <td>${inst.adbPort}</td>
         <td class="android-id-cell">${androidIdCellHtml(inst)}</td>
         <td class="actions"></td>
       `;
+      const state = InstanceState.describe(inst.status);
+      tr.querySelector('.status-cell').innerHTML = `<span class="status-dot ${state.tone}"></span>${t('instances.status.' + state.key)}`;
       const actions = tr.querySelector('.actions');
       if (inst.hasGapps && inst.androidId && !inst.androidIdRegisteredAt) {
         const link = document.createElement('a');
@@ -90,6 +94,7 @@ async function loadInstances() {
         });
         actions.appendChild(markBtn);
       }
+      // Only the actions that make sense for the current state (see instanceState.js).
       const mk = (label, action) => {
         const b = document.createElement('button');
         b.textContent = label;
@@ -98,33 +103,37 @@ async function loadInstances() {
           b.disabled = true;
           try {
             await api(`/instances/${inst.id}/${action}`, { method: 'POST' });
-            await loadInstances();
           } catch (e) {
             alert(e.message);
           } finally {
             b.disabled = false;
+            await loadInstances({ silent: true });
           }
         });
         return b;
       };
-      actions.appendChild(mk('Start', 'start'));
-      actions.appendChild(mk('Stop', 'stop'));
-      actions.appendChild(mk('Restart', 'restart'));
-      const del = document.createElement('button');
-      del.textContent = t('instances.delete');
-      del.className = 'secondary';
-      del.addEventListener('click', async () => {
-        if (!confirm(t('instances.confirmDelete', { name: inst.name }))) return;
-        try {
-          await api(`/instances/${inst.id}`, { method: 'DELETE' });
-          await loadInstances();
-        } catch (e) {
-          alert(e.message);
+      for (const action of state.actions) {
+        if (action === 'delete') {
+          const del = document.createElement('button');
+          del.textContent = t('instances.delete');
+          del.className = 'secondary';
+          del.addEventListener('click', async () => {
+            if (!confirm(t('instances.confirmDelete', { name: inst.name }))) return;
+            try {
+              await api(`/instances/${inst.id}`, { method: 'DELETE' });
+              await loadInstances({ silent: true });
+            } catch (e) {
+              alert(e.message);
+            }
+          });
+          actions.appendChild(del);
+        } else {
+          actions.appendChild(mk(t(`instances.${action}`), action));
         }
-      });
-      actions.appendChild(del);
-      tbody.appendChild(tr);
+      }
+      rows.appendChild(tr);
     }
+    tbody.replaceChildren(rows);
   } catch (e) {
     tbody.innerHTML = `<tr><td colspan="6">${t('common.error', { msg: e.message })}</td></tr>`;
   }
@@ -284,3 +293,12 @@ I18n.apply();
 syncLangButton();
 
 loadInstances();
+
+// The state of an instance changes by itself (it boots, it crashes, someone uses adb/docker): refresh
+// every few seconds while the Instances tab is the one on screen. It does not run while a dialog is open
+// (the user is typing) nor when the browser tab is hidden.
+setInterval(() => {
+  const onInstances = $('.tab-btn.active')?.dataset.tab === 'instances';
+  const dialogOpen = $$('dialog').some((d) => d.open);
+  if (onInstances && !dialogOpen && !document.hidden) loadInstances({ silent: true });
+}, 4000);

@@ -91,6 +91,9 @@ th, td { text-align: left; padding: 0.5rem; border-bottom: 1px solid var(--borde
 .status-dot.ok { background: var(--ok); }
 .status-dot.warn { background: var(--warn); }
 .status-dot.fail { background: var(--fail); }
+.status-dot.idle { background: var(--muted, #8a8f98); }
+.status-cell { white-space: nowrap; }
+.status-cell .status-dot { margin-right: 0.4rem; vertical-align: middle; }
 
 .muted { opacity: 0.6; }
 .ok-text { color: var(--ok); font-size: 0.8rem; }
