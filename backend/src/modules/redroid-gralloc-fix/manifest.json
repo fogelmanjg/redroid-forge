@@ -1,0 +1,43 @@
+{
+  "id": "redroid-gralloc-fix",
+  "nombre": "Workaround for a redroid bug: gralloc crash on 10-bit formats",
+  "esTerceroNoLibre": false,
+  "licencia": "Not software of redroid-forge: a 2-byte change made on the instance's own copy of a file of redroid; nothing is redistributed",
+  "origen": "https://github.com/remote-android/redroid-doc/issues/930",
+  "descripcion": "This is NOT a feature of redroid-forge: it works around a KNOWN BUG OF REDROID 15 that we reported upstream (redroid-doc#930). The graphics allocator of the official image crashes (SIGFPE, division by zero in gralloc_gbm_bo_create) when an app asks for a buffer in a pixel format its table does not know -- RGBA_1010102 (10-bit colour: Unity 6 games, benchmarks, HDR) or P010 -- and that crash restarts the whole of Android inside the container. It happens in host GPU mode on AMD (reported) and Intel (seen with P010). Remove this module when redroid fixes it.",
+  "queToca": [
+    "in the stopped instance, before its first start, it changes 2 bytes of /vendor/lib64/hw/gralloc.gbm.so, a file of redroid (xor ecx,ecx -> mov cl,4: an unknown format is treated as 4 bytes per pixel instead of 0)",
+    "it only patches the file if the bytes around the change are exactly the known ones of the official redroid 15 image; with any other version of the file it leaves it as it is and says so in the log. It does nothing on hosts whose GPU is not AMD or Intel",
+    "the change is applied to the instance's own copy: the Docker image is not modified and nothing is downloaded or redistributed",
+    "a buffer in an unknown format is now allocated as 32 bits per pixel instead of crashing: correct for RGBA_1010102, only an approximation for other exotic formats"
+  ],
+  "compatibleCon": {
+    "androidVersion": [
+      15
+    ],
+    "gpuMode": [
+      "host"
+    ]
+  },
+  "etapa": [
+    4
+  ],
+  "entry": "./integrate.js",
+  "version": 1,
+  "i18n": {
+    "es": {
+      "nombre": "Workaround de un bug de redroid: gralloc se cae con formatos de 10 bits",
+      "licencia": "No es software de redroid-forge: un cambio de 2 bytes en la copia de un archivo de redroid que tiene la propia instancia; no se redistribuye nada",
+      "descripcion": "Esto NO es una función de redroid-forge: es un workaround de un BUG CONOCIDO DE REDROID 15 que reportamos upstream (redroid-doc#930). El allocator de gráficos de la imagen oficial se cae (SIGFPE, división por cero en gralloc_gbm_bo_create) cuando una app pide un buffer en un formato de píxel que su tabla no conoce -- RGBA_1010102 (color de 10 bits: juegos de Unity 6, benchmarks, HDR) o P010 -- y esa caída reinicia todo Android dentro del contenedor. Pasa en modo GPU host con AMD (reportado) e Intel (visto con P010). Hay que sacar este módulo cuando redroid lo arregle.",
+      "queToca": [
+        "en la instancia parada, antes de su primer arranque, cambia 2 bytes de /vendor/lib64/hw/gralloc.gbm.so, un archivo de redroid (xor ecx,ecx -> mov cl,4: un formato desconocido se trata como 4 bytes por píxel en vez de 0)",
+        "sólo parchea el archivo si los bytes alrededor del cambio son exactamente los conocidos de la imagen oficial de redroid 15; con cualquier otra versión del archivo lo deja como está y lo dice en el log. No hace nada en hosts cuya GPU no sea AMD ni Intel",
+        "el cambio se aplica a la copia de la propia instancia: la imagen de Docker no se modifica y no se descarga ni se redistribuye nada",
+        "un buffer en un formato desconocido ahora se reserva como 32 bits por píxel en vez de caerse: correcto para RGBA_1010102, sólo una aproximación para otros formatos exóticos"
+      ]
+    }
+  },
+  "referencias": [
+    "https://github.com/remote-android/redroid-doc/issues/930"
+  ]
+}
