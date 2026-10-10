@@ -273,6 +273,51 @@ function checkAndroidIdRegistration() {
   });
 }
 
+// The known redroid bug that the redroid-gralloc-fix module works around (redroid-doc#930): the file of EVERY instance is
+// read, so an instance created before the module existed (or from an image where it did not apply) is not overlooked.
+// It is a bug of redroid, not of redroid-forge: the check says so and where it was reported.
+async function checkGrallocFix({ readFile = runtime.readFile, vendorOf = hwAccel.detectGpuVendor, list = () => store.readAll() } = {}) {
+  const fix = require('../modules/redroid-gralloc-fix/integrate');
+  const id = 'redroid-gralloc-fix';
+  const label = 'Known redroid bug: gralloc crash on 10-bit formats';
+  const vendor = await vendorOf();
+  if (!fix.GPU_VENDORS.includes(vendor)) {
+    return [{ id, label, status: 'ok', detail: `Host GPU "${vendor}": the bug is known on ${fix.GPU_VENDORS.join('/')} hosts only, nothing to check.` }];
+  }
+  const instances = list().filter((i) => i.containerId);
+  if (instances.length === 0) return [{ id, label, status: 'ok', detail: 'There are no instances to check.' }];
+
+  const buggy = [];
+  const unknown = [];
+  let fixed = 0;
+  for (const i of instances) {
+    try {
+      // eslint-disable-next-line no-await-in-loop
+      const { status } = fix.patchGralloc(await readFile(i.containerId, fix.TARGET));
+      if (status === 'patched') buggy.push(i.name); // "it would be patched" = it still has the bug
+      else if (status === 'already') fixed += 1;
+      else unknown.push(i.name);
+    } catch (e) {
+      unknown.push(i.name);
+    }
+  }
+  if (buggy.length === 0) {
+    return [{
+      id,
+      label,
+      status: unknown.length ? 'warn' : 'ok',
+      detail: `${fixed} instance(s) have the workaround.${unknown.length ? ` ${unknown.length} could not be checked or carry another version of the file (${unknown.slice(0, 4).join(', ')}): an app asking for a 10-bit buffer could still restart Android there.` : ''}`,
+    }];
+  }
+  return [{
+    id,
+    label,
+    status: 'warn',
+    detail: `${buggy.length} instance(s) still have the redroid bug (${buggy.slice(0, 6).join(', ')}${buggy.length > 6 ? ', ...' : ''}): when an app asks for a 10-bit buffer (RGBA_1010102, P010: Unity 6 games, benchmarks, HDR) the graphics allocator dies with SIGFPE and the whole of Android restarts inside the container. It is a known bug of redroid, reported at https://github.com/remote-android/redroid-doc/issues/930.`,
+    fix: 'Create the instance again: the redroid-gralloc-fix module (bound to the official image) applies the workaround to its copy of gralloc.gbm.so when it is created. An instance that already exists can be patched in place while it is stopped, with the same 2-byte change (see backend/src/modules/redroid-gralloc-fix/README.md).',
+  }];
+}
+
 // Known-combinations database (docs/KNOWN-COMBINATIONS.md). Informative: never
 // 'fail' because of age -- the app works the same without it, it just knows less
 // about which combinations are validated.
@@ -300,11 +345,12 @@ function checkKnownDb() {
 }
 
 async function runAll() {
-  const [dockerSocket, hwsim, imagePresence, hwAccelCheck] = await Promise.all([
+  const [dockerSocket, hwsim, imagePresence, hwAccelCheck, grallocFix] = await Promise.all([
     checkDockerSocket(),
     checkHwsim(),
     checkImagesPresent(),
     checkHwAccel(),
+    checkGrallocFix().catch((e) => [{ id: 'redroid-gralloc-fix', label: 'Known redroid bug: gralloc crash on 10-bit formats', status: 'warn', detail: `could not be checked: ${e.message}` }]),
   ]);
 
   const checks = [
@@ -318,10 +364,11 @@ async function runAll() {
     { id: 'hw-accel', label: 'HW acceleration (hwenc, VA-API)', ...hwAccelCheck },
     { id: 'known-db', label: 'Known-combinations database', ...checkKnownDb() },
     ...imagePresence,
+    ...grallocFix,
     ...checkAndroidIdRegistration(),
   ];
 
   return checks;
 }
 
-module.exports = { runAll, checkKnownDb };
+module.exports = { runAll, checkKnownDb, checkGrallocFix };

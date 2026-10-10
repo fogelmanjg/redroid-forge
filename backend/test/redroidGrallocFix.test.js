@@ -89,3 +89,49 @@ test('the manifest says it is a workaround of a known redroid bug and where it w
   assert.match(m.i18n.es.descripcion, /BUG CONOCIDO DE REDROID/);
   assert.deepStrictEqual(m.compatibleCon.androidVersion, [15]);
 });
+
+// ---- the doctor check ----
+const { checkGrallocFix } = require('../src/lib/doctor');
+const { firstFileFromTar } = require('../src/lib/tarFile');
+
+function tarOf(name, content) {
+  const header = Buffer.alloc(512);
+  header.write(name);
+  header.write(`${content.length.toString(8).padStart(11, '0')}\0`, 124);
+  header[156] = 48;
+  const pad = Buffer.alloc((512 - (content.length % 512)) % 512);
+  return Buffer.concat([header, content, pad, Buffer.alloc(1024)]);
+}
+
+test('tarFile reads the first regular file of a tar archive', () => {
+  const content = Buffer.from('hello world');
+  assert.deepStrictEqual(firstFileFromTar(tarOf('x', content)), content);
+  assert.strictEqual(firstFileFromTar(Buffer.alloc(1024)), null);
+});
+
+test('doctor: it flags the instances that still have the bug and says it is a known redroid bug', async () => {
+  const files = { old: fakeGralloc(), new: fakeGralloc('b104') };
+  const r = await checkGrallocFix({
+    vendorOf: async () => 'amd',
+    list: () => [{ name: 'a-old', containerId: 'old' }, { name: 'a-new', containerId: 'new' }],
+    readFile: async (id) => files[id],
+  });
+  assert.strictEqual(r[0].status, 'warn');
+  assert.match(r[0].detail, /a-old/);
+  assert.doesNotMatch(r[0].detail, /a-new/);
+  assert.match(r[0].detail, /known bug of redroid/);
+  assert.match(r[0].detail, /redroid-doc\/issues\/930/);
+});
+
+test('doctor: ok when every instance has the fix, and not applicable on other GPUs', async () => {
+  const ok = await checkGrallocFix({ vendorOf: async () => 'intel', list: () => [{ name: 'n', containerId: 'c' }], readFile: async () => fakeGralloc('b104') });
+  assert.strictEqual(ok[0].status, 'ok');
+  const na = await checkGrallocFix({ vendorOf: async () => 'nvidia', list: () => { throw new Error('must not be asked'); }, readFile: async () => null });
+  assert.strictEqual(na[0].status, 'ok');
+  assert.match(na[0].detail, /nothing to check/);
+});
+
+test('doctor: a file it does not recognise is a warning, never a pass', async () => {
+  const r = await checkGrallocFix({ vendorOf: async () => 'amd', list: () => [{ name: 'x', containerId: 'c' }], readFile: async () => Buffer.alloc(100) });
+  assert.strictEqual(r[0].status, 'warn');
+});
