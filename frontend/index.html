@@ -78,6 +78,9 @@ gunzip -c image.tar.gz | docker load</pre>
       <label><span data-i18n="new.image">Image</span>
         <select name="imageId" id="image-select"></select>
       </label>
+      <label class="contract-checkbox"><input type="checkbox" name="gapps" id="chk-gapps" />
+        <span data-i18n="new.gapps">Google Apps (Play Store)</span></label>
+      <p id="gapps-status" class="muted" hidden></p>
       <div class="dialog-actions">
         <button type="button" id="btn-cancel-new-instance" data-i18n="common.cancel">Cancel</button>
         <button type="submit" data-i18n="new.create">Create</button>

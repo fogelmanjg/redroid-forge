@@ -200,6 +200,8 @@ $('#btn-new-instance').addEventListener('click', async () => {
   } catch (e) {
     select.innerHTML = `<option>${t('common.error', { msg: e.message })}</option>`;
   }
+  gappsChk.checked = false;
+  resetGappsStatus();
   dialog.showModal();
 });
 $('#btn-cancel-new-instance').addEventListener('click', () => dialog.close());
@@ -207,11 +209,12 @@ $('#btn-cancel-new-instance').addEventListener('click', () => dialog.close());
 // Phase 4 gate: if the backend answers 428 with the pending manifests
 // (see moduleGate.js), it shows the generic contract modal(s) before
 // retrying -- the backend never creates the instance without that acceptance.
-async function createInstance(name, imageId, form) {
+async function createInstance(name, imageId, form, modules) {
   try {
-    await api('/instances', { method: 'POST', body: JSON.stringify({ name, imageId }) });
+    await api('/instances', { method: 'POST', body: JSON.stringify({ name, imageId, modules }) });
     dialog.close();
     form.reset();
+    resetGappsStatus();
     await loadInstances();
   } catch (err) {
     if (err.status === 428 && err.modules) {
@@ -223,7 +226,7 @@ async function createInstance(name, imageId, form) {
         return;
       }
       if (allAccepted) {
-        await createInstance(name, imageId, form);
+        await createInstance(name, imageId, form, modules);
       }
       return;
     }
@@ -236,7 +239,36 @@ $('#new-instance-form').addEventListener('submit', async (e) => {
   const form = e.target;
   const name = form.name.value.trim();
   const imageId = form.imageId.value;
-  await createInstance(name, imageId, form);
+  const modules = form.gapps.checked ? ['gapps'] : [];
+  await createInstance(name, imageId, form, modules);
+});
+
+// GApps option: when it is ticked, the backend verifies the user's files right away (the same
+// verification the module does when injecting) so a missing folder is known before the
+// contract is shown, not after.
+const gappsChk = $('#chk-gapps');
+const gappsStatus = $('#gapps-status');
+function resetGappsStatus() { gappsStatus.hidden = true; gappsStatus.textContent = ''; }
+gappsChk.addEventListener('change', async () => {
+  if (!gappsChk.checked) { resetGappsStatus(); return; }
+  gappsStatus.hidden = false;
+  gappsStatus.className = 'muted';
+  gappsStatus.textContent = t('new.gappsChecking');
+  try {
+    const st = await api('/modules/gapps/status');
+    if (!gappsChk.checked) return; // it was unticked while checking
+    if (st.ok) {
+      gappsStatus.className = st.supported ? 'ok-text' : 'warn-text';
+      gappsStatus.textContent = t('new.gappsOk', { pkg: st.packageId || 'gapps', n: st.files })
+        + (st.supported ? '' : t('new.gappsUnsupported'));
+    } else {
+      gappsStatus.className = 'fail-text';
+      gappsStatus.textContent = t('new.gappsMissing', { msg: st.message });
+    }
+  } catch (e) {
+    gappsStatus.className = 'fail-text';
+    gappsStatus.textContent = t('common.error', { msg: e.message });
+  }
 });
 
 // Language: static texts are applied from the I18n table; dynamic views are re-rendered on change.

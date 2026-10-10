@@ -36,6 +36,22 @@ router.get('/', (req, res) => {
   res.json(manifests.list().map((m) => withStatus(m, req.query.imageId)));
 });
 
+// GApps does not download anything: the user provides the files (see the module's manifest).
+// This lets the UI say, BEFORE creating the instance and asking to accept the contract,
+// whether the folder is ready -- it verifies the sha256 of every file, which is exactly what
+// the module does when it injects. Declared before '/:id' so that "gapps" is not an id.
+router.get('/gapps/status', async (req, res) => {
+  const gapps = require('../modules/gapps/integrate');
+  try {
+    const { pkg, source } = await gapps.resolveAndVerify();
+    res.json({
+      ok: true, source, packageId: pkg.id || null, files: pkg.archivos.length, supported: source === 'db',
+    });
+  } catch (e) {
+    res.json({ ok: false, message: e.message });
+  }
+});
+
 router.get('/:id', (req, res) => {
   const manifest = manifests.get(req.params.id);
   if (!manifest) return res.status(404).json({ error: `Unknown module: ${req.params.id}` });
