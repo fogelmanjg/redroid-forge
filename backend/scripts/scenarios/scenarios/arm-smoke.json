@@ -1,0 +1,10 @@
+{
+  "id": "arm-smoke",
+  "description": "ARM translation, smoke test: an instance with the arm-translation module boots with the native bridge loaded (idle for a short while).",
+  "durationS": 10,
+  "warmupS": 5,
+  "instances": [
+    { "name": "a", "modules": ["arm-translation"], "width": 720, "height": 1280, "dpi": 320, "fps": 30, "workloads": [] }
+  ],
+  "criteria": { "noRestarts": true, "noKernelErrors": true }
+}

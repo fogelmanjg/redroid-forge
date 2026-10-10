@@ -276,7 +276,8 @@ $('#btn-new-instance').addEventListener('click', async () => {
   } catch (e) {
     select.innerHTML = `<option>${t('common.error', { msg: e.message })}</option>`;
   }
-  gappsChk.checked = false;
+  $('#chk-gapps').checked = false;
+  $('#chk-arm').checked = false;
   resetGappsStatus();
   dialog.showModal();
   refreshHwencOption();
@@ -320,39 +321,50 @@ $('#new-instance-form').addEventListener('submit', async (e) => {
   const modules = [];
   if (form.hwenc.checked) modules.push('hwenc');
   if (form.gapps.checked) modules.push('gapps');
+  if (form.arm.checked) modules.push('arm-translation');
   const display = {
     width: Number(form.width.value), height: Number(form.height.value), dpi: Number(form.dpi.value), fps: Number(form.fps.value),
   };
   await createInstance(name, imageId, form, modules, display);
 });
 
-// GApps option: when it is ticked, the backend verifies the user's files right away (the same
-// verification the module does when injecting) so a missing folder is known before the
-// contract is shown, not after.
-const gappsChk = $('#chk-gapps');
-const gappsStatus = $('#gapps-status');
-function resetGappsStatus() { gappsStatus.hidden = true; gappsStatus.textContent = ''; }
-gappsChk.addEventListener('change', async () => {
-  if (!gappsChk.checked) { resetGappsStatus(); return; }
-  gappsStatus.hidden = false;
-  gappsStatus.className = 'muted';
-  gappsStatus.textContent = t('new.gappsChecking');
-  try {
-    const st = await api('/modules/gapps/status');
-    if (!gappsChk.checked) return; // it was unticked while checking
-    if (st.ok) {
-      gappsStatus.className = st.supported ? 'ok-text' : 'warn-text';
-      gappsStatus.textContent = t('new.gappsOk', { pkg: st.packageId || 'gapps', n: st.files })
-        + (st.supported ? '' : t('new.gappsUnsupported'));
-    } else {
-      gappsStatus.className = 'fail-text';
-      gappsStatus.textContent = t('new.gappsMissing', { msg: st.message });
+// Options whose files the user provides (GApps, ARM translation): when one is ticked, the backend
+// verifies the files right away (the same verification the module does when injecting) so a missing
+// folder is known before the contract is shown, not after.
+function fileModuleOption({
+  chk, status, endpoint, label,
+}) {
+  const reset = () => { status.hidden = true; status.textContent = ''; };
+  chk.addEventListener('change', async () => {
+    if (!chk.checked) { reset(); return; }
+    status.hidden = false;
+    status.className = 'muted';
+    status.textContent = t('new.filesChecking', { what: label });
+    try {
+      const st = await api(endpoint);
+      if (!chk.checked) return; // it was unticked while checking
+      if (st.ok) {
+        status.className = st.supported ? 'ok-text' : 'warn-text';
+        status.textContent = t('new.filesOk', { pkg: st.packageId || label, n: st.files })
+          + (st.supported ? '' : t('new.filesUnsupported'));
+      } else {
+        status.className = 'fail-text';
+        status.textContent = t('new.filesMissing', { what: label, msg: st.message });
+      }
+    } catch (e) {
+      status.className = 'fail-text';
+      status.textContent = t('common.error', { msg: e.message });
     }
-  } catch (e) {
-    gappsStatus.className = 'fail-text';
-    gappsStatus.textContent = t('common.error', { msg: e.message });
-  }
+  });
+  return reset;
+}
+const resetGapps = fileModuleOption({
+  chk: $('#chk-gapps'), status: $('#gapps-status'), endpoint: '/modules/gapps/status', label: 'GApps',
 });
+const resetArm = fileModuleOption({
+  chk: $('#chk-arm'), status: $('#arm-status'), endpoint: '/modules/arm-translation/status', label: 'ARM translation',
+});
+function resetGappsStatus() { resetGapps(); resetArm(); }
 
 // Language: static texts are applied from the I18n table; dynamic views are re-rendered on change.
 const langBtn = $('#btn-lang');

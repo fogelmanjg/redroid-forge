@@ -15,11 +15,18 @@ const path = require('path');
 const ALLOWED_PARTITIONS = ['product', 'system_ext'];
 const ALLOWED_SUBDIRS = ['priv-app', 'app', 'etc', 'framework', 'lib64'];
 
+// What each kind of package may write (the default is the GApps one). A package of another
+// kind has its own, narrower, rules: the ARM translation only writes native libraries.
+const RULES = {
+  gapps: { partitions: ALLOWED_PARTITIONS, subdirs: ALLOWED_SUBDIRS },
+  'arm-translation': { partitions: ['system'], subdirs: ['lib64', 'bin', 'etc'] },
+};
+
 const SHA256_RE = /^[0-9a-f]{64}$/;
 
 // Validates a package definition and returns the list of problems (empty = valid).
 // `archivos`: [{ path, sha256, tamano? }]
-function validateFiles(files) {
+function validateFiles(files, rules = RULES.gapps) {
   const problems = [];
   if (!Array.isArray(files) || files.length === 0) return ['the package has no "archivos"'];
   const seen = new Set();
@@ -31,8 +38,8 @@ function validateFiles(files) {
       continue;
     }
     const [partition, sub] = p.split('/');
-    if (!ALLOWED_PARTITIONS.includes(partition) || !ALLOWED_SUBDIRS.includes(sub) || p.split('/').length < 3) {
-      problems.push(`${p}: outside of ${ALLOWED_PARTITIONS.join('|')}/${ALLOWED_SUBDIRS.join('|')}`);
+    if (!rules.partitions.includes(partition) || !rules.subdirs.includes(sub) || p.split('/').length < 3) {
+      problems.push(`${p}: outside of ${rules.partitions.join('|')}/${rules.subdirs.join('|')}`);
     }
     if (!SHA256_RE.test(f.sha256 || '')) problems.push(`${p}: "sha256" is mandatory (64 hex)`);
     if (seen.has(p)) problems.push(`${p}: duplicated`);
@@ -52,5 +59,5 @@ function bundleDigest(files) {
 }
 
 module.exports = {
-  ALLOWED_PARTITIONS, ALLOWED_SUBDIRS, SHA256_RE, validateFiles, bundleDigest,
+  ALLOWED_PARTITIONS, ALLOWED_SUBDIRS, RULES, SHA256_RE, validateFiles, bundleDigest,
 };

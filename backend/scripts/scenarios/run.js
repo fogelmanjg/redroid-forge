@@ -66,11 +66,24 @@ async function hostInfo(host, forge) {
   return { name: host.ssh, gpu, kernel, gpuVendor: m.json ? m.json.hostGpuVendor : null };
 }
 
+// The folder with the ARM translation files (see docs/SCENARIOS.md): `armDir` of the config, or the one the module itself uses.
+function armDirOf(cfg) {
+  const dir = cfg.armDir || process.env.REDROID_FORGE_ARM_DIR || path.join(REPO_ROOT, 'backend', 'data', 'arm-translation');
+  if (!fs.existsSync(path.join(dir, 'package.json'))) {
+    throw new Error(`the scenario uses the "arm-translation" module but ${dir} has no files: extract them with backend/scripts/sdk-extract.js, or point to them with armDir`);
+  }
+  return dir;
+}
+
+function usesModule(scenario, id) {
+  return scenario.instances.some((i) => i.modules.includes(id));
+}
+
 async function main() {
   const opts = parseArgs(process.argv.slice(2));
   const cfg = { ...loadConfig() };
-  for (const k of ['host', 'rootCmd', 'hwencArtifacts', 'decodeTool']) {
-    const cli = { rootCmd: 'root-cmd', hwencArtifacts: 'hwenc-artifacts', decodeTool: 'decode-tool' }[k] || k;
+  for (const k of ['host', 'rootCmd', 'hwencArtifacts', 'decodeTool', 'armDir']) {
+    const cli = { rootCmd: 'root-cmd', hwencArtifacts: 'hwenc-artifacts', decodeTool: 'decode-tool', armDir: 'arm-dir' }[k] || k;
     if (opts[cli] !== undefined) cfg[k] = opts[cli];
   }
   const scenario = loadScenario(opts.scenario);
@@ -81,7 +94,7 @@ async function main() {
   if (!cfg.host) throw new Error('--host <ssh-target> is required (or "host" in ~/.config/redroid-forge/scenarios.json)');
 
   const host = new Host({ ssh: cfg.host, rootCmd: cfg.rootCmd === undefined ? 'sudo -n' : cfg.rootCmd, log });
-  const forge = new IsolatedForge(host, { hwencArtifacts: cfg.hwencArtifacts, log });
+  const forge = new IsolatedForge(host, { hwencArtifacts: cfg.hwencArtifacts, armDir: usesModule(scenario, 'arm-translation') ? armDirOf(cfg) : null, log });
   const assets = new Assets(host, { decodeTool: cfg.decodeTool, log });
   const startedAt = new Date().toISOString();
   const outDir = path.resolve(opts.out || path.join(REPO_ROOT, 'scenario-results', `${forge.runId}-${scenario.id}`));
