@@ -14,7 +14,7 @@ function requiredModuleIdsForImage(img) {
   if (img.hasGapps) ids.push('gapps');
   if (img.hasMagisk) ids.push('magisk');
   if (img.needsHwsimWifi) ids.push('wifi-falso');
-  if (img.needsGrallocFix) ids.push('gralloc-fix');
+  if (img.needsGrallocFix) ids.push('redroid-gralloc-fix');
   return ids;
 }
 

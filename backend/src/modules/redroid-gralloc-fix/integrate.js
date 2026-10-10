@@ -1,6 +1,10 @@
 'use strict';
 
-// gralloc-fix module (stage 4 -- see manifest.json and lib/moduleRunner.js).
+// redroid-gralloc-fix module (stage 4 -- see manifest.json and lib/moduleRunner.js).
+//
+// THIS IS A WORKAROUND FOR A KNOWN BUG OF REDROID, not a feature of redroid-forge: it is what has to be
+// done to redroid's own file until redroid fixes it (remove the module then). Reported upstream:
+// https://github.com/remote-android/redroid-doc/issues/930
 //
 // The official redroid 15 image ships a gralloc.gbm.so whose gralloc_gbm_bo_create works out the
 // bytes per pixel with a table that stops at HAL_PIXEL_FORMAT_FLEX_RGBA_8888 (0x2A) and only
@@ -9,8 +13,9 @@
 // android.hardware.graphics.allocator@2.0-service, which is critical, so zygote and
 // system_server restart and the whole of Android restarts inside the container.
 //
-// Found and documented in https://github.com/remote-android/redroid-doc/issues/930 (the binary
-// workaround is the one used here: `xor ecx,ecx` -> `mov cl,4` at file offset 0x57d2).
+// Affects host GPU mode on AMD (reported there, with RGBA_1010102) and Intel (the same function dies with
+// P010 on an Iris Xe). The binary workaround of the issue is the one used here: `xor ecx,ecx` ->
+// `mov cl,4` at file offset 0x57d2.
 //
 // It runs between runtime.create() and runtime.start() (the instance is stopped), on the instance's
 // OWN copy of the file: the image is not touched and nothing is redistributed.
@@ -20,7 +25,10 @@ const os = require('os');
 const path = require('path');
 const { execFile } = require('child_process');
 const { promisify } = require('util');
+const hwAccel = require('../../lib/hwAccel');
 const execFileAsync = promisify(execFile);
+
+const GPU_VENDORS = ['amd', 'intel'];
 
 const TARGET = '/vendor/lib64/hw/gralloc.gbm.so';
 const OFFSET = 0x57d2;
@@ -31,8 +39,8 @@ const BUGGY = Buffer.from('31c9', 'hex');   // xor %ecx,%ecx
 const FIXED = Buffer.from('b104', 'hex');    // mov $4,%cl
 const AFTER = Buffer.from('eb05b90300000031d2f7', 'hex');
 
-function log(msg) { console.log(`[gralloc-fix] ${msg}`); }
-function warn(msg) { console.warn(`[gralloc-fix] ${msg}`); }
+function log(msg) { console.log(`[redroid-gralloc-fix] ${msg}`); }
+function warn(msg) { console.warn(`[redroid-gralloc-fix] ${msg}`); }
 
 // Pure. -> { status: 'patched'|'already'|'unknown', buffer }   (the input buffer is never modified)
 function patchGralloc(input) {
@@ -45,10 +53,15 @@ function patchGralloc(input) {
   return { status: 'patched', buffer: data };
 }
 
-async function integrate(containerId, ctx = {}, { copyOut, copyIn } = {}) {
+async function integrate(containerId, ctx = {}, { copyOut, copyIn, gpuVendor } = {}) {
+  const vendor = gpuVendor || await hwAccel.detectGpuVendor();
+  if (!GPU_VENDORS.includes(vendor)) {
+    log(`the host GPU is "${vendor}" (the bug is known on ${GPU_VENDORS.join('/')}): ${TARGET} of ${containerId} left as it is`);
+    return;
+  }
   const out = copyOut || ((src, dest) => execFileAsync('docker', ['cp', `${containerId}:${src}`, dest]));
   const put = copyIn || ((src, dest) => execFileAsync('docker', ['cp', src, `${containerId}:${dest}`]));
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gralloc-fix-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'redroid-gralloc-fix-'));
   const file = path.join(dir, path.basename(TARGET));
   try {
     await out(TARGET, file);
@@ -68,4 +81,6 @@ async function integrate(containerId, ctx = {}, { copyOut, copyIn } = {}) {
   }
 }
 
-module.exports = { integrate, patchGralloc, TARGET, OFFSET };
+module.exports = {
+  integrate, patchGralloc, TARGET, OFFSET, GPU_VENDORS,
+};
