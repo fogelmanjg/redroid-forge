@@ -2,37 +2,44 @@ const manifests = require('./moduleManifests');
 const acceptance = require('./moduleAcceptance');
 const hwAccel = require('./hwAccel');
 
-// Which modules an image of the catalog requires, from the same flags that
-// backend/images.json already has (hasGapps/needsHwsimWifi) plus hasMagisk
-// (added in Phase 4) and hwEncCapable (added in Phase 5, see moduleRunner.js).
-// There is no separate "modules per image" list: it is derived from the
-// metadata the catalog already declares.
+// Which modules an image of the catalog is BOUND to, from the same flags that
+// backend/images.json already has (hasGapps/needsHwsimWifi) plus hasMagisk. There is no
+// separate "modules per image" list: it is derived from the metadata the catalog declares.
 //
-// hwEncCapable follows the same "required if the image declares it" criterion
-// as hasGapps/hasMagisk/needsHwsimWifi, not a separate opt-in: if the image
-// says it ships the hwenc component, the user has to see and accept its
-// contract (even if it is "own", see section 5 of REQUIREMENTS.md) before the
-// backend integrates it -- the official image in the catalog sets this flag.
+// hwenc is NOT here since the per-instance options: `hwEncCapable` now says "this image
+// supports the hwenc module" and hwenc is an optional module of the instance, on by default
+// (see defaultModuleIdsForImage and requiredModuleIds).
 function requiredModuleIdsForImage(img) {
   const ids = [];
   if (img.hasGapps) ids.push('gapps');
   if (img.hasMagisk) ids.push('magisk');
   if (img.needsHwsimWifi) ids.push('wifi-falso');
-  if (img.hwEncCapable) ids.push('hwenc');
   return ids;
 }
 
-// Modules that the user can ask for PER INSTANCE when creating it (POST /api/instances
-// {"modules": ["gapps"]}), on top of what the image itself requires. Anything else in that
-// list is rejected: the request body must not be able to switch on modules that are not
-// meant to be optional (fake WiFi and hwenc depend on the image, device-profile has its own flow).
-const OPTIONAL_PER_INSTANCE = ['gapps'];
+// Optional modules an instance gets when the request does not choose (`modules` omitted):
+// the hardware acceleration if the image supports it. Same behavior as before the options
+// existed, which is also what instances created back then get when they are revalidated.
+function defaultModuleIdsForImage(img) {
+  return img.hwEncCapable ? ['hwenc'] : [];
+}
 
-// Union of the modules the image requires and the ones requested for the instance.
-// `requested` comes from the HTTP body: validated here. Throws Error with httpStatus 400.
+// Modules that the user can choose PER INSTANCE when creating it (POST /api/instances
+// {"modules": ["gapps", "hwenc"]}). Anything else in that list is rejected: the request body must
+// not be able to switch on modules that are not meant to be optional (fake WiFi depends on the
+// image, device-profile has its own flow).
+const OPTIONAL_PER_INSTANCE = ['gapps', 'hwenc'];
+
+// The modules of an instance: what the image is bound to, plus the optional ones.
+//  - `requested` omitted (undefined/null): the image's defaults (hwenc if it supports it).
+//  - `requested` an array: EXACTLY those optional modules -- an instance can opt out of hwenc by
+//    not listing it. It comes from the HTTP body: validated here. Throws Error with httpStatus 400.
 function requiredModuleIds(img, requested) {
   const ids = requiredModuleIdsForImage(img);
-  if (requested === undefined || requested === null) return ids;
+  if (requested === undefined || requested === null) {
+    for (const id of defaultModuleIdsForImage(img)) if (!ids.includes(id)) ids.push(id);
+    return ids;
+  }
   if (!Array.isArray(requested) || requested.some((m) => typeof m !== 'string')) {
     throw Object.assign(new Error('"modules" must be an array of module ids'), { httpStatus: 400 });
   }
@@ -42,6 +49,9 @@ function requiredModuleIds(img, requested) {
         new Error(`module "${id}" cannot be requested per instance (allowed: ${OPTIONAL_PER_INSTANCE.join(', ')})`),
         { httpStatus: 400 },
       );
+    }
+    if (id === 'hwenc' && !img.hwEncCapable) {
+      throw Object.assign(new Error(`image "${img.id}" does not support hardware video acceleration (hwenc)`), { httpStatus: 400 });
     }
     if (!ids.includes(id)) ids.push(id);
   }
@@ -121,5 +131,5 @@ async function check(img, requested) {
 }
 
 module.exports = {
-  check, requiredModuleIdsForImage, requiredModuleIds, OPTIONAL_PER_INSTANCE,
+  check, requiredModuleIdsForImage, defaultModuleIdsForImage, requiredModuleIds, OPTIONAL_PER_INSTANCE,
 };

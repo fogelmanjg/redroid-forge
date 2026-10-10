@@ -123,6 +123,11 @@ dialog {
 }
 
 dialog form { display: flex; flex-direction: column; gap: 0.8rem; min-width: 280px; }
+.display-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem 0.8rem; border: 1px solid var(--border, #3a3f47); border-radius: 6px; padding: 0.6rem 0.8rem; }
+.display-fields legend { padding: 0 0.3rem; font-size: 0.85rem; opacity: 0.8; }
+.display-fields label { display: flex; flex-direction: column; gap: 0.2rem; font-size: 0.85rem; }
+.display-fields input { width: 100%; box-sizing: border-box; }
+.instance-meta { display: block; font-size: 0.75rem; }
 .dialog-actions { display: flex; justify-content: flex-end; gap: 0.5rem; }
 
 #contract-dialog { max-width: 480px; }

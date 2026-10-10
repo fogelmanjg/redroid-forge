@@ -10,6 +10,7 @@ const moduleGate = require('../lib/moduleGate');
 const moduleManifests = require('../lib/moduleManifests');
 const moduleAcceptance = require('../lib/moduleAcceptance');
 const moduleRunner = require('../lib/moduleRunner');
+const instanceParams = require('../lib/instanceParams');
 const catalog = require('../../images.json');
 
 const router = express.Router();
@@ -56,8 +57,12 @@ async function revalidateModulesIfImageKnown(instance) {
     console.warn(`[instances] "${instance.imageId}" is no longer in the catalog -- module revalidation is skipped for ${instance.id}`);
     return;
   }
-  // The modules asked for per instance when it was created are revalidated too.
-  const extras = (instance.requiredModuleIds || []).filter((id) => moduleGate.OPTIONAL_PER_INSTANCE.includes(id));
+  // The optional modules chosen when it was created are revalidated too -- exactly those (an
+  // instance that opted out of hwenc stays out). An instance created before the per-instance
+  // options has no persisted list: it gets the image's defaults, as it did.
+  const extras = instance.requiredModuleIds
+    ? instance.requiredModuleIds.filter((id) => moduleGate.OPTIONAL_PER_INSTANCE.includes(id))
+    : undefined;
   await assertModulesReady(img, extras);
 }
 
@@ -76,7 +81,8 @@ async function revalidateModulesIfImageKnown(instance) {
 function requiredModuleIdsFor(instance) {
   if (instance.requiredModuleIds) return instance.requiredModuleIds;
   const img = catalog.find((i) => i.id === instance.imageId);
-  return img ? moduleGate.requiredModuleIdsForImage(img) : [];
+  // `requiredModuleIds(img)` with no choice = the image's defaults: what these instances got.
+  return img ? moduleGate.requiredModuleIds(img) : [];
 }
 
 // e.modules (the list of manifests pending acceptance, see moduleGate.js) is added
@@ -133,8 +139,13 @@ router.get('/', async (req, res) => {
 
 router.post('/', async (req, res) => {
   try {
-    const { name, imageId, width, height, dpi, fps, modules } = req.body;
+    const { name, imageId, modules } = req.body;
+    const display = instanceParams.parseDisplay(req.body);
     if (!name || !imageId) throw httpError('name and imageId are required', 400);
+    // The same pattern the UI enforces: the name ends up in container and volume names.
+    if (typeof name !== 'string' || !/^[a-z0-9][a-z0-9-]{0,39}$/.test(name)) {
+      throw httpError('"name" must be lowercase letters, digits and hyphens (1-40 characters, not starting with a hyphen)', 400);
+    }
     if (store.readAll().some((i) => i.name === name)) {
       throw httpError(`An instance named "${name}" already exists`, 409);
     }
@@ -150,10 +161,10 @@ router.post('/', async (req, res) => {
     const binds = [...binder.binderBinds(slot), `${volumeName}:/data`];
 
     const cmd = [
-      `androidboot.redroid_width=${width || 720}`,
-      `androidboot.redroid_height=${height || 1280}`,
-      `androidboot.redroid_dpi=${dpi || 160}`,
-      `androidboot.redroid_fps=${fps || 60}`,
+      `androidboot.redroid_width=${display.width}`,
+      `androidboot.redroid_height=${display.height}`,
+      `androidboot.redroid_dpi=${display.dpi}`,
+      `androidboot.redroid_fps=${display.fps}`,
       `androidboot.redroid_gpu_mode=${img.gpuMode}`,
     ];
 
@@ -184,7 +195,7 @@ router.post('/', async (req, res) => {
       // `display`: the instance's screen size, for the modules that adjust something to it (hwenc limits the
       // resolution the hardware decoders advertise).
       await moduleRunner.integrate(requiredModuleIds, containerId, {
-        display: { width: Number(width) || 720, height: Number(height) || 1280 },
+        display: { width: display.width, height: display.height },
       });
     } catch (e) {
       await runtime.remove(containerId, { force: true }).catch(() => {});
@@ -205,6 +216,7 @@ router.post('/', async (req, res) => {
       hasGapps: !!img.hasGapps || requiredModuleIds.includes('gapps'),
       hwEncCapable: !!img.hwEncCapable,
       requiredModuleIds,
+      display,
       androidId: null,
       androidIdRegisteredAt: null,
       createdAt: new Date().toISOString(),

@@ -166,9 +166,13 @@ test('Phase 4 gate: GApps stays blocked until its manifest is accepted, then it 
 // image declares hwEncCapable=true (see moduleGate.requiredModuleIdsForImage)
 // -- the same generic consent flow, even though hwenc is an own module
 // (esTerceroNoLibre=false) and not a third-party one.
-test('moduleGate.requiredModuleIdsForImage: adds "hwenc" when the image declares hwEncCapable', () => {
-  assert.deepEqual(moduleGate.requiredModuleIdsForImage(imgHwEncCapable), ['hwenc']);
-  assert.deepEqual(moduleGate.requiredModuleIdsForImage(imgWithoutModules), []);
+test('moduleGate: hwenc is not bound to the image any more, it is an optional module that is on by default when the image supports it', () => {
+  assert.deepEqual(moduleGate.requiredModuleIdsForImage(imgHwEncCapable), []);
+  assert.deepEqual(moduleGate.defaultModuleIdsForImage(imgHwEncCapable), ['hwenc']);
+  assert.deepEqual(moduleGate.defaultModuleIdsForImage(imgWithoutModules), []);
+  // no choice made = the same as before the options existed
+  assert.deepEqual(moduleGate.requiredModuleIds(imgHwEncCapable), ['hwenc']);
+  assert.deepEqual(moduleGate.requiredModuleIds(imgWithoutModules), []);
 });
 
 test('moduleGate.check: hwenc stays blocked until its manifest is accepted, just like gapps/magisk', (t) => withTempAcceptanceStore(async () => {
