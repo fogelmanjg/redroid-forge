@@ -1,0 +1,15 @@
+{
+  "id": "decode-solo-hw",
+  "description": "Decode only, hardware: H.264 High 1080p (B-frames, 4 references) decoded flat out by the hardware decoder. How many frames per second one instance can sustain, and whether the video decode engine really works.",
+  "durationS": 30,
+  "warmupS": 5,
+  "instances": [
+    { "name": "a", "modules": ["hwenc"], "width": 1280, "height": 720, "dpi": 240, "fps": 30, "workloads": [ { "type": "decode", "decoder": "hw", "clip": "h264_1080" } ] }
+  ],
+  "criteria": {
+    "noRestarts": true,
+    "noKernelErrors": true,
+    "decode": { "minFps": 60 },
+    "videoEngines": ["uvd"]
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "id": "decode-solo-sw",
+  "description": "Decode only, software: the same clip as decode-solo-hw with the platform's software decoder. The comparison that says what the hardware decoder is worth.",
+  "durationS": 30,
+  "warmupS": 5,
+  "instances": [
+    { "name": "a", "modules": [], "width": 1280, "height": 720, "dpi": 240, "fps": 30, "workloads": [ { "type": "decode", "decoder": "sw", "clip": "h264_1080" } ] }
+  ],
+  "criteria": { "noRestarts": true, "noKernelErrors": true }
+}

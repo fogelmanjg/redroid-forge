@@ -4,3 +4,4 @@ backend/data/*.json
 .claude/
 backend/native/vaapi-daemon/daemon
 backend/native/vaapi-daemon/hwdec-test
+scenario-results/
