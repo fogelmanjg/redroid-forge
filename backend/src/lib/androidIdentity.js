@@ -10,21 +10,64 @@ const store = require('./store');
 // "uncertified" device).
 function log(msg) { console.log(`[androidIdentity] ${msg}`); }
 
+// Where the ID lives depends on the GMS generation, but it is the same number in every
+// source (the one the user pastes in https://www.google.com/android/uncertified), and it
+// is read the same way jg-dashboard does it (Android 11 and 15 images): the `android_id`
+// row of the `main` table of gservices.db, trying the GSF path first and the GMS path
+// second (GSF-owned in the GSF 12 / kylindemons-style trio, GMS-owned in the modern
+// GSF 15 + GMS 24+ trio of the gapps module). As a fallback, the same ID is also in
+// shared_prefs/Checkin.xml (<string name="android_id">3607632867885909819</string>),
+// confirmed on 09/10/2026 to be identical to the db value in both generations.
+// It is returned EXACTLY as stored (a decimal number, ~19 digits): it is the format the
+// registration has always been done with (confirmed on 09/10/2026 against the CIFI
+// instance, whose ID is 3627736167647049813). It is NOT converted to hexadecimal.
+const CHECKIN_XML = '/data/data/com.google.android.gms/shared_prefs/Checkin.xml';
+const LEGACY_DBS = [
+  '/data/data/com.google.android.gsf/databases/gservices.db',
+  '/data/data/com.google.android.gms/databases/gservices.db',
+];
+
+// Pure (no I/O) so it can be tested. Returns the check-in Android ID as a decimal
+// string, or null if the XML has no valid ID yet (before the first check-in completes GMS
+// stores 0 or nothing).
+function parseCheckinXml(xml) {
+  const m = /<string\s+name="android_id">\s*(\d{1,20})\s*<\/string>/.exec(String(xml || ''));
+  if (!m) return null;
+  const id = BigInt(m[1]);
+  if (id === 0n || id >= (1n << 64n)) return null;
+  return id.toString();
+}
+
+// The legacy value comes from gservices.db as text. It is accepted only if it looks
+// like an ID (digits, or hexadecimal in the oldest GSF generations); anything else is
+// ignored rather than shown to the user as an ID.
+function normalizeLegacyId(raw) {
+  const v = String(raw || '').trim().toLowerCase();
+  return /^[0-9a-f]{8,20}$/.test(v) ? v : null;
+}
+
 async function fetchFromVolume(volumeName) {
+  // One ephemeral container reads both sources and prints a JSON; parsing and
+  // conversion happen here in Node (parseCheckinXml/normalizeLegacyId, tested).
   const pyScript = [
-    'import sqlite3',
-    'paths = ["/data/data/com.google.android.gsf/databases/gservices.db", "/data/data/com.google.android.gms/databases/gservices.db"]',
-    'result = ""',
+    'import json, sqlite3',
+    `checkin = ${JSON.stringify(CHECKIN_XML)}`,
+    `paths = ${JSON.stringify(LEGACY_DBS)}`,
+    'out = {"checkin": "", "legacy": ""}',
+    'try:',
+    '    out["checkin"] = open(checkin).read()',
+    'except Exception:',
+    '    pass',
     'for p in paths:',
     '    try:',
-    '        c = sqlite3.connect(p)',
+    '        c = sqlite3.connect("file:" + p + "?mode=ro", uri=True)',
     '        r = c.execute("select value from main where name=\'android_id\'").fetchone()',
     '        if r and r[0]:',
-    '            result = r[0]',
+    '            out["legacy"] = str(r[0])',
     '            break',
     '    except Exception:',
     '        pass',
-    'print(result, end="")',
+    'print(json.dumps(out), end="")',
   ].join('\n');
 
   try {
@@ -33,8 +76,8 @@ async function fetchFromVolume(volumeName) {
       ['python3', '-c', pyScript],
       [`${volumeName}:/data:ro`],
     );
-    const raw = out.trim();
-    return raw || null;
+    const data = JSON.parse(out.trim());
+    return normalizeLegacyId(data.legacy) || parseCheckinXml(data.checkin) || null;
   } catch {
     return null;
   }
@@ -82,4 +125,4 @@ function markRegistered(instanceId) {
   return updated;
 }
 
-module.exports = { scheduleFetch, get, markRegistered };
+module.exports = { scheduleFetch, get, markRegistered, parseCheckinXml, normalizeLegacyId };

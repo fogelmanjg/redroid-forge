@@ -115,7 +115,23 @@ async function ensureImage(image) {
   });
 }
 
-// Runs a single-use container until it finishes and returns its stdout —
+// Reads ALL the output of a container that already finished, as text. It is read as a
+// stream (follow: true) on purpose: the non-streaming `container.logs()` goes through
+// docker-modem, which JSON-parses the body when it looks like JSON, so an output such as
+// 3607632867885909819 came back as the NUMBER 3607632867885909500 (precision lost) and
+// {"a":1} as the object "[object Object]". A stream is never parsed.
+async function readLogs(container) {
+  const stream = await container.logs({ stdout: true, stderr: true, follow: true });
+  const chunks = [];
+  await new Promise((resolve, reject) => {
+    stream.on('data', (d) => chunks.push(Buffer.isBuffer(d) ? d : Buffer.from(String(d))));
+    stream.on('end', resolve);
+    stream.on('error', reject);
+  });
+  return Buffer.concat(chunks).toString('utf-8');
+}
+
+// Runs a single-use container until it finishes and returns its stdout --
 // equivalent to `docker run --rm ...` but through dockerode. Tty:true avoids the
 // multiplexed binary framing that container.logs() brings for separate
 // stdout/stderr, which does not need to be distinguished here.
@@ -133,8 +149,7 @@ async function runEphemeral(image, cmd, binds, timeoutMs = 30000) {
       container.wait(),
       new Promise((_, reject) => setTimeout(() => reject(new Error('runEphemeral timeout')), timeoutMs)),
     ]);
-    const logs = await container.logs({ stdout: true, stderr: true });
-    return logs.toString('utf-8');
+    return await readLogs(container);
   } finally {
     await container.remove({ force: true }).catch(() => {});
   }
@@ -142,5 +157,5 @@ async function runEphemeral(image, cmd, binds, timeoutMs = 30000) {
 
 module.exports = {
   docker, listLocalImageTags, create, start, stop, restart, remove, removeVolume,
-  inspect, getPid, getBridgeIp, exec, runEphemeral,
+  inspect, getPid, getBridgeIp, exec, runEphemeral, readLogs,
 };

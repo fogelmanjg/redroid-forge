@@ -32,17 +32,17 @@ function findImage(imageId) {
 // manifest, or is not compatible with the chosen image (compatibleCon). It is
 // called before touching Docker at all: "the backend runs the script/integrates
 // the component" only after this.
-async function assertModulesReady(img) {
-  const result = await moduleGate.check(img);
+async function assertModulesReady(img, requested) {
+  const result = await moduleGate.check(img, requested);
   if (!result.ok) {
     throw Object.assign(new Error(result.error), { httpStatus: result.httpStatus, modules: result.modules });
   }
 }
 
 // Strict use (create): the image has to exist in the catalog.
-async function resolveImageAndGate(imageId) {
+async function resolveImageAndGate(imageId, requested) {
   const img = findImage(imageId);
-  await assertModulesReady(img);
+  await assertModulesReady(img, requested);
   return img;
 }
 
@@ -56,7 +56,9 @@ async function revalidateModulesIfImageKnown(instance) {
     console.warn(`[instances] "${instance.imageId}" is no longer in the catalog -- module revalidation is skipped for ${instance.id}`);
     return;
   }
-  await assertModulesReady(img);
+  // The modules asked for per instance when it was created are revalidated too.
+  const extras = (instance.requiredModuleIds || []).filter((id) => moduleGate.OPTIONAL_PER_INSTANCE.includes(id));
+  await assertModulesReady(img, extras);
 }
 
 // requiredModuleIds is computed once at creation (from the image that WAS in the
@@ -131,17 +133,17 @@ router.get('/', async (req, res) => {
 
 router.post('/', async (req, res) => {
   try {
-    const { name, imageId, width, height, dpi, fps } = req.body;
+    const { name, imageId, width, height, dpi, fps, modules } = req.body;
     if (!name || !imageId) throw httpError('name and imageId are required', 400);
     if (store.readAll().some((i) => i.name === name)) {
       throw httpError(`An instance named "${name}" already exists`, 409);
     }
 
-    const img = await resolveImageAndGate(imageId);
+    const img = await resolveImageAndGate(imageId, modules);
     // Which modules this image requires (moduleGate.js) -- it is persisted on the
     // instance (see requiredModuleIdsFor()) so that start/restart do not depend on
     // the image still being in the catalog afterwards.
-    const requiredModuleIds = moduleGate.requiredModuleIdsForImage(img);
+    const requiredModuleIds = moduleGate.requiredModuleIds(img, modules);
     const adbPort = portAllocator.nextPort();
     const slot = binder.nextFreeSlot();
     const volumeName = `redroid-forge-${name}`;
@@ -200,7 +202,7 @@ router.post('/', async (req, res) => {
       binderSlot: slot,
       volumeName,
       needsHwsimWifi: !!img.needsHwsimWifi,
-      hasGapps: !!img.hasGapps,
+      hasGapps: !!img.hasGapps || requiredModuleIds.includes('gapps'),
       hwEncCapable: !!img.hwEncCapable,
       requiredModuleIds,
       androidId: null,

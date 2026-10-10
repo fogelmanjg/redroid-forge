@@ -113,6 +113,24 @@ con `docker load` sin repo) **no matchea nunca** una base → sin soporte.
 
 `sha256` es **obligatorio**. Un paquete sin hash no entra a la base.
 
+#### Paquetes definidos por archivos (`archivos`) — el caso de GApps
+
+Los GApps de Android 15 en x86_64 **no son un único archivo**: son un conjunto fijo de archivos
+(Google Play services, Play Store, Google Services Framework, Partner Setup y sus XML de permisos
+y configuración) que el usuario extrae de la imagen de sistema *Google Play* x86_64 que Google
+publica para el emulador del SDK de Android (`backend/scripts/gapps-extract-sdk.js`). Un paquete
+así lista sus archivos y lleva, como `sha256`, el **digest del conjunto completo** (`sha256` de las
+líneas ordenadas `<sha256>  <path>\n`; `lib/fileBundle.js`), de modo que no pueden contradecirse.
+Las rutas permitidas son solo `product/` y `system_ext/`. El módulo `gapps` **nunca descarga**
+esos archivos: verifica la carpeta del usuario contra `archivos` y se niega a inyectar algo que no
+coincida, o cualquier archivo extra que la definición no liste. Un paquete que **no** está en la
+base pero cuya carpeta trae su propio `package.json` se inyecta igual y figura como **sin soporte**.
+
+**Por qué este conjunto exacto (validado el 09/10/2026).** Los GApps de generaciones distintas no
+se mezclan: GMS 22 con un GSF 15 se cae al arrancar, y GMS 21 con un GSF 12 arranca pero no puede
+actualizarse (`INSTALL_FAILED_CONFLICTING_PROVIDER`). El conjunto GmsCore 24 + Phonesky 41 + GSF 15
+de la imagen de Android 15 bootea, permite el login, y Play se actualiza solo a GMS 26 sin errores.
+
 ### 2.3 `combinaciones` — la unidad de soporte
 
 ```jsonc

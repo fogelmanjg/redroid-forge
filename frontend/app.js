@@ -31,6 +31,29 @@ async function api(path, opts) {
   return res.json();
 }
 
+// Copies text to the clipboard. navigator.clipboard only exists in a "secure context" (https or
+// localhost): when the UI is opened by IP over plain http (e.g. through Tailscale) it is missing, so
+// there is a fallback that uses a temporary textarea. Both have to be called from a user gesture.
+async function copyText(text) {
+  try {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch { /* falls through to the fallback */ }
+  const ta = document.createElement('textarea');
+  ta.value = text;
+  ta.setAttribute('readonly', '');
+  ta.style.position = 'fixed';
+  ta.style.opacity = '0';
+  document.body.appendChild(ta);
+  ta.select();
+  let ok = false;
+  try { ok = document.execCommand('copy'); } catch { ok = false; }
+  ta.remove();
+  return ok;
+}
+
 function androidIdCellHtml(inst) {
   if (!inst.hasGapps) return '<span class="muted">-</span>';
   if (!inst.androidId) return `<span class="muted">${t('instances.waitingBoot')}</span>`;
@@ -48,26 +71,30 @@ function androidIdCellHtml(inst) {
   `;
 }
 
-async function loadInstances() {
+// `silent`: the periodic refresh does not flash "Loading..." over the table.
+async function loadInstances({ silent = false } = {}) {
   const tbody = $('#instances-table tbody');
-  tbody.innerHTML = `<tr><td colspan="6">${t('common.loading')}</td></tr>`;
+  if (!silent) tbody.innerHTML = `<tr><td colspan="6">${t('common.loading')}</td></tr>`;
   try {
     const instances = await api('/instances');
     if (instances.length === 0) {
       tbody.innerHTML = `<tr><td colspan="6">${t('instances.none')}</td></tr>`;
       return;
     }
-    tbody.innerHTML = '';
+    // Built off-screen and swapped in one go, so a refresh never leaves the table half drawn.
+    const rows = document.createDocumentFragment();
     for (const inst of instances) {
       const tr = document.createElement('tr');
       tr.innerHTML = `
         <td>${inst.name}</td>
         <td>${inst.dockerImage}</td>
-        <td>${inst.status}</td>
+        <td class="status-cell"></td>
         <td>${inst.adbPort}</td>
         <td class="android-id-cell">${androidIdCellHtml(inst)}</td>
         <td class="actions"></td>
       `;
+      const state = InstanceState.describe(inst.status);
+      tr.querySelector('.status-cell').innerHTML = `<span class="status-dot ${state.tone}"></span>${t('instances.status.' + state.key)}`;
       const actions = tr.querySelector('.actions');
       if (inst.hasGapps && inst.androidId && !inst.androidIdRegisteredAt) {
         const link = document.createElement('a');
@@ -75,7 +102,15 @@ async function loadInstances() {
         link.target = '_blank';
         link.rel = 'noopener';
         link.textContent = t('instances.register');
+        link.title = t('instances.registerHint');
         link.className = 'link-btn';
+        // The page of Google asks for the Android ID: it is copied in the same click that opens
+        // it (the link still navigates; no preventDefault), so it only has to be pasted there.
+        link.addEventListener('click', async () => {
+          const ok = await copyText(inst.androidId);
+          link.textContent = t(ok ? 'instances.copied' : 'instances.copyFailed');
+          setTimeout(() => { link.textContent = t('instances.register'); }, 2500);
+        });
         actions.appendChild(link);
         const markBtn = document.createElement('button');
         markBtn.textContent = t('instances.markRegistered');
@@ -90,6 +125,7 @@ async function loadInstances() {
         });
         actions.appendChild(markBtn);
       }
+      // Only the actions that make sense for the current state (see instanceState.js).
       const mk = (label, action) => {
         const b = document.createElement('button');
         b.textContent = label;
@@ -98,33 +134,37 @@ async function loadInstances() {
           b.disabled = true;
           try {
             await api(`/instances/${inst.id}/${action}`, { method: 'POST' });
-            await loadInstances();
           } catch (e) {
             alert(e.message);
           } finally {
             b.disabled = false;
+            await loadInstances({ silent: true });
           }
         });
         return b;
       };
-      actions.appendChild(mk('Start', 'start'));
-      actions.appendChild(mk('Stop', 'stop'));
-      actions.appendChild(mk('Restart', 'restart'));
-      const del = document.createElement('button');
-      del.textContent = t('instances.delete');
-      del.className = 'secondary';
-      del.addEventListener('click', async () => {
-        if (!confirm(t('instances.confirmDelete', { name: inst.name }))) return;
-        try {
-          await api(`/instances/${inst.id}`, { method: 'DELETE' });
-          await loadInstances();
-        } catch (e) {
-          alert(e.message);
+      for (const action of state.actions) {
+        if (action === 'delete') {
+          const del = document.createElement('button');
+          del.textContent = t('instances.delete');
+          del.className = 'secondary';
+          del.addEventListener('click', async () => {
+            if (!confirm(t('instances.confirmDelete', { name: inst.name }))) return;
+            try {
+              await api(`/instances/${inst.id}`, { method: 'DELETE' });
+              await loadInstances({ silent: true });
+            } catch (e) {
+              alert(e.message);
+            }
+          });
+          actions.appendChild(del);
+        } else {
+          actions.appendChild(mk(t(`instances.${action}`), action));
         }
-      });
-      actions.appendChild(del);
-      tbody.appendChild(tr);
+      }
+      rows.appendChild(tr);
     }
+    tbody.replaceChildren(rows);
   } catch (e) {
     tbody.innerHTML = `<tr><td colspan="6">${t('common.error', { msg: e.message })}</td></tr>`;
   }
@@ -200,6 +240,8 @@ $('#btn-new-instance').addEventListener('click', async () => {
   } catch (e) {
     select.innerHTML = `<option>${t('common.error', { msg: e.message })}</option>`;
   }
+  gappsChk.checked = false;
+  resetGappsStatus();
   dialog.showModal();
 });
 $('#btn-cancel-new-instance').addEventListener('click', () => dialog.close());
@@ -207,11 +249,12 @@ $('#btn-cancel-new-instance').addEventListener('click', () => dialog.close());
 // Phase 4 gate: if the backend answers 428 with the pending manifests
 // (see moduleGate.js), it shows the generic contract modal(s) before
 // retrying -- the backend never creates the instance without that acceptance.
-async function createInstance(name, imageId, form) {
+async function createInstance(name, imageId, form, modules) {
   try {
-    await api('/instances', { method: 'POST', body: JSON.stringify({ name, imageId }) });
+    await api('/instances', { method: 'POST', body: JSON.stringify({ name, imageId, modules }) });
     dialog.close();
     form.reset();
+    resetGappsStatus();
     await loadInstances();
   } catch (err) {
     if (err.status === 428 && err.modules) {
@@ -223,7 +266,7 @@ async function createInstance(name, imageId, form) {
         return;
       }
       if (allAccepted) {
-        await createInstance(name, imageId, form);
+        await createInstance(name, imageId, form, modules);
       }
       return;
     }
@@ -236,7 +279,36 @@ $('#new-instance-form').addEventListener('submit', async (e) => {
   const form = e.target;
   const name = form.name.value.trim();
   const imageId = form.imageId.value;
-  await createInstance(name, imageId, form);
+  const modules = form.gapps.checked ? ['gapps'] : [];
+  await createInstance(name, imageId, form, modules);
+});
+
+// GApps option: when it is ticked, the backend verifies the user's files right away (the same
+// verification the module does when injecting) so a missing folder is known before the
+// contract is shown, not after.
+const gappsChk = $('#chk-gapps');
+const gappsStatus = $('#gapps-status');
+function resetGappsStatus() { gappsStatus.hidden = true; gappsStatus.textContent = ''; }
+gappsChk.addEventListener('change', async () => {
+  if (!gappsChk.checked) { resetGappsStatus(); return; }
+  gappsStatus.hidden = false;
+  gappsStatus.className = 'muted';
+  gappsStatus.textContent = t('new.gappsChecking');
+  try {
+    const st = await api('/modules/gapps/status');
+    if (!gappsChk.checked) return; // it was unticked while checking
+    if (st.ok) {
+      gappsStatus.className = st.supported ? 'ok-text' : 'warn-text';
+      gappsStatus.textContent = t('new.gappsOk', { pkg: st.packageId || 'gapps', n: st.files })
+        + (st.supported ? '' : t('new.gappsUnsupported'));
+    } else {
+      gappsStatus.className = 'fail-text';
+      gappsStatus.textContent = t('new.gappsMissing', { msg: st.message });
+    }
+  } catch (e) {
+    gappsStatus.className = 'fail-text';
+    gappsStatus.textContent = t('common.error', { msg: e.message });
+  }
 });
 
 // Language: static texts are applied from the I18n table; dynamic views are re-rendered on change.
@@ -252,3 +324,12 @@ I18n.apply();
 syncLangButton();
 
 loadInstances();
+
+// The state of an instance changes by itself (it boots, it crashes, someone uses adb/docker): refresh
+// every few seconds while the Instances tab is the one on screen. It does not run while a dialog is open
+// (the user is typing) nor when the browser tab is hidden.
+setInterval(() => {
+  const onInstances = $('.tab-btn.active')?.dataset.tab === 'instances';
+  const dialogOpen = $$('dialog').some((d) => d.open);
+  if (onInstances && !dialogOpen && !document.hidden) loadInstances({ silent: true });
+}, 4000);

@@ -22,6 +22,32 @@ function requiredModuleIdsForImage(img) {
   return ids;
 }
 
+// Modules that the user can ask for PER INSTANCE when creating it (POST /api/instances
+// {"modules": ["gapps"]}), on top of what the image itself requires. Anything else in that
+// list is rejected: the request body must not be able to switch on modules that are not
+// meant to be optional (fake WiFi and hwenc depend on the image, device-profile has its own flow).
+const OPTIONAL_PER_INSTANCE = ['gapps'];
+
+// Union of the modules the image requires and the ones requested for the instance.
+// `requested` comes from the HTTP body: validated here. Throws Error with httpStatus 400.
+function requiredModuleIds(img, requested) {
+  const ids = requiredModuleIdsForImage(img);
+  if (requested === undefined || requested === null) return ids;
+  if (!Array.isArray(requested) || requested.some((m) => typeof m !== 'string')) {
+    throw Object.assign(new Error('"modules" must be an array of module ids'), { httpStatus: 400 });
+  }
+  for (const id of requested) {
+    if (!OPTIONAL_PER_INSTANCE.includes(id)) {
+      throw Object.assign(
+        new Error(`module "${id}" cannot be requested per instance (allowed: ${OPTIONAL_PER_INSTANCE.join(', ')})`),
+        { httpStatus: 400 },
+      );
+    }
+    if (!ids.includes(id)) ids.push(id);
+  }
+  return ids;
+}
+
 // Single source of truth for "this image can be created/started as configured":
 // no module it requires may be incompatible with it (compatibleCon) or lack a
 // current acceptance of its manifest. It is called both when creating and when
@@ -36,8 +62,10 @@ function requiredModuleIdsForImage(img) {
 // ever checked against the real vendor: hwenc could be "accepted" and start
 // the VA-API daemon (AMD/Intel-only) on an NVIDIA host without anything
 // blocking it.
-async function check(img) {
-  const requiredIds = requiredModuleIdsForImage(img);
+// `requested`: the modules asked for per instance (see requiredModuleIds()); on start/restart
+// the ones persisted on the instance are passed, so its contract is revalidated too.
+async function check(img, requested) {
+  const requiredIds = requiredModuleIds(img, requested);
   const pendingManifests = [];
   // It is detected at most once per call, and only if some required module
   // really declares hostGpuVendor -- for an image without hardware modules
@@ -92,4 +120,6 @@ async function check(img) {
   return { ok: true };
 }
 
-module.exports = { check, requiredModuleIdsForImage };
+module.exports = {
+  check, requiredModuleIdsForImage, requiredModuleIds, OPTIONAL_PER_INSTANCE,
+};
