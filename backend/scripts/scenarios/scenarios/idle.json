@@ -1,0 +1,10 @@
+{
+  "id": "idle",
+  "description": "Baseline: one instance with hardware acceleration doing nothing. What an instance costs by existing; every other scenario is read against it.",
+  "durationS": 20,
+  "warmupS": 5,
+  "instances": [
+    { "name": "a", "modules": ["hwenc"], "width": 1280, "height": 720, "dpi": 240, "fps": 30, "workloads": [ { "type": "idle" } ] }
+  ],
+  "criteria": { "noRestarts": true, "noKernelErrors": true }
+}

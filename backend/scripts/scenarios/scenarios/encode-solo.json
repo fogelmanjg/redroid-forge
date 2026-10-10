@@ -1,0 +1,15 @@
+{
+  "id": "encode-solo",
+  "description": "Encode only: screenrecord over a moving screen at 8 Mbps, with the hardware encoder. Does the encoder deliver the bitrate asked for, at the frame rate of the screen, with the video encode engine really powered up?",
+  "durationS": 30,
+  "warmupS": 5,
+  "instances": [
+    { "name": "a", "modules": ["hwenc"], "width": 1280, "height": 720, "dpi": 240, "fps": 30, "workloads": [ { "type": "encode", "bitrateMbps": 8 } ] }
+  ],
+  "criteria": {
+    "noRestarts": true,
+    "noKernelErrors": true,
+    "encode": { "bitrateTolerance": 0.35, "minFps": 15 },
+    "videoEngines": ["vce"]
+  }
+}
