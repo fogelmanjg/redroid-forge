@@ -5,8 +5,10 @@ the machine is working, until it receives SIGTERM/SIGINT or --duration seconds p
 
   - host: CPU % (all cores, from /proc/stat), memory, load average
   - GPU (AMD, through sysfs/debugfs; every field is null where the host does not offer it):
-        busy %, VRAM, temperature, power, shader/memory clocks, and whether the video engines are
-        powered up (UVD = decode, VCE = encode) -- which tells that the hardware really works
+        busy %, VRAM, temperature, power, shader/memory clocks, fan (rpm and % of its maximum), and
+        whether the video engines are powered up (UVD = decode, VCE = encode) -- which tells that the
+        hardware really works
+  - CPU temperature (AMD k10temp: Tctl, and Tdie where the sensor has it)
   - per container: CPU (in cores, from the cgroup v2 cpu.stat) and memory
   - kernel events worth knowing about (GPU ring timeouts and resets, VM faults, init aborts of an
     Android...), read from /dev/kmsg
@@ -93,7 +95,10 @@ class Gpu:
                 self.dev = card
                 break
         self.pm = None
+        self.hwmon = None
         if self.dev:
+            hw = sorted(glob.glob(self.dev + '/hwmon/hwmon*'))
+            self.hwmon = hw[0] if hw else None
             slot = os.path.basename(os.path.realpath(self.dev))
             cand = '/sys/kernel/debug/dri/%s/amdgpu_pm_info' % slot
             if read(cand) is not None:
@@ -101,12 +106,19 @@ class Gpu:
 
     def sample(self):
         out = {'busy': None, 'vram_mb': None, 'temp_c': None, 'power_w': None,
-               'sclk_mhz': None, 'mclk_mhz': None, 'uvd': None, 'vce': None}
+               'sclk_mhz': None, 'mclk_mhz': None, 'uvd': None, 'vce': None, 'fan_rpm': None, 'fan_pct': None}
         if not self.dev:
             return out
         out['busy'] = num(read(self.dev + '/gpu_busy_percent'))
         vram = num(read(self.dev + '/mem_info_vram_used'))
         out['vram_mb'] = round(vram / 1048576) if vram is not None else None
+        if self.hwmon:
+            out['fan_rpm'] = num(read(self.hwmon + '/fan1_input'))
+            pwm, pmax = num(read(self.hwmon + '/pwm1')), num(read(self.hwmon + '/pwm1_max'))
+            out['fan_pct'] = round(100.0 * pwm / pmax) if pwm is not None and pmax else None
+            if out['temp_c'] is None:
+                t = num(read(self.hwmon + '/temp1_input'))
+                out['temp_c'] = t / 1000.0 if t is not None else None
         if self.pm:
             txt = read(self.pm) or ''
             m = re.search(r'GPU Load:\s*(\d+)', txt)
@@ -123,6 +135,33 @@ class Gpu:
             for eng in ('uvd', 'vce'):
                 m = re.search(r'%s:\s*(Powered (?:up|down))' % eng.upper(), txt)
                 out[eng] = (m.group(1) == 'Powered up') if m else None
+        return out
+
+
+class CpuTemp:
+    """Temperature of an AMD CPU (k10temp): Tctl is what the sensor reports (it carries an offset on some models),
+    Tdie the real one where the CPU has it. All null on other CPUs."""
+
+    def __init__(self):
+        self.dir = None
+        for d in sorted(glob.glob('/sys/class/hwmon/hwmon*')):
+            if (read(d + '/name') or '').strip() == 'k10temp':
+                self.dir = d
+                break
+
+    def sample(self):
+        out = {'tctl_c': None, 'tdie_c': None}
+        if not self.dir:
+            return out
+        for i in range(1, 6):
+            label = (read('%s/temp%d_label' % (self.dir, i)) or '').strip()
+            v = num(read('%s/temp%d_input' % (self.dir, i)))
+            if v is None:
+                continue
+            if label == 'Tctl':
+                out['tctl_c'] = v / 1000.0
+            elif label == 'Tdie':
+                out['tdie_c'] = v / 1000.0
         return out
 
 
@@ -205,7 +244,7 @@ def main():
     for sig in (signal.SIGTERM, signal.SIGINT):
         signal.signal(sig, lambda *_: stop.update(now=True))
 
-    cpu, gpu, kmsg = CpuTotal(), Gpu(), Kmsg()
+    cpu, gpu, kmsg, cputemp = CpuTotal(), Gpu(), Kmsg(), CpuTemp()
     containers = [Container(n) for n in a.containers.split(',') if n]
     series, kernel_events = [], []
     t0 = time.time()
@@ -220,6 +259,7 @@ def main():
                 'mem_used_mb': used, 'mem_avail_mb': avail,
                 'load1': num((read('/proc/loadavg') or '').split(' ')[0]),
                 'gpu': gpu.sample(),
+                'cpu_temp': cputemp.sample(),
                 'containers': {c.name: c.sample() for c in containers},
             }
             series.append(sample)
@@ -232,7 +272,7 @@ def main():
             if a.duration and now - t0 >= a.duration:
                 break
 
-    gpu_keys = ['busy', 'vram_mb', 'temp_c', 'power_w', 'sclk_mhz', 'mclk_mhz']
+    gpu_keys = ['busy', 'vram_mb', 'temp_c', 'power_w', 'sclk_mhz', 'mclk_mhz', 'fan_rpm', 'fan_pct']
     summary = {
         'samples': len(series),
         'seconds': round(time.time() - t0, 1),
@@ -240,6 +280,7 @@ def main():
         'mem_used_mb': stats([s['mem_used_mb'] for s in series]),
         'load1': stats([s['load1'] for s in series]),
         'gpu': {k: stats([s['gpu'][k] for s in series]) for k in gpu_keys},
+        'cpu_temp': {k: stats([s['cpu_temp'][k] for s in series]) for k in ('tctl_c', 'tdie_c')},
         # fraction of the samples in which the engine was powered up: it proves the hardware worked
         'uvd_active_ratio': ratio([s['gpu']['uvd'] for s in series]),
         'vce_active_ratio': ratio([s['gpu']['vce'] for s in series]),
