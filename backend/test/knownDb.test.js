@@ -7,7 +7,9 @@ const snapshot = require('../db/snapshot.json');
 const clone = (o) => JSON.parse(JSON.stringify(o));
 const DIGEST = snapshot.bases[0].digest;
 // The hwenc module version that the snapshot's combination declares as validated (it changes with every database release).
-const HWENC = snapshot.combinaciones[0].modulos.hwenc;
+// Combinations are found by id, not by position: the order follows the file names of redroid-forge-db.
+const HWENC_COMBO = snapshot.combinaciones.find((c) => c.id === 'redroid15-hwenc');
+const HWENC = HWENC_COMBO.modulos.hwenc;
 const base = { baseDigest: DIGEST, modulos: { hwenc: HWENC } };
 
 test('the seed snapshot is valid', () => {
@@ -16,8 +18,9 @@ test('the seed snapshot is valid', () => {
 
 test('validate: collects errors and detects broken references / official without a validation', () => {
   const db = clone(snapshot);
-  db.combinaciones[0].base = 'no-existe';
-  db.combinaciones[0].validaciones = [];
+  const combo = db.combinaciones.find((c) => c.id === 'redroid15-hwenc');
+  combo.base = 'no-existe';
+  combo.validaciones = [];
   db.paquetes.push({ id: 'g', tipo: 'gapps', origen: 'https://x', sha256: 'abc' });
   assert.throws(() => k.validateDatabase(db), (e) =>
     /does not exist/.test(e.message) && /oficial.*requires/.test(e.message) && /sha256/.test(e.message));
