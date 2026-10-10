@@ -200,14 +200,14 @@ function withRealManifests(fn) {
 }
 
 test('moduleRunner: a required module without an "entry" (the pure contract modules of Phase 4) takes part in no stage', () => withRealManifests(async () => {
-  // gapps/magisk/wifi-falso (the existing flat manifests) declare no
-  // etapa/entry -- asking the runner to run their stages must not fail, it must
-  // simply do nothing.
-  const createReq = await moduleRunner.prepareCreate(['gapps']);
+  // magisk/wifi-falso (the existing flat manifests) declare no etapa/entry --
+  // asking the runner to run their stages must not fail, it must simply do
+  // nothing. (gapps stopped being one of them: it has its own folder and stages 4 and 6.)
+  const createReq = await moduleRunner.prepareCreate(['magisk']);
   assert.deepEqual(createReq, { binds: [], cmd: [] });
-  await assert.doesNotReject(() => moduleRunner.integrate(['gapps'], 'containerX'));
-  await assert.doesNotReject(() => moduleRunner.ensureHostInfraReady(['gapps']));
-  assert.doesNotThrow(() => moduleRunner.scheduleRuntimeFixups(['gapps'], 'containerX'));
+  await assert.doesNotReject(() => moduleRunner.integrate(['magisk'], 'containerX'));
+  await assert.doesNotReject(() => moduleRunner.ensureHostInfraReady(['magisk']));
+  assert.doesNotThrow(() => moduleRunner.scheduleRuntimeFixups(['magisk'], 'containerX'));
 }));
 
 // Smoke test against the REAL hwenc module (not a fixture) -- the only function

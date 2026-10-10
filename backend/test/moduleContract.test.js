@@ -34,7 +34,8 @@ async function withTempAcceptanceStore(fn) {
 // the tests to the real catalog, which may change.
 const imgOfficialWithGappsAndMagisk = { id: 'fixture-15-full', androidVersion: 15, gpuMode: 'host', hasGapps: true, hasMagisk: true, needsHwsimWifi: false };
 const imgWithoutModules = { id: 'fixture-15-plain', androidVersion: 15, gpuMode: 'host', hasGapps: false, hasMagisk: false, needsHwsimWifi: false };
-const imgGappsAndroid11 = { id: 'fixture-11-gapps', androidVersion: 11, gpuMode: 'host', hasGapps: true, hasMagisk: false, needsHwsimWifi: false };
+// GApps is validated only on Android 15 (the trio of the Android 15 SDK image), see its manifest.
+const imgGappsAndroid15 = { id: 'fixture-15-gapps', androidVersion: 15, gpuMode: 'host', hasGapps: true, hasMagisk: false, needsHwsimWifi: false };
 const imgGappsGuestUnsupported = { id: 'fixture-99-gapps-guest', androidVersion: 99, gpuMode: 'guest', hasGapps: true, hasMagisk: false, needsHwsimWifi: false };
 const imgHwEncCapable = {
   id: 'fixture-15-hwenc', androidVersion: 15, gpuMode: 'host', hasGapps: false, hasMagisk: false, needsHwsimWifi: false, hwEncCapable: true,
@@ -57,7 +58,8 @@ test('moduleManifests: hwenc is discovered from its own folder, with etapa/entry
 });
 
 test('moduleManifests.moduleDir: resolves the folder of a flat module and of one with its own folder', () => {
-  assert.match(manifests.moduleDir('gapps'), /modules[/\\]manifests$/);
+  assert.match(manifests.moduleDir('magisk'), /modules[/\\]manifests$/);
+  assert.match(manifests.moduleDir('gapps'), /modules[/\\]gapps$/);
   assert.match(manifests.moduleDir('hwenc'), /modules[/\\]hwenc$/);
   assert.equal(manifests.moduleDir('does-not-exist'), null);
 });
@@ -149,14 +151,14 @@ test('moduleGate.check: it does not offer/allow the module if the image does not
 // anything. This test reproduces that flow end to end at the level of the pure
 // logic (without real Docker, see the note above).
 test('Phase 4 gate: GApps stays blocked until its manifest is accepted, then it is enabled', () => withTempAcceptanceStore(async () => {
-  const beforeAccepting = await moduleGate.check(imgGappsAndroid11);
+  const beforeAccepting = await moduleGate.check(imgGappsAndroid15);
   assert.equal(beforeAccepting.ok, false);
   assert.equal(beforeAccepting.httpStatus, 428);
   assert.equal(beforeAccepting.modules[0].id, 'gapps');
 
   acceptance.record({ moduleId: 'gapps', version: beforeAccepting.modules[0].version, instanceName: 'my-gapps-instance' });
 
-  const afterAccepting = await moduleGate.check(imgGappsAndroid11);
+  const afterAccepting = await moduleGate.check(imgGappsAndroid15);
   assert.equal(afterAccepting.ok, true);
 }));
 

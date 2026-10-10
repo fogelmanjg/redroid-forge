@@ -1,0 +1,45 @@
+{
+  "id": "gapps",
+  "nombre": "Google Apps (GApps)",
+  "esTerceroNoLibre": true,
+  "licencia": "Proprietary (Google). redroid-forge neither includes, hosts nor downloads these files: you provide them and you are responsible for complying with Google's license terms",
+  "origen": "https://dl.google.com/android/repository/sys-img/google_apis_playstore/sys-img2-1.xml",
+  "descripcion": "Installs Google Play services, the Play Store and the Google Services Framework in the instance, from files that YOU provide in a folder of the host (for example, extracted with the included tool from the 'Google Play' x86_64 system image that Google publishes for the Android SDK emulator).",
+  "queToca": [
+    "copies Google Play services, the Play Store, Google Services Framework and Partner Setup, plus their permission and configuration files, into /system of the instance -- before its first start, /system becomes unwritable for this purpose as soon as it boots",
+    "verifies the sha256 of EVERY file against the package definition (from the known-combinations database, or from the local package.json written by the extraction tool, in which case the combination is reported as unsupported) and refuses to inject anything that does not match",
+    "does NOT download anything and does NOT include any Google software: the files come from a folder of the host that you provide (REDROID_FORGE_GAPPS_DIR, by default backend/data/gapps)",
+    "after every start it writes a WebView command line (--no-sandbox --single-process) and marks the device as provisioned: without it the Google sign-in screen crashes inside the container. This REDUCES the isolation of the WebView of that instance",
+    "the instance is an uncertified device for Google: its Android ID (GSF) has to be registered by hand at https://www.google.com/android/uncertified within 48 hours of the first boot, or Google blocks GApps access on that instance. The Android ID is shown in the instance",
+    "Play services and the Play Store update themselves from Google after the first sign-in (hundreds of MB per instance): that traffic and those versions are Google's, not controlled by this project"
+  ],
+  "compatibleCon": {
+    "androidVersion": [
+      15
+    ],
+    "gpuMode": [
+      "host",
+      "guest"
+    ]
+  },
+  "etapa": [
+    4,
+    6
+  ],
+  "entry": "./integrate.js",
+  "version": 2,
+  "i18n": {
+    "es": {
+      "licencia": "Propietaria (Google). redroid-forge no incluye, no aloja ni descarga estos archivos: los ponés vos y sos responsable de cumplir los términos de licencia de Google",
+      "descripcion": "Instala Google Play services, la Play Store y el Google Services Framework en la instancia, a partir de archivos que VOS ponés en una carpeta del host (por ejemplo, extraídos con la herramienta incluida de la imagen de sistema 'Google Play' x86_64 que Google publica para el emulador del SDK de Android).",
+      "queToca": [
+        "copia Google Play services, la Play Store, Google Services Framework y Partner Setup, más sus archivos de permisos y configuración, dentro de /system de la instancia -- antes de su primer arranque, porque apenas bootea no se puede escribir ahí con este método",
+        "verifica el sha256 de CADA archivo contra la definición del paquete (de la base de combinaciones conocidas, o del package.json local que escribe la herramienta de extracción, en cuyo caso la combinación figura como sin soporte) y se niega a inyectar algo que no coincida",
+        "NO descarga nada y NO incluye software de Google: los archivos salen de una carpeta del host que ponés vos (REDROID_FORGE_GAPPS_DIR, por defecto backend/data/gapps)",
+        "después de cada arranque escribe una línea de comandos para el WebView (--no-sandbox --single-process) y marca el dispositivo como aprovisionado: sin eso la pantalla de login de Google se cae dentro del contenedor. Esto REDUCE el aislamiento del WebView de esa instancia",
+        "la instancia es un dispositivo no certificado para Google: su Android ID (GSF) hay que registrarlo a mano en https://www.google.com/android/uncertified dentro de las 48hs del primer boot, o Google bloquea el acceso a GApps en esa instancia. El Android ID se muestra en la instancia",
+        "Play services y la Play Store se actualizan solos desde Google después del primer login (cientos de MB por instancia): ese tráfico y esas versiones son de Google, no los controla este proyecto"
+      ]
+    }
+  }
+}
