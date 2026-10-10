@@ -1,4 +1,5 @@
 const fs = require('fs');
+const binder = require('./binder');
 const { execFile } = require('child_process');
 const { promisify } = require('util');
 const runtime = require('./dockerRuntime');
@@ -31,14 +32,28 @@ function checkBinderfs() {
   // Legacy mode (kernel without CONFIG_ANDROID_BINDERFS): binder_linux creates
   // /dev/binderN according to `devices=`. See binder.js (useLegacyBinder).
   const legacySlots = [];
+  const restricted = [];
   for (let n = 0; n <= 32; n++) {
     const sfx = n === 0 ? '' : String(n);
-    if (['binder', 'hwbinder', 'vndbinder'].every((b) => fs.existsSync(`/dev/${b}${sfx}`))) legacySlots.push(n);
+    if (['binder', 'hwbinder', 'vndbinder'].every((b) => fs.existsSync(`/dev/${b}${sfx}`))) {
+      const bad = binder.restrictedNodes(n);
+      if (bad.length) restricted.push(...bad); else legacySlots.push(n);
+    }
+  }
+  if (restricted.length > 0) {
+    return {
+      status: 'fail',
+      detail: `legacy binder: ${restricted.length} node(s) are not world-accessible (${restricted.slice(0, 3).join(', ')}${restricted.length > 3 ? ', ...' : ''}), so their slots are NOT usable${legacySlots.length ? ` (usable slots: [${legacySlots.join(', ')}])` : ''}. Android's servicemanager runs as a non-root user inside the container: with a root-only node the instance dies a few seconds after starting (exit 129).`,
+      fix: [
+        'Run on the HOST, as root (and make it permanent, e.g. with a oneshot systemd unit after systemd-modules-load.service):',
+        '  chmod 0666 /dev/binder /dev/hwbinder /dev/vndbinder /dev/binder[0-9]* /dev/hwbinder[0-9]* /dev/vndbinder[0-9]*',
+      ].join('\n'),
+    };
   }
   if (legacySlots.length > 0) {
     return {
       status: 'ok',
-      detail: `legacy binder (binder_linux with devices=): ${legacySlots.length} slot(s) available [${legacySlots.join(', ')}] (0 = /dev/binder without a suffix). Every instance uses one slot; if you need more simultaneous instances, extend \`devices=\`.`,
+      detail: `legacy binder (binder_linux with devices=): ${legacySlots.length} slot(s) available [${legacySlots.join(', ')}] (0 = /dev/binder without a suffix). Every instance uses one slot; if you need more simultaneous instances, extend \`devices=\` and REBOOT (the binder module cannot be reloaded) (\`node backend/scripts/binder-devices.js 12\` prints the configuration).${fs.existsSync('/usr/bin/waydroid') ? ' Waydroid is installed on this host and uses slot 0: set REDROID_FORGE_BINDER_RESERVED=0 so redroid-forge never takes it.' : ''}`,
     };
   }
   return {
