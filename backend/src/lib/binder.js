@@ -59,7 +59,7 @@ function nextFreeSlot({ legacy = useLegacyBinder(), exists = fs.existsSync, rese
   if (free === undefined) {
     throw new Error(
       'binder legacy: there is no free slot with its three nodes in /dev. ' +
-      'Extend "options binder_linux devices=..." (see Doctor) and reload the module.'
+      'Extend "options binder_linux devices=..." (see Doctor, `node backend/scripts/binder-devices.js`) and reboot: the module cannot be reloaded.'
     );
   }
   return free;
@@ -74,6 +74,16 @@ function nextFreeSlot({ legacy = useLegacyBinder(), exists = fs.existsSync, rese
 function legacyNodeNames(slot) {
   const suffix = slot === 0 ? '' : String(slot);
   return [`binder${suffix}`, `hwbinder${suffix}`, `vndbinder${suffix}`];
+}
+
+// The value of `options binder_linux devices=...` that creates `slots` slots (0 .. slots-1): slot 0 is
+// the nodes without a suffix, the rest are numbered. It is a superset of what Waydroid's package asks for
+// (binder,hwbinder,vndbinder + the same with 1 and 2), in the same order. Pure.
+function legacyDevicesParam(slots) {
+  if (!Number.isInteger(slots) || slots < 1 || slots > 64) throw new Error('slots must be an integer between 1 and 64');
+  const names = [];
+  for (let n = 0; n < slots; n++) names.push(...legacyNodeNames(n));
+  return names.join(',');
 }
 
 function useLegacyBinder(exists = fs.existsSync) {
@@ -91,7 +101,7 @@ function binderBinds(slot, { legacy = useLegacyBinder(), exists = fs.existsSync 
     if (missing.length) {
       throw new Error(
         `binder legacy: /dev/${missing.join(', /dev/')} missing -- the binder_linux module did not create them. ` +
-        'Extend "options binder_linux devices=..." (see Doctor) and reload the module.'
+        'Extend "options binder_linux devices=..." (see Doctor, `node backend/scripts/binder-devices.js`) and reboot: the module cannot be reloaded.'
       );
     }
     return names.map((n, i) => `/dev/${n}:${targets[i]}`);
@@ -101,4 +111,6 @@ function binderBinds(slot, { legacy = useLegacyBinder(), exists = fs.existsSync 
   return names.map((n, i) => `${BINDERFS_ROOT}/${n}:${targets[i]}`);
 }
 
-module.exports = { nextFreeSlot, binderBinds, useLegacyBinder, reservedSlots, BINDERFS_ROOT };
+module.exports = {
+  nextFreeSlot, binderBinds, useLegacyBinder, reservedSlots, legacyDevicesParam, legacyNodeNames, BINDERFS_ROOT,
+};

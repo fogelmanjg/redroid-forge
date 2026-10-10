@@ -38,7 +38,7 @@ function checkBinderfs() {
   if (legacySlots.length > 0) {
     return {
       status: 'ok',
-      detail: `legacy binder (binder_linux with devices=): ${legacySlots.length} slot(s) available [${legacySlots.join(', ')}] (0 = /dev/binder without a suffix). Every instance uses one slot; if you need more simultaneous instances, extend \`devices=\`.`,
+      detail: `legacy binder (binder_linux with devices=): ${legacySlots.length} slot(s) available [${legacySlots.join(', ')}] (0 = /dev/binder without a suffix). Every instance uses one slot; if you need more simultaneous instances, extend \`devices=\` and REBOOT (the binder module cannot be reloaded) (\`node backend/scripts/binder-devices.js 12\` prints the configuration).${fs.existsSync('/usr/bin/waydroid') ? ' Waydroid is installed on this host and uses slot 0: set REDROID_FORGE_BINDER_RESERVED=0 so redroid-forge never takes it.' : ''}`,
     };
   }
   return {

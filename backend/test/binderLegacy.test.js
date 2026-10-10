@@ -78,3 +78,46 @@ test('nextFreeSlot legacy: it also respects the reserved ones', () => {
   const slot = nextFreeSlot({ legacy: true, exists: () => true, reserved: [1, 2] });
   assert.strictEqual(slot, 3);
 });
+
+// ---- legacyDevicesParam: the `devices=` line that creates N slots ----
+
+test('legacyDevicesParam(3) is exactly what the Waydroid package configures (slots 0, 1 and 2)', () => {
+  const { legacyDevicesParam } = require('../src/lib/binder');
+  assert.strictEqual(
+    legacyDevicesParam(3),
+    'binder,hwbinder,vndbinder,binder1,hwbinder1,vndbinder1,binder2,hwbinder2,vndbinder2',
+  );
+});
+
+test('legacyDevicesParam(N): 3 nodes per slot, unique, slot 0 first and without suffix', () => {
+  const { legacyDevicesParam } = require('../src/lib/binder');
+  const list = legacyDevicesParam(12).split(',');
+  assert.strictEqual(list.length, 36);
+  assert.strictEqual(new Set(list).size, 36);
+  assert.deepStrictEqual(list.slice(0, 3), ['binder', 'hwbinder', 'vndbinder']);
+  assert.deepStrictEqual(list.slice(-3), ['binder11', 'hwbinder11', 'vndbinder11']);
+});
+
+test('legacyDevicesParam: what it declares is exactly what nextFreeSlot can then use', () => {
+  const { legacyDevicesParam, nextFreeSlot } = require('../src/lib/binder');
+  const present = new Set(legacyDevicesParam(5).split(',').map((n) => `/dev/${n}`));
+  const exists = (p) => present.has(p);
+  // Slots 1..4 exist and slot 0 is the fallback; with slot 0 reserved (Waydroid) and 1..4 used there is none left.
+  const taken = [1, 2, 3, 4];
+  assert.throws(() => nextFreeSlot({ legacy: true, exists, reserved: [0, ...taken] }), /no free slot/);
+  assert.strictEqual(nextFreeSlot({ legacy: true, exists, reserved: [0, 1, 2, 3] }), 4);
+});
+
+test('legacyDevicesParam: rejects a slot count that makes no sense', () => {
+  const { legacyDevicesParam } = require('../src/lib/binder');
+  for (const bad of [0, -1, 1.5, 65, '3', NaN, undefined]) {
+    assert.throws(() => legacyDevicesParam(bad), /between 1 and 64/, String(bad));
+  }
+});
+
+test('reserving slot 0 keeps redroid-forge away from it even when it is the only one free', () => {
+  const { nextFreeSlot } = require('../src/lib/binder');
+  const exists = (p) => ['/dev/binder', '/dev/hwbinder', '/dev/vndbinder'].includes(p); // a host with only slot 0
+  assert.strictEqual(nextFreeSlot({ legacy: true, exists, reserved: [] }), 0);
+  assert.throws(() => nextFreeSlot({ legacy: true, exists, reserved: [0] }), /no free slot/);
+});
