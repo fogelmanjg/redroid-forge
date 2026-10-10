@@ -166,7 +166,7 @@ test('render: a report that shows the verdict, the loads, the host and each chec
     instances: [{ name: 'a', modules: ['hwenc'], display: { width: 1280, height: 720, fps: 30 }, bootS: 10, restartsDuring: 0 }],
     workloads: [enc({ size: '1280x720', codec: 'h264', frames: 900, seconds: 30 }), { instance: 'a', type: 'decode', ok: false, error: 'no frames' }],
     sampler: { samples: 31, cpu_pct: { mean: 9.1, p95: 13, max: 28 }, gpu: { busy: { mean: 14, p95: 81, max: 86 } }, uvd_active_ratio: 0, vce_active_ratio: 0.76, containers: {}, kernel_events: [] },
-    daemon: { encode: { meanMbps: 2.9, windows: 6, lastQp: 26, atFloorRatio: 0 } },
+    daemon: { encode: { meanMbps: 2.9, windows: 6, lastQp: 26, atFloorRatio: 0, requestedMbps: 2.49 } },
     checks: [{ id: 'noRestarts', verdict: 'pass', detail: 'fine' }, { id: 'x', verdict: 'fail', detail: 'bad' }, { id: 'w', verdict: 'warn', detail: 'careful' }],
     verdict: 'fail',
   });
@@ -176,6 +176,7 @@ test('render: a report that shows the verdict, the loads, the host and each chec
   assert.match(md, /\*\*failed\*\* \| no frames/);
   assert.match(md, /encode \(VCE\) in 76 %/);
   assert.match(md, /last QP 26/);
+  assert.match(md, /target of 2\.49 Mbps as it reached the daemon/);
   assert.match(md, /\*\*PASS\*\* `noRestarts`/);
   assert.match(md, /\*\*FAIL\*\* `x` — bad/);
 });
@@ -216,4 +217,16 @@ test('artifacts: a scenario that only decodes is not judged against the encoder 
   assert.ok(sourcesFor(['encode']).some((p) => /VaapiEnc/.test(p)));
   assert.ok(!sourcesFor(['encode']).some((p) => /VaapiDec/.test(p)));
   assert.ok(sourcesFor(['idle']).every((p) => /service/.test(p)), 'an idle scenario depends only on the common service');
+});
+
+test('IsolatedForge: the method that reads the daemon log is not hidden by the logging callback stored in the instance', () => {
+  // Regression: the constructor stores the runner's logger in `this.log`; a METHOD with that name was shadowed
+  // by it, returned undefined, and made the daemon's report look empty without any error.
+  const { IsolatedForge } = require(path.join(dir, 'lib', 'forge'));
+  const f = new IsolatedForge({ ssh: 'x' }, { runId: 't', log: () => {} });
+  assert.strictEqual(typeof f.daemonLog, 'function', 'daemonLog is a method of the prototype');
+  assert.ok(Object.getOwnPropertyNames(Object.getPrototypeOf(f)).includes('daemonLog'));
+  for (const method of Object.getOwnPropertyNames(IsolatedForge.prototype).filter((m) => m !== 'constructor')) {
+    assert.ok(!Object.prototype.hasOwnProperty.call(f, method), `the instance property "${method}" would hide the method of the same name`);
+  }
 });

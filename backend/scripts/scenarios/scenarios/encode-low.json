@@ -1,0 +1,15 @@
+{
+  "id": "encode-low",
+  "description": "Encode only, with a LOW bitrate: the same moving screen as encode-solo but asking for 2 Mbps, which is below what this content costs at the encoder's quality floor. Here the rate control has to raise the QP to spend fewer bits: it is the test that it steers, not only that it receives the target.",
+  "durationS": 30,
+  "warmupS": 5,
+  "instances": [
+    { "name": "a", "modules": ["hwenc"], "width": 1280, "height": 720, "dpi": 240, "fps": 30, "workloads": [ { "type": "encode", "bitrateMbps": 2 } ] }
+  ],
+  "criteria": {
+    "noRestarts": true,
+    "noKernelErrors": true,
+    "encode": { "bitrateTolerance": 0.35, "minFps": 15 },
+    "videoEngines": ["vce"]
+  }
+}

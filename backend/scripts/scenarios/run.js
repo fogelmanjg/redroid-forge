@@ -173,7 +173,7 @@ async function main() {
         restartsDuring: now.restarts - inst.restartsAtStart, status: now.status,
       });
     }
-    const encodeStats = parseEncodeStats(await forge.log());
+    const encodeStats = parseEncodeStats(await forge.daemonLog());
     const daemon = { encode: summarize(encodeStats), encodeWindows: encodeStats };
     const checks = evaluate({ criteria: scenario.criteria, instances: instReport, workloads: results, sampler, daemon });
     if (modules.includes('hwenc') && cfg.hwencArtifacts) {

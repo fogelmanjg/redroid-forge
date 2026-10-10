@@ -101,8 +101,10 @@ class IsolatedForge {
     if (r.status !== 201) throw new Error(`could not accept the contract of ${moduleId}: HTTP ${r.status}`);
   }
 
-  // What the forge (and the VA-API daemon it supervises) printed so far.
-  async log() {
+  // What the forge (and the VA-API daemon it supervises) printed so far. NOT called `log`: the constructor stores the
+  // runner's logging callback in `this.log`, which would hide a method of that name (it did: every read returned
+  // undefined and the daemon's report looked empty).
+  async daemonLog() {
     const r = await this.host.run(`docker logs ${q(this.name)} 2>&1 | tail -n 4000`);
     return r.stdout;
   }

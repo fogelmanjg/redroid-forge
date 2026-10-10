@@ -58,7 +58,7 @@ function render(r) {
 
   if (r.daemon && r.daemon.encode) {
     const e = r.daemon.encode;
-    lines.push('', `Encoder (daemon's own report): ${e.meanMbps} Mbps on average over ${e.windows} window(s) of 5 s, last QP ${e.lastQp}, at the quality floor (QP ${QP_FLOOR}) in ${Math.round(e.atFloorRatio * 100)} % of them.`);
+    lines.push('', `Encoder (daemon's own report): ${e.meanMbps} Mbps on average over ${e.windows} window(s) of 5 s against a target of ${f(e.requestedMbps, 2)} Mbps as it reached the daemon (Android raises very low requests), last QP ${e.lastQp}, at the quality floor (QP ${QP_FLOOR}) in ${Math.round(e.atFloorRatio * 100)} % of them.`);
   }
 
   const conts = Object.entries(s.containers || {});

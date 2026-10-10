@@ -34,6 +34,7 @@ A scenario is a JSON file in `backend/scripts/scenarios/scenarios/` (see `lib/sc
 |---|---|
 | `idle` | the baseline: what an instance costs by existing |
 | `encode-solo` | `screenrecord` over a moving screen at 8 Mbps: does the encoder deliver the bitrate, at the frame rate of the screen, with the video encode engine really working? |
+| `encode-low` | the same with a **low** bitrate (2 Mbps): the rate control has to raise the QP to spend fewer bits — the test that it steers, not only that it receives the target |
 | `decode-solo-hw` | H.264 High 1080p decoded flat out by the hardware decoder |
 | `decode-solo-sw` | the same clip with the platform's software decoder: what the hardware is worth |
 
