@@ -2,6 +2,7 @@ const express = require('express');
 const manifests = require('../lib/moduleManifests');
 const acceptance = require('../lib/moduleAcceptance');
 const catalog = require('../../images.json');
+const hwAccel = require('../lib/hwAccel');
 
 const router = express.Router();
 
@@ -9,7 +10,7 @@ const router = express.Router();
 // frontend to render the generic contract modal (section 5) -- here the
 // acceptance state is added and, if asked for a specific image (?imageId=),
 // whether it is compatible with it (compatibleCon).
-function withStatus(manifest, imageId) {
+function withStatus(manifest, imageId, hostGpuVendor) {
   const latest = acceptance.latestFor(manifest.id);
   const out = {
     ...manifest,
@@ -29,11 +30,30 @@ function withStatus(manifest, imageId) {
     }
   }
 
+  // compatibleCon.hostGpuVendor is an attribute of the HOST's hardware, not of the image: it is
+  // reported separately so the UI can disable the option instead of letting a create fail with a 409.
+  const vendors = manifest.compatibleCon && manifest.compatibleCon.hostGpuVendor;
+  if (vendors) {
+    out.hostGpuVendor = hostGpuVendor || null;
+    out.hostCompatible = !!hostGpuVendor && vendors.includes(hostGpuVendor);
+    out.hostIncompatibilityReason = out.hostCompatible
+      ? null
+      : `this host has a "${hostGpuVendor || 'undetected'}" GPU (compatible with: ${vendors.join(', ')})`;
+  }
+
   return out;
 }
 
-router.get('/', (req, res) => {
-  res.json(manifests.list().map((m) => withStatus(m, req.query.imageId)));
+// lspci is only run if some manifest declares hostGpuVendor (it spawns a process).
+async function detectHostVendorIfNeeded(list) {
+  if (!list.some((m) => m.compatibleCon && m.compatibleCon.hostGpuVendor)) return null;
+  try { return await hwAccel.detectGpuVendor(); } catch { return null; }
+}
+
+router.get('/', async (req, res) => {
+  const list = manifests.list();
+  const vendor = await detectHostVendorIfNeeded(list);
+  res.json(list.map((m) => withStatus(m, req.query.imageId, vendor)));
 });
 
 // GApps does not download anything: the user provides the files (see the module's manifest).
@@ -52,10 +72,10 @@ router.get('/gapps/status', async (req, res) => {
   }
 });
 
-router.get('/:id', (req, res) => {
+router.get('/:id', async (req, res) => {
   const manifest = manifests.get(req.params.id);
   if (!manifest) return res.status(404).json({ error: `Unknown module: ${req.params.id}` });
-  res.json(withStatus(manifest, req.query.imageId));
+  res.json(withStatus(manifest, req.query.imageId, await detectHostVendorIfNeeded([manifest])));
 });
 
 router.post('/:id/accept', (req, res) => {

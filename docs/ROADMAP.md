@@ -408,10 +408,15 @@ scratch, although with external references), and the pilot case (CIFI) is a scri
    to a script-module instead of being ported as is.
 
 **In addition to what was originally asked in steps 1-2** (a positive side effect of leaving the lifecycle
-runner properly generic, not ad hoc for hwenc): `moduleGate.requiredModuleIdsForImage` now also derives
-`hwenc` from `img.hwEncCapable`, so activating an image with that flag requires accepting its contract just
-like GApps/Magisk/fake WiFi. No image in the catalog (`backend/images.json`) declares that flag yet, so
-this does not change the observable behavior of anything today.
+runner properly generic, not ad hoc for hwenc): `hwenc` went through the same contract gate as
+GApps/Magisk/fake WiFi, derived from `img.hwEncCapable`. **Update 10/10/2026:** `hwEncCapable` now only
+says "this image supports hwenc", and hwenc is an **optional module of each instance**, on by default
+when the image supports it: `POST /api/instances {"modules": [...]}` lists exactly the optional modules
+(`gapps`, `hwenc`) the instance gets, and omitting `modules` keeps the previous behavior (hwenc on). An
+instance that opts out stays out across restarts (its choice is persisted in `requiredModuleIds`).
+`GET /api/modules` also reports `hostCompatible` (the host's GPU vs `compatibleCon.hostGpuVendor`), so
+the UI offers the option only where it can work. The create form exposes width, height, dpi and fps,
+validated on the server (`lib/instanceParams.js`: they end up in the kernel command line).
 
 **[PENDING] nothing of what was done in steps 1-2 was validated against a real host with Docker/redroid**
 — there is only unit-test coverage with fixtures/mocks (`backend/test/moduleRunner.test.js`,

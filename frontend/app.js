@@ -86,7 +86,7 @@ async function loadInstances({ silent = false } = {}) {
     for (const inst of instances) {
       const tr = document.createElement('tr');
       tr.innerHTML = `
-        <td>${inst.name}</td>
+        <td>${inst.name}${inst.display ? `<span class="instance-meta muted">${inst.display.width}×${inst.display.height} · ${inst.display.dpi} dpi · ${inst.display.fps} fps</span>` : ''}</td>
         <td>${inst.dockerImage}</td>
         <td class="status-cell"></td>
         <td>${inst.adbPort}</td>
@@ -225,11 +225,47 @@ $('#btn-refresh-modules').addEventListener('click', loadModules);
 $('#btn-run-doctor').addEventListener('click', loadDoctor);
 
 const dialog = $('#new-instance-dialog');
+// Hardware acceleration (hwenc) is an option of the instance, on by default. It is offered only
+// when the chosen image includes it AND this host's GPU can run it; otherwise the checkbox is
+// disabled and says why, instead of letting the create fail afterwards.
+let imagesById = {};
+const hwencChk = $('#chk-hwenc');
+const hwencStatus = $('#hwenc-status');
+function setHwenc({ enabled, checked, text, tone }) {
+  hwencChk.disabled = !enabled;
+  hwencChk.checked = checked;
+  hwencStatus.hidden = !text;
+  hwencStatus.className = tone || 'muted';
+  hwencStatus.textContent = text || '';
+}
+async function refreshHwencOption() {
+  const img = imagesById[$('#image-select').value];
+  if (!img) { setHwenc({ enabled: false, checked: false }); return; }
+  if (!img.hwEncCapable) {
+    setHwenc({ enabled: false, checked: false, text: t('new.hwencNoImage'), tone: 'muted' });
+    return;
+  }
+  setHwenc({ enabled: false, checked: false, text: t('new.hwencChecking'), tone: 'muted' });
+  try {
+    const m = await api(`/modules/hwenc?imageId=${encodeURIComponent(img.id)}`);
+    if (imagesById[$('#image-select').value] !== img) return; // another image was chosen meanwhile
+    if (m.hostCompatible === false) {
+      setHwenc({ enabled: false, checked: false, text: t('new.hwencNoHost', { reason: m.hostIncompatibilityReason }), tone: 'warn-text' });
+    } else {
+      setHwenc({ enabled: true, checked: true, text: t('new.hwencOk', { vendor: m.hostGpuVendor || '?' }), tone: 'ok-text' });
+    }
+  } catch (e) {
+    setHwenc({ enabled: false, checked: false, text: t('common.error', { msg: e.message }), tone: 'fail-text' });
+  }
+}
+$('#image-select').addEventListener('change', refreshHwencOption);
+
 $('#btn-new-instance').addEventListener('click', async () => {
   const select = $('#image-select');
   select.innerHTML = `<option>${t('common.loading')}</option>`;
   try {
     const images = await api('/images');
+    imagesById = Object.fromEntries(images.map((i) => [i.id, i]));
     select.innerHTML = images
       .map((img) => {
         const tier = img.soporte === 'oficial' ? t('image.official') : t('image.community');
@@ -243,15 +279,16 @@ $('#btn-new-instance').addEventListener('click', async () => {
   gappsChk.checked = false;
   resetGappsStatus();
   dialog.showModal();
+  refreshHwencOption();
 });
 $('#btn-cancel-new-instance').addEventListener('click', () => dialog.close());
 
 // Phase 4 gate: if the backend answers 428 with the pending manifests
 // (see moduleGate.js), it shows the generic contract modal(s) before
 // retrying -- the backend never creates the instance without that acceptance.
-async function createInstance(name, imageId, form, modules) {
+async function createInstance(name, imageId, form, modules, display) {
   try {
-    await api('/instances', { method: 'POST', body: JSON.stringify({ name, imageId, modules }) });
+    await api('/instances', { method: 'POST', body: JSON.stringify({ name, imageId, modules, ...display }) });
     dialog.close();
     form.reset();
     resetGappsStatus();
@@ -266,7 +303,7 @@ async function createInstance(name, imageId, form, modules) {
         return;
       }
       if (allAccepted) {
-        await createInstance(name, imageId, form, modules);
+        await createInstance(name, imageId, form, modules, display);
       }
       return;
     }
@@ -279,8 +316,14 @@ $('#new-instance-form').addEventListener('submit', async (e) => {
   const form = e.target;
   const name = form.name.value.trim();
   const imageId = form.imageId.value;
-  const modules = form.gapps.checked ? ['gapps'] : [];
-  await createInstance(name, imageId, form, modules);
+  // The list is explicit: what is not ticked is not installed (that is how hwenc is opted out of).
+  const modules = [];
+  if (form.hwenc.checked) modules.push('hwenc');
+  if (form.gapps.checked) modules.push('gapps');
+  const display = {
+    width: Number(form.width.value), height: Number(form.height.value), dpi: Number(form.dpi.value), fps: Number(form.fps.value),
+  };
+  await createInstance(name, imageId, form, modules, display);
 });
 
 // GApps option: when it is ticked, the backend verifies the user's files right away (the same
