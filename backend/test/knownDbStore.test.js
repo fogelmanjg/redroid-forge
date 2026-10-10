@@ -69,23 +69,41 @@ test('broken snapshot: the error propagates (it is a broken release)', () => {
 
 test('summarize: counts bases, packages, combinations and official ones', () => {
   const s = knownDbStore.summarize(knownDbStore.loadCurrent(setup()));
-  assert.deepStrictEqual(s.counts, { bases: 1, paquetes: 0, combinaciones: 1, oficiales: 1 });
+  assert.deepStrictEqual(s.counts, {
+    bases: snapshot.bases.length,
+    paquetes: snapshot.paquetes.length,
+    combinaciones: snapshot.combinaciones.length,
+    oficiales: snapshot.combinaciones.filter((c) => c.soporte === 'oficial').length,
+  });
 });
 
 test('validate: malformed checks are rejected', () => {
   const db = clone(snapshot);
-  db.combinaciones[0].validaciones[0].chequeos = [{ id: 'x', resultado: 'maybe' }, { resultado: 'ok' }];
+  db.combinaciones.find((c) => c.id === 'redroid15-hwenc').validaciones[0].chequeos = [{ id: 'x', resultado: 'maybe' }, { resultado: 'ok' }];
   assert.throws(() => knownDb.validateDatabase(db), (e) => /invalid result/.test(e.message) && /without "id"/.test(e.message));
 });
 
 test('real snapshot: hwenc on the official base is "oficial" on AMD and Intel, "comunidad" on NVIDIA', () => {
-  const input = { baseDigest: snapshot.bases[0].digest, modulos: { hwenc: snapshot.combinaciones[0].modulos.hwenc } };
+  const input = { baseDigest: snapshot.bases[0].digest, modulos: { hwenc: snapshot.combinaciones.find((c) => c.id === 'redroid15-hwenc').modulos.hwenc } };
   for (const vendor of ['amd', 'intel']) {
     assert.strictEqual(knownDb.resolve(snapshot, { ...input, hostGpuVendor: vendor }).nivel, 'oficial', vendor);
   }
   const nv = knownDb.resolve(snapshot, { ...input, hostGpuVendor: 'nvidia' });
   assert.strictEqual(nv.nivel, 'comunidad');
   assert.match(nv.motivos[0], /validated on amd, intel/);
+});
+
+test('real snapshot: GApps on the official base is "oficial" on AMD (validated), "comunidad" on Intel, and an unknown package has no support', () => {
+  const combo = snapshot.combinaciones.find((c) => c.id === 'redroid15-gapps');
+  const input = { baseDigest: snapshot.bases[0].digest, gappsId: combo.gapps, modulos: combo.modulos };
+  assert.strictEqual(knownDb.resolve(snapshot, { ...input, hostGpuVendor: 'amd' }).nivel, 'oficial');
+  const intel = knownDb.resolve(snapshot, { ...input, hostGpuVendor: 'intel' });
+  assert.strictEqual(intel.nivel, 'comunidad');
+  assert.match(intel.motivos[0], /validated on amd/);
+  assert.strictEqual(knownDb.resolve(snapshot, { ...input, gappsId: 'mi-paquete', hostGpuVendor: 'amd' }).nivel, 'sin-soporte');
+  // the package's sha256 is the digest of its files (the same rule the validator enforces)
+  const pkg = snapshot.paquetes.find((p) => p.id === combo.gapps);
+  assert.strictEqual(require('../src/lib/fileBundle').bundleDigest(pkg.archivos), pkg.sha256);
 });
 
 test('real snapshot: every ok validation carries reproducible checks', () => {
@@ -122,16 +140,18 @@ test('GET /api/db: summary', async () => {
     const j = await r.json();
     assert.strictEqual(j.serial, snapshot.serial);
     assert.strictEqual(j.source, 'snapshot');
-    assert.strictEqual(j.counts.combinaciones, 1);
+    assert.strictEqual(j.counts.combinaciones, snapshot.combinaciones.length);
   });
 });
 
 test('GET /api/db/combinaciones: list with the resolved base', async () => {
   await withServer(async (base) => {
     const j = await (await fetch(`${base}/api/db/combinaciones`)).json();
-    assert.strictEqual(j.combinaciones[0].id, 'redroid15-hwenc');
-    assert.strictEqual(j.combinaciones[0].baseInfo.id, 'redroid-15-2025-06-27');
-    assert.strictEqual(j.combinaciones[0].validaciones.length, 2);
+    const hwenc = j.combinaciones.find((c) => c.id === 'redroid15-hwenc');
+    assert.ok(hwenc, 'redroid15-hwenc is listed');
+    assert.strictEqual(hwenc.baseInfo.id, 'redroid-15-2025-06-27');
+    assert.strictEqual(hwenc.validaciones.length, 2);
+    assert.ok(j.combinaciones.some((c) => c.id === 'redroid15-gapps'), 'redroid15-gapps is listed');
   });
 });
 

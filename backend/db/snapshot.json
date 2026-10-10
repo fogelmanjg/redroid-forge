@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "serial": 5,
-  "generatedAt": "2026-10-08T02:00:17Z",
+  "serial": 6,
+  "generatedAt": "2026-10-10T12:41:20Z",
   "minForgeVersion": "0.1.0",
   "bases": [
     {
@@ -15,8 +15,162 @@
       "estado": "vigente"
     }
   ],
-  "paquetes": [],
+  "paquetes": [
+    {
+      "id": "gapps-sdk35-r09-x86_64",
+      "tipo": "gapps",
+      "nombre": "Google Mobile Services (Google Play x86_64 system image of the Android SDK, Android 15 r09)",
+      "version": "Android 15 (API 35) Google Play x86_64, r09",
+      "androidVersion": [
+        15
+      ],
+      "arch": "x86_64",
+      "origen": "https://dl.google.com/android/repository/sys-img/google_apis_playstore/x86_64-35_r09.zip",
+      "origenSha1": "2f0054868e6aab3c098acd3decba17a82aed4176",
+      "tamano": 1762061559,
+      "licencia": "Proprietary (Google)",
+      "integracion": "sdk-system-image",
+      "sha256": "78eeb14c516f4acd5995fa4afa122913e9d22f298818728be48de07a257dc1ae",
+      "archivos": [
+        {
+          "path": "product/priv-app/PrebuiltGmsCore/PrebuiltGmsCore.apk",
+          "sha256": "1dfb9dd903cc34b62294f2887871f96c8490ac88eb5d063d7a5dff71365e7752",
+          "tamano": 239885506
+        },
+        {
+          "path": "product/priv-app/Phonesky/Phonesky.apk",
+          "sha256": "4d26dfb70aa712a474e9160c3fb11d01461d3b6cb30a4a9519201ba6696313dc",
+          "tamano": 78457112
+        },
+        {
+          "path": "product/priv-app/PartnerSetupPrebuilt/PartnerSetupPrebuilt.apk",
+          "sha256": "d0c767b858a3f5f9bb1b08f5df9d4f3ccc3268ab2faf34d41bbd56e4be954ff0",
+          "tamano": 1444170
+        },
+        {
+          "path": "system_ext/priv-app/GoogleServicesFramework/GoogleServicesFramework.apk",
+          "sha256": "238f306eb78193605bd5a72d4845a8ce635cda3fceebc4df077d5491481cc07b",
+          "tamano": 5290526
+        },
+        {
+          "path": "product/etc/default-permissions/default-permissions-sdk-google.xml",
+          "sha256": "297da40b3ee14858911217e1dd03c392e0e2bf207c40ebf3a562ad72aa671eb2",
+          "tamano": 4400
+        },
+        {
+          "path": "product/etc/permissions/privapp-permissions-google-p.xml",
+          "sha256": "5c770368d987a31b71d1f98bf3c605207d238c6dca7a9199d597b5ab42189d91",
+          "tamano": 54396
+        },
+        {
+          "path": "product/etc/permissions/privapp-permissions-sdk-google.xml",
+          "sha256": "194365ba6d1d35b4232aa491ef735b9d1198aaaf58243235d37bb53cc3803c31",
+          "tamano": 1592
+        },
+        {
+          "path": "product/etc/permissions/split-permissions-google.xml",
+          "sha256": "73a160b4ec5ee9fd7ebb3ad8947d37c699302732584a90cc6a03956005cada12",
+          "tamano": 919
+        },
+        {
+          "path": "product/etc/sysconfig/google_build.xml",
+          "sha256": "724875dc95f7fb7eb950714f9a474a9a304e081626d9364647e02409e4bdae9c",
+          "tamano": 1106
+        },
+        {
+          "path": "product/etc/sysconfig/google-hiddenapi-package-whitelist.xml",
+          "sha256": "bcd8a5af2cfcb56aea1d891f4eedd5dff6037043b440e772192a7422f39373b6",
+          "tamano": 7490
+        },
+        {
+          "path": "product/etc/sysconfig/google-staged-installer-whitelist.xml",
+          "sha256": "c5c27d407dc5f3219de77f94fc2b439195ab8f2d017feb68d4ec595aeb09203c",
+          "tamano": 393
+        },
+        {
+          "path": "product/etc/sysconfig/google.xml",
+          "sha256": "7129e123bcc1390bc0dc7f9237916a4d565366ea5373c241c5ee0ed41dfa5059",
+          "tamano": 9098
+        },
+        {
+          "path": "system_ext/etc/permissions/com.google.android.googlesdksetup.xml",
+          "sha256": "385a8281ebc7835f3ed623990c363f1886c4e6c3673693d1ee5213797d6e63ba",
+          "tamano": 1557
+        },
+        {
+          "path": "system_ext/etc/permissions/privapp-permissions-google-se.xml",
+          "sha256": "39568f70e2db94359b45f2269e973f17c1fe16f986b8355de758bf46e8359b8b",
+          "tamano": 14362
+        }
+      ]
+    }
+  ],
   "combinaciones": [
+    {
+      "id": "redroid15-gapps",
+      "base": "redroid-15-2025-06-27",
+      "gapps": "gapps-sdk35-r09-x86_64",
+      "magisk": null,
+      "modulos": {
+        "gapps": 2
+      },
+      "soporte": "oficial",
+      "validaciones": [
+        {
+          "hardware": {
+            "vendor": "amd",
+            "gpu": "Radeon RX 480 (Polaris10)",
+            "driver": "radeonsi"
+          },
+          "fecha": "2026-10-10",
+          "forgeVersion": "0.1.0",
+          "resultado": "ok",
+          "chequeos": [
+            {
+              "id": "gapps.hashes-verificados",
+              "resultado": "ok",
+              "detalle": "the 14 files of the package are verified against their sha256 before injecting; a tampered, missing or unlisted extra file stops the injection (covered by tests)"
+            },
+            {
+              "id": "gapps.boot",
+              "resultado": "ok",
+              "detalle": "boot completed in 18 s; Google Play services, Play Store, Google Services Framework and Partner Setup registered as system apps, no crashes"
+            },
+            {
+              "id": "gapps.login-google",
+              "resultado": "ok",
+              "detalle": "a real Google account signs in (needs the WebView command line --no-sandbox --single-process, which the module writes after every start)"
+            },
+            {
+              "id": "gapps.actualizacion-play",
+              "resultado": "ok",
+              "detalle": "Play updates itself from GMS 24.23.35 to 26.37.37 and the Play Store from 41.3.25 to 53.4.34 with no INSTALL_FAILED errors"
+            },
+            {
+              "id": "gapps.android-id",
+              "resultado": "ok",
+              "detalle": "the Android ID exists from the first check-in, is identical in gservices.db and Checkin.xml, and does not change when signing in"
+            }
+          ],
+          "notas": "Validated on the official image redroid/redroid:15.0.0-latest (host GPU mode off the critical path: guest and host modes both boot). Not validated together with hwenc yet: that is a different combination.",
+          "evidencia": "https://github.com/fogelmanjg/redroid-forge/pull/20"
+        }
+      ],
+      "problemasConocidos": [
+        {
+          "id": "login-requiere-webview-sin-sandbox",
+          "descripcion": "Google's sign-in screen crashes inside the container (the sandboxed WebView renderer dies with SIGSYS) unless the WebView runs with --no-sandbox --single-process. The module applies it after every start; it reduces the isolation of that instance's WebView."
+        },
+        {
+          "id": "dispositivo-no-certificado",
+          "descripcion": "Google sees the instance as an uncertified device: its Android ID has to be registered at https://www.google.com/android/uncertified within 48 hours of the first boot, or Google blocks GApps access on that instance."
+        },
+        {
+          "id": "actualizaciones-por-instancia",
+          "descripcion": "After the first sign-in Play services and the Play Store update themselves (hundreds of MB per instance); the versions that end up running are Google's, not the ones in this package."
+        }
+      ]
+    },
     {
       "id": "redroid15-hwenc",
       "base": "redroid-15-2025-06-27",
