@@ -1,0 +1,40 @@
+{
+  "id": "gralloc-fix",
+  "nombre": "Gralloc crash fix (10-bit formats)",
+  "esTerceroNoLibre": false,
+  "licencia": "A 2-byte change made on the instance's own copy of the file; nothing is redistributed",
+  "origen": "https://github.com/remote-android/redroid-doc/issues/930",
+  "descripcion": "Stops the graphics allocator of the official redroid 15 image from crashing (SIGFPE, division by zero in gralloc_gbm_bo_create) when an app asks for a buffer in a pixel format its table does not know, such as RGBA_1010102 (10-bit colour: Unity 6 games, benchmarks, HDR). That crash restarts the whole of Android inside the container.",
+  "queToca": [
+    "in the stopped instance, before its first start, it changes 2 bytes of /vendor/lib64/hw/gralloc.gbm.so (xor ecx,ecx -> mov cl,4: an unknown format is treated as 4 bytes per pixel instead of 0)",
+    "it only patches the file if the bytes around the change are exactly the known ones of the official image; with any other version of the file it leaves it as it is and says so in the log",
+    "the change is applied to the instance's own copy: the Docker image is not modified and nothing is downloaded or redistributed",
+    "a buffer in an unknown format is now allocated as 32 bits per pixel instead of crashing: correct for RGBA_1010102, only an approximation for other exotic formats"
+  ],
+  "compatibleCon": {
+    "androidVersion": [
+      15
+    ],
+    "gpuMode": [
+      "host"
+    ]
+  },
+  "etapa": [
+    4
+  ],
+  "entry": "./integrate.js",
+  "version": 1,
+  "i18n": {
+    "es": {
+      "nombre": "Arreglo de crash de gralloc (formatos de 10 bits)",
+      "licencia": "Un cambio de 2 bytes en la copia del archivo de la propia instancia; no se redistribuye nada",
+      "descripcion": "Evita que el allocator de gráficos de la imagen oficial de redroid 15 se caiga (SIGFPE, división por cero en gralloc_gbm_bo_create) cuando una app pide un buffer en un formato de píxel que su tabla no conoce, como RGBA_1010102 (color de 10 bits: juegos de Unity 6, benchmarks, HDR). Esa caída reinicia todo Android dentro del contenedor.",
+      "queToca": [
+        "en la instancia parada, antes de su primer arranque, cambia 2 bytes de /vendor/lib64/hw/gralloc.gbm.so (xor ecx,ecx -> mov cl,4: un formato desconocido se trata como 4 bytes por píxel en vez de 0)",
+        "sólo parchea el archivo si los bytes alrededor del cambio son exactamente los conocidos de la imagen oficial; con cualquier otra versión del archivo lo deja como está y lo dice en el log",
+        "el cambio se aplica a la copia de la propia instancia: la imagen de Docker no se modifica y no se descarga ni se redistribuye nada",
+        "un buffer en un formato desconocido ahora se reserva como 32 bits por píxel en vez de caerse: correcto para RGBA_1010102, sólo una aproximación para otros formatos exóticos"
+      ]
+    }
+  }
+}

@@ -3,7 +3,7 @@ const acceptance = require('./moduleAcceptance');
 const hwAccel = require('./hwAccel');
 
 // Which modules an image of the catalog is BOUND to, from the same flags that
-// backend/images.json already has (hasGapps/needsHwsimWifi) plus hasMagisk. There is no
+// backend/images.json already has (hasGapps/needsHwsimWifi/needsGrallocFix) plus hasMagisk. There is no
 // separate "modules per image" list: it is derived from the metadata the catalog declares.
 //
 // hwenc is NOT here since the per-instance options: `hwEncCapable` now says "this image
@@ -14,6 +14,7 @@ function requiredModuleIdsForImage(img) {
   if (img.hasGapps) ids.push('gapps');
   if (img.hasMagisk) ids.push('magisk');
   if (img.needsHwsimWifi) ids.push('wifi-falso');
+  if (img.needsGrallocFix) ids.push('gralloc-fix');
   return ids;
 }
 
