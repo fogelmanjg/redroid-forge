@@ -31,6 +31,29 @@ async function api(path, opts) {
   return res.json();
 }
 
+// Copies text to the clipboard. navigator.clipboard only exists in a "secure context" (https or
+// localhost): when the UI is opened by IP over plain http (e.g. through Tailscale) it is missing, so
+// there is a fallback that uses a temporary textarea. Both have to be called from a user gesture.
+async function copyText(text) {
+  try {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch { /* falls through to the fallback */ }
+  const ta = document.createElement('textarea');
+  ta.value = text;
+  ta.setAttribute('readonly', '');
+  ta.style.position = 'fixed';
+  ta.style.opacity = '0';
+  document.body.appendChild(ta);
+  ta.select();
+  let ok = false;
+  try { ok = document.execCommand('copy'); } catch { ok = false; }
+  ta.remove();
+  return ok;
+}
+
 function androidIdCellHtml(inst) {
   if (!inst.hasGapps) return '<span class="muted">-</span>';
   if (!inst.androidId) return `<span class="muted">${t('instances.waitingBoot')}</span>`;
@@ -79,7 +102,15 @@ async function loadInstances({ silent = false } = {}) {
         link.target = '_blank';
         link.rel = 'noopener';
         link.textContent = t('instances.register');
+        link.title = t('instances.registerHint');
         link.className = 'link-btn';
+        // The page of Google asks for the Android ID: it is copied in the same click that opens
+        // it (the link still navigates; no preventDefault), so it only has to be pasted there.
+        link.addEventListener('click', async () => {
+          const ok = await copyText(inst.androidId);
+          link.textContent = t(ok ? 'instances.copied' : 'instances.copyFailed');
+          setTimeout(() => { link.textContent = t('instances.register'); }, 2500);
+        });
         actions.appendChild(link);
         const markBtn = document.createElement('button');
         markBtn.textContent = t('instances.markRegistered');
