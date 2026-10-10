@@ -24,9 +24,12 @@ options binder_linux devices=${devices}
 # /etc/modules-load.d/redroid-forge-binder.conf
 binder_linux
 
-# The nodes are created root-only: make them usable at every boot, e.g. with a oneshot systemd unit
-# that runs, after systemd-modules-load.service:
-#   /bin/sh -c 'chmod 0666 /dev/binder* /dev/hwbinder* /dev/vndbinder*'
+# The module creates the nodes root-only (0600) and that is NOT enough: Android's servicemanager runs as a
+# non-root user inside the container, and with a root-only node the instance dies a few seconds after starting
+# (exit 129). Every node, slot 0 included, must be 0666 -- at every boot, e.g. with a oneshot systemd unit that
+# runs, after systemd-modules-load.service:
+#   /bin/sh -c 'chmod 0666 /dev/binder /dev/hwbinder /dev/vndbinder /dev/binder[0-9]* /dev/hwbinder[0-9]* /dev/vndbinder[0-9]*'
+# (not /dev/binder*: that would also match the /dev/binderfs directory)
 
 # Apply it with a REBOOT. The binder driver of the kernel has no unload function, so
 # \`modprobe -r binder_linux\` always fails with "Device or resource busy" (even with nothing using it): the

@@ -121,3 +121,52 @@ test('reserving slot 0 keeps redroid-forge away from it even when it is the only
   assert.strictEqual(nextFreeSlot({ legacy: true, exists, reserved: [] }), 0);
   assert.throws(() => nextFreeSlot({ legacy: true, exists, reserved: [0] }), /no free slot/);
 });
+
+// ---- permissions: a root-only node kills the instance (found with slot 0 of the Polaris, 10/10/2026) ----
+
+test('worldAccessible: only a node that every user can open for read and write counts', () => {
+  const fs = require('fs');
+  const os = require('os');
+  const path = require('path');
+  const { worldAccessible } = require('../src/lib/binder');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'binder-perm-'));
+  try {
+    const f = path.join(dir, 'node');
+    fs.writeFileSync(f, '');
+    fs.chmodSync(f, 0o600);
+    assert.strictEqual(worldAccessible(f), false, '0600');
+    fs.chmodSync(f, 0o660);
+    assert.strictEqual(worldAccessible(f), false, '0660');
+    fs.chmodSync(f, 0o664);
+    assert.strictEqual(worldAccessible(f), false, '0664 (others can only read)');
+    fs.chmodSync(f, 0o666);
+    assert.strictEqual(worldAccessible(f), true, '0666');
+    assert.strictEqual(worldAccessible(path.join(dir, 'does-not-exist')), true, 'a missing node is reported on its own');
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('nextFreeSlot skips a slot whose nodes are root-only and takes the next usable one', () => {
+  const { nextFreeSlot, legacyDevicesParam } = require('../src/lib/binder');
+  const present = new Set(legacyDevicesParam(4).split(',').map((n) => `/dev/${n}`));
+  const exists = (p) => present.has(p);
+  const rootOnly = (p) => !/(binder|hwbinder|vndbinder)1$/.test(p); // slot 1 is root-only, the others are 0666
+  assert.strictEqual(nextFreeSlot({ legacy: true, exists, accessible: rootOnly, reserved: [] }), 2);
+});
+
+test('nextFreeSlot: when the only free slots are root-only it says how to fix it, not "no free slot"', () => {
+  const { nextFreeSlot } = require('../src/lib/binder');
+  const exists = (p) => ['/dev/binder', '/dev/hwbinder', '/dev/vndbinder'].includes(p);
+  assert.throws(
+    () => nextFreeSlot({ legacy: true, exists, accessible: () => false, reserved: [] }),
+    /not world-accessible[\s\S]*chmod 0666/,
+  );
+});
+
+test('binderBinds refuses a slot with root-only nodes (the instance would die after a few seconds)', () => {
+  const { binderBinds } = require('../src/lib/binder');
+  const exists = () => true;
+  assert.throws(() => binderBinds(0, { legacy: true, exists, accessible: () => false }), /not world-accessible[\s\S]*servicemanager/);
+  assert.deepStrictEqual(binderBinds(0, { legacy: true, exists, accessible: () => true }), [
+    '/dev/binder:/dev/binder', '/dev/hwbinder:/dev/hwbinder', '/dev/vndbinder:/dev/vndbinder',
+  ]);
+});

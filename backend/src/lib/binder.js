@@ -44,7 +44,9 @@ function reservedSlots(env = process.env) {
 // and it falls back to slot 0 (/dev/binder, no suffix) if there is no other --
 // the case of a host with the module's default `devices=binder,hwbinder,
 // vndbinder` (confirmed on n02).
-function nextFreeSlot({ legacy = useLegacyBinder(), exists = fs.existsSync, reserved = reservedSlots() } = {}) {
+function nextFreeSlot({
+  legacy = useLegacyBinder(), exists = fs.existsSync, reserved = reservedSlots(), accessible = worldAccessible,
+} = {}) {
   const used = new Set(store.readAll().map((i) => i.binderSlot).filter((s) => s != null));
   for (const r of reserved) used.add(r);
   if (!legacy) {
@@ -55,8 +57,16 @@ function nextFreeSlot({ legacy = useLegacyBinder(), exists = fs.existsSync, rese
   const candidates = [];
   for (let n = 1; n <= 32; n++) candidates.push(n);
   candidates.push(0);
-  const free = candidates.find((n) => !used.has(n) && legacyNodeNames(n).every((name) => exists(`/dev/${name}`)));
+  const free = candidates.find((n) => !used.has(n)
+    && legacyNodeNames(n).every((name) => exists(`/dev/${name}`)) && restrictedNodes(n, accessible, exists).length === 0);
   if (free === undefined) {
+    const restricted = candidates.filter((n) => !used.has(n)).flatMap((n) => restrictedNodes(n, accessible, exists));
+    if (restricted.length > 0) {
+      throw new Error(
+        `binder legacy: the free slots are not usable because their nodes are not world-accessible (${restricted.slice(0, 3).join(', ')}...). `
+        + 'Android\'s servicemanager runs as a non-root user inside the container: chmod 0666 the binder nodes (e.g. `chmod 0666 /dev/binder /dev/hwbinder /dev/vndbinder /dev/binder[0-9]* /dev/hwbinder[0-9]* /dev/vndbinder[0-9]*` as root).',
+      );
+    }
     throw new Error(
       'binder legacy: there is no free slot with its three nodes in /dev. ' +
       'Extend "options binder_linux devices=..." (see Doctor, `node backend/scripts/binder-devices.js`) and reboot: the module cannot be reloaded.'
@@ -86,6 +96,18 @@ function legacyDevicesParam(slots) {
   return names.join(',');
 }
 
+// A node is only usable if EVERY user can open it for reading and writing (mode 0666): the servicemanager
+// of Android runs as a non-root user inside the container, and with a root-only node (the module creates
+// them 0600) the instance dies a few seconds after starting (exit 129) -- found out on 10/10/2026 with
+// slot 0 of the Polaris. A node that does not exist counts as accessible here: that is reported on its own.
+function worldAccessible(p) {
+  try { return (fs.statSync(p).mode & 0o006) === 0o006; } catch { return true; }
+}
+
+function restrictedNodes(slot, accessible = worldAccessible, exists = fs.existsSync) {
+  return legacyNodeNames(slot).map((n) => `/dev/${n}`).filter((p) => exists(p) && !accessible(p));
+}
+
 function useLegacyBinder(exists = fs.existsSync) {
   return !exists(`${BINDERFS_ROOT}/binder-control`);
 }
@@ -93,7 +115,7 @@ function useLegacyBinder(exists = fs.existsSync) {
 // Returns the Docker binds "/dev/binderfs/binderN:/dev/binder" (and hwbinder/vndbinder)
 // for a given slot, creating the devices if needed. In legacy mode the source is
 // "/dev/binderN" and it must already exist.
-function binderBinds(slot, { legacy = useLegacyBinder(), exists = fs.existsSync } = {}) {
+function binderBinds(slot, { legacy = useLegacyBinder(), exists = fs.existsSync, accessible = worldAccessible } = {}) {
   const targets = ['/dev/binder', '/dev/hwbinder', '/dev/vndbinder'];
   if (legacy) {
     const names = legacyNodeNames(slot);
@@ -104,6 +126,13 @@ function binderBinds(slot, { legacy = useLegacyBinder(), exists = fs.existsSync 
         'Extend "options binder_linux devices=..." (see Doctor, `node backend/scripts/binder-devices.js`) and reboot: the module cannot be reloaded.'
       );
     }
+    const restricted = restrictedNodes(slot, accessible, exists);
+    if (restricted.length) {
+      throw new Error(
+        `binder legacy: ${restricted.join(', ')} are not world-accessible (mode 0666 needed): Android's servicemanager runs as a non-root user `
+        + 'inside the container and the instance would die a few seconds after starting.',
+      );
+    }
     return names.map((n, i) => `/dev/${n}:${targets[i]}`);
   }
   const names = [`binder${slot}`, `hwbinder${slot}`, `vndbinder${slot}`];
@@ -112,5 +141,5 @@ function binderBinds(slot, { legacy = useLegacyBinder(), exists = fs.existsSync 
 }
 
 module.exports = {
-  nextFreeSlot, binderBinds, useLegacyBinder, reservedSlots, legacyDevicesParam, legacyNodeNames, BINDERFS_ROOT,
+  nextFreeSlot, binderBinds, useLegacyBinder, reservedSlots, legacyDevicesParam, legacyNodeNames, restrictedNodes, worldAccessible, BINDERFS_ROOT,
 };
