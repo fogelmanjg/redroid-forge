@@ -96,13 +96,17 @@ async function integrate(containerId, ctx = {}, { dir = GAPPS_DIR, packages, cop
 // Stage 6: after every start. Both settings live in /data (per instance) and are
 // idempotent. The WebView line has to be there BEFORE the user tries to sign in: without
 // it the sandboxed renderer of the sign-in screen dies with SIGSYS inside the container.
-async function ensureRuntimeReady(containerId) {
+async function ensureRuntimeReady(containerId, { exec } = {}) {
+  const opts = exec ? { exec, delayMs: 1 } : {};
+  // /data/local/tmp is created by Android's init during the first boot, with the owner and
+  // mode that `adb`/scrcpy need (shell:shell 0771). It is NOT created here: if it is not
+  // there yet the command fails (exit 3) and execAndroidWithRetry tries again later.
   await execAndroidWithRetry(containerId, [
     'sh', '-c',
-    `echo '${bundle.WEBVIEW_COMMAND_LINE}' > ${bundle.WEBVIEW_COMMAND_LINE_PATH} && chmod 0644 ${bundle.WEBVIEW_COMMAND_LINE_PATH}`,
-  ]);
-  await execAndroidWithRetry(containerId, ['settings', 'put', 'global', 'device_provisioned', '1']);
-  await execAndroidWithRetry(containerId, ['settings', 'put', 'secure', 'user_setup_complete', '1']);
+    `test -d /data/local/tmp || exit 3; echo '${bundle.WEBVIEW_COMMAND_LINE}' > ${bundle.WEBVIEW_COMMAND_LINE_PATH} && chmod 0644 ${bundle.WEBVIEW_COMMAND_LINE_PATH}`,
+  ], opts);
+  await execAndroidWithRetry(containerId, ['settings', 'put', 'global', 'device_provisioned', '1'], opts);
+  await execAndroidWithRetry(containerId, ['settings', 'put', 'secure', 'user_setup_complete', '1'], opts);
   log(`WebView command line and provisioning flags applied in ${containerId}`);
 }
 

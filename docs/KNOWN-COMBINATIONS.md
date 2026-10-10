@@ -114,6 +114,43 @@ locally, imported with `docker load` without a repo) **never matches** a base �
 
 `sha256` is **mandatory**. A package without a hash does not enter the database.
 
+#### Packages defined by files (`archivos`) — the GApps case
+
+GApps for Android 15 on x86_64 is **not one archive**: it is a fixed set of files (Google Play
+services, Play Store, Google Services Framework, Partner Setup and their permission/config XMLs)
+that the user extracts from the *Google Play* x86_64 system image that Google publishes for the
+Android SDK emulator (`backend/scripts/gapps-extract-sdk.js`). Such a package lists its files and
+carries, as its `sha256`, the **digest of the whole set** (`sha256` of the sorted lines
+`<sha256>  <path>\n`; `lib/fileBundle.js`), so the two cannot disagree:
+
+```jsonc
+{
+  "id": "gapps-sdk35-r09-x86_64",
+  "tipo": "gapps",
+  "androidVersion": [15], "arch": "x86_64",
+  "origen": "https://dl.google.com/android/repository/sys-img/google_apis_playstore/x86_64-35_r09.zip",
+  "licencia": "Proprietary (Google)",
+  "integracion": "sdk-system-image",
+  "sha256": "<digest of archivos>",
+  "archivos": [
+    { "path": "product/priv-app/PrebuiltGmsCore/PrebuiltGmsCore.apk", "sha256": "…", "tamano": 239885506 },
+    { "path": "system_ext/priv-app/GoogleServicesFramework/GoogleServicesFramework.apk", "sha256": "…" }
+  ]
+}
+```
+
+Allowed paths are only `product/` and `system_ext/` (`priv-app`, `app`, `etc`, `framework`,
+`lib64`): a package definition can never make the module write anywhere else. The `gapps` module
+**never downloads** these files: it verifies the user's folder against `archivos` and refuses to
+inject anything that does not match, or any extra file the definition does not list. A package
+that is **not** in the database but whose folder carries its own `package.json` is injected
+anyway and reported as **unsupported**.
+
+**Why this exact set (validated 09/10/2026).** GApps of different generations do not mix: GMS 22
+with a GSF 15 crashes at start, and GMS 21 with a GSF 12 starts but cannot update itself
+(`INSTALL_FAILED_CONFLICTING_PROVIDER`). The set GmsCore 24 + Phonesky 41 + GSF 15 of the
+Android 15 image boots, signs in, and Play updates itself to GMS 26 without errors.
+
 ### 2.3 `combinaciones` — the unit of support
 
 ```jsonc

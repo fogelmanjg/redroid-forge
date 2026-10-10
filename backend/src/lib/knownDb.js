@@ -1,4 +1,5 @@
 const crypto = require('crypto');
+const fileBundle = require('./fileBundle');
 
 // Pure core of the known-combinations database (design in
 // docs/KNOWN-COMBINATIONS.md). No disk or network I/O: it receives documents
@@ -51,6 +52,15 @@ function validateDatabase(db) {
     if (!['gapps', 'magisk'].includes(p.tipo)) errors.push(`package "${p.id}": invalid "tipo"`);
     if (!SHA256_RE.test(p.sha256 || '')) errors.push(`package "${p.id}": "sha256" is mandatory (64 hex)`);
     if (!isStr(p.origen)) errors.push(`package "${p.id}": missing "origen"`);
+    // A package defined by FILES (GApps from the Android SDK image): "sha256" is the digest of
+    // the whole set (fileBundle.bundleDigest), so it cannot disagree with the listed files.
+    if (p.archivos !== undefined) {
+      const problems = fileBundle.validateFiles(p.archivos);
+      for (const pr of problems) errors.push(`package "${p.id}": archivos: ${pr}`);
+      if (problems.length === 0 && fileBundle.bundleDigest(p.archivos) !== p.sha256) {
+        errors.push(`package "${p.id}": "sha256" is not the digest of its "archivos"`);
+      }
+    }
   }
   const pkgType = new Map(db.paquetes.map((p) => [p.id, p.tipo]));
   for (const c of db.combinaciones) {

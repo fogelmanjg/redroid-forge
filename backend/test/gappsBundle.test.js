@@ -155,3 +155,40 @@ test('execAndroidWithRetry: retries until Android answers, gives up after the at
   await assert.rejects(() => execAndroidWithRetry('c', ['x'], { delayMs: 1, noRetryCodes: [1], exec: definitive }));
   assert.strictEqual(k, 1);
 });
+
+test('knownDb: a package defined by files must carry, as its sha256, the digest of those files', () => {
+  const knownDb = require('../src/lib/knownDb');
+  const archivos = [
+    { path: 'product/priv-app/A/A.apk', sha256: '1'.repeat(64), tamano: 10 },
+    { path: 'system_ext/etc/permissions/p.xml', sha256: '2'.repeat(64) },
+  ];
+  const db = (pkg) => ({
+    schemaVersion: 1, serial: 1, generatedAt: '2026-10-10T00:00:00Z', minForgeVersion: '0.1.0',
+    bases: [], combinaciones: [],
+    paquetes: [{ id: 'gapps-x', tipo: 'gapps', origen: 'https://example.invalid/x.zip', ...pkg }],
+  });
+  const good = db({ archivos, sha256: require('../src/lib/fileBundle').bundleDigest(archivos) });
+  assert.doesNotThrow(() => knownDb.validateDatabase(good));
+  assert.throws(() => knownDb.validateDatabase(db({ archivos, sha256: 'f'.repeat(64) })), /not the digest of its "archivos"/);
+  assert.throws(
+    () => knownDb.validateDatabase(db({ archivos: [{ path: '../x/y/z', sha256: '1'.repeat(64) }], sha256: 'f'.repeat(64) })),
+    /unsafe path/,
+  );
+});
+
+test('gapps stage 6: waits for /data/local/tmp instead of creating it, then applies the three settings', async () => {
+  const seen = [];
+  let tries = 0;
+  const exec = async (cmd, args) => {
+    seen.push(args.slice(2));
+    if (args.includes('sh') && tries++ < 2) throw Object.assign(new Error('exit 3'), { code: 3 });
+    return { stdout: '' };
+  };
+  await gapps.ensureRuntimeReady('cid', { exec });
+  const shCalls = seen.filter((a) => a[0] === 'sh');
+  assert.strictEqual(shCalls.length, 3, 'two failures (no /data/local/tmp yet) and one success');
+  assert.match(shCalls[0][2], /test -d \/data\/local\/tmp \|\| exit 3/);
+  assert.ok(!seen.some((a) => a.join(' ').includes('mkdir')), 'it must not create /data/local/tmp itself');
+  assert.deepStrictEqual(seen.filter((a) => a[0] === 'settings').map((a) => a.slice(1).join(' ')),
+    ['put global device_provisioned 1', 'put secure user_setup_complete 1']);
+});
