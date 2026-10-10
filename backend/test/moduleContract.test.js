@@ -41,13 +41,13 @@ const imgHwEncCapable = {
   id: 'fixture-15-hwenc', androidVersion: 15, gpuMode: 'host', hasGapps: false, hasMagisk: false, needsHwsimWifi: false, hwEncCapable: true,
 };
 
-test('moduleManifests: the catalog has the 6 modules of section 5 of REQUIREMENTS.md + hwenc', () => {
+test('moduleManifests: the catalog has the 6 modules of section 5 of REQUIREMENTS.md + hwenc + arm-translation', () => {
   // hwenc (Phase 5) lives in its own folder (backend/src/modules/hwenc/
   // manifest.json), not in backend/src/modules/manifests/ like the other
   // six -- this test also covers that moduleManifests.loadAll() discovers
   // both sources (see the comment there).
   const ids = manifests.list().map((m) => m.id).sort();
-  assert.deepEqual(ids, ['cpu-ram', 'device-profile', 'gapps', 'gpu-mode', 'hwenc', 'magisk', 'wifi-falso']);
+  assert.deepEqual(ids, ['arm-translation', 'cpu-ram', 'device-profile', 'gapps', 'gpu-mode', 'hwenc', 'magisk', 'wifi-falso']);
 });
 
 test('moduleManifests: hwenc is discovered from its own folder, with etapa/entry', () => {

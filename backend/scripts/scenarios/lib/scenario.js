@@ -16,7 +16,7 @@
 // problem found (not just the first), so the file can be fixed in one pass.
 
 const WORKLOAD_TYPES = ['idle', 'encode', 'decode'];
-const OPTIONAL_MODULES = ['hwenc', 'gapps'];
+const OPTIONAL_MODULES = ['hwenc', 'gapps', 'arm-translation'];
 const NAME_RE = /^[a-z0-9][a-z0-9-]{0,19}$/;
 
 function int(v) { return Number.isInteger(v); }

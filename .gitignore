@@ -5,3 +5,6 @@ backend/data/*.json
 backend/native/vaapi-daemon/daemon
 backend/native/vaapi-daemon/hwdec-test
 scenario-results/
+backend/data/gapps/
+backend/data/arm-translation/
+__pycache__/

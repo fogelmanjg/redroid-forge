@@ -37,8 +37,9 @@ A scenario is a JSON file in `backend/scripts/scenarios/scenarios/` (see `lib/sc
 | `encode-low` | the same with a **low** bitrate (2 Mbps): the rate control has to raise the QP to spend fewer bits — the test that it steers, not only that it receives the target |
 | `decode-solo-hw` | H.264 High 1080p decoded flat out by the hardware decoder |
 | `decode-solo-sw` | the same clip with the platform's software decoder: what the hardware is worth |
+| `arm-smoke` | an instance with the `arm-translation` module boots (the ARM files are copied to the host for the run) |
 
-An instance lists its `modules` (`hwenc`, `gapps`), its screen (`width`, `height`, `dpi`, `fps`) and its `workloads`
+An instance lists its `modules` (`hwenc`, `gapps`, `arm-translation`), its screen (`width`, `height`, `dpi`, `fps`) and its `workloads`
 (`idle`, `encode`, `decode`). Several instances and several workloads per instance run **at the same time**, which is how
 combined loads are built. `criteria` says what counts as a pass.
 
@@ -75,6 +76,10 @@ host only the generic part is available for now.
 
 `rootCmd` is how to become root on the host (debugfs and `/dev/kmsg` need it, and so does removing the root-owned data of
 the isolated forge); `""` if the account already is root. Without root the run still works, with less to say.
+
+A scenario that uses `arm-translation` needs its files (`backend/scripts/sdk-extract.js arm-translation <zip>`, see
+`backend/src/modules/arm-translation/README.md`): the runner copies the folder `armDir` (default: the one the module
+uses, `backend/data/arm-translation`) to the host for the run.
 
 `--accept-contracts` accepts, through the API and only for the isolated forge of this run, the contract of the modules
 the scenario uses. Use it only if you have read them.

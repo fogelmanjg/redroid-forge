@@ -72,6 +72,19 @@ router.get('/gapps/status', async (req, res) => {
   }
 });
 
+// Same for the ARM translation (the files come from the same SDK system image).
+router.get('/arm-translation/status', async (req, res) => {
+  const arm = require('../modules/arm-translation/integrate');
+  try {
+    const { pkg, source } = await arm.resolveAndVerify();
+    res.json({
+      ok: true, source, packageId: pkg.id || null, files: pkg.archivos.length, supported: source === 'db',
+    });
+  } catch (e) {
+    res.json({ ok: false, message: e.message });
+  }
+});
+
 router.get('/:id', async (req, res) => {
   const manifest = manifests.get(req.params.id);
   if (!manifest) return res.status(404).json({ error: `Unknown module: ${req.params.id}` });

@@ -20,7 +20,7 @@ function newRunId() {
 
 class IsolatedForge {
   constructor(host, {
-    runId = newRunId(), image = null, hwencArtifacts, log = () => {},
+    runId = newRunId(), image = null, hwencArtifacts, armDir = null, log = () => {},
   } = {}) {
     this.host = host;
     this.runId = runId;
@@ -29,6 +29,7 @@ class IsolatedForge {
     this.image = image;
     this.builtImage = null;
     this.hwencArtifacts = hwencArtifacts;
+    this.armDir = armDir;
     this.log = log;
     this.name = `forge-scn-${runId}`;
     this.dir = `rf-scn-${runId}`;       // relative to the home of the host's user
@@ -57,6 +58,11 @@ class IsolatedForge {
     this.log(`syncing the checkout to ~/${this.dir} on ${host.ssh}`);
     await host.run(`mkdir -p ~/${this.dir}/backend/data`, { check: true });
     await host.rsyncTo(REPO_ROOT, `${this.dir}`, ['node_modules', '.git', 'backend/data', 'scenario-results']);
+
+    if (this.armDir) {
+      this.log('copying the ARM translation files to the host');
+      await host.rsyncTo(this.armDir, `${this.dir}/backend/data/arm-translation`);
+    }
 
     if (!this.image) {
       this.builtImage = `redroid-forge-scn:${this.runId}`;

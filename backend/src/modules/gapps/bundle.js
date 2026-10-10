@@ -18,7 +18,9 @@ const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 
-const { ALLOWED_PARTITIONS, ALLOWED_SUBDIRS, validateFiles, bundleDigest } = require('../../lib/fileBundle');
+const {
+  ALLOWED_PARTITIONS, ALLOWED_SUBDIRS, RULES, validateFiles, bundleDigest,
+} = require('../../lib/fileBundle');
 
 // WebView command line that makes the Google sign-in screen work inside the container
 // (validated on 09/10/2026: without it the sandboxed renderer dies with SIGSYS and the
@@ -40,8 +42,8 @@ function sha256File(file) {
 // in the folders the module would copy but that the definition does NOT list: they would
 // be injected without having been verified, so they are a problem too.
 // -> { ok, problems: [string] }
-async function verifyBundle(dir, files) {
-  const problems = validateFiles(files);
+async function verifyBundle(dir, files, rules = RULES.gapps) {
+  const problems = validateFiles(files, rules);
   if (problems.length > 0) return { ok: false, problems };
 
   for (const f of files) {
@@ -53,13 +55,18 @@ async function verifyBundle(dir, files) {
       problems.push(`${f.path}: size ${st.size} != ${f.tamano}`);
       continue;
     }
+    // The mode matters for what has to be executable; docker cp keeps the one of the host's file.
+    if (Number.isInteger(f.modo) && (st.mode & 0o777) !== f.modo) {
+      problems.push(`${f.path}: mode ${(st.mode & 0o777).toString(8)} != ${f.modo.toString(8)}`);
+      continue;
+    }
     // eslint-disable-next-line no-await-in-loop
     const got = await sha256File(abs);
     if (got !== f.sha256) problems.push(`${f.path}: sha256 mismatch (expected ${f.sha256.slice(0, 12)}…, got ${got.slice(0, 12)}…)`);
   }
 
   const known = new Set(files.map((f) => f.path));
-  for (const extra of listFiles(dir)) {
+  for (const extra of listFiles(dir, rules.partitions)) {
     if (extra === 'package.json') continue;
     if (!known.has(extra)) problems.push(`${extra}: present in the folder but not in the package definition (it would be injected unverified)`);
   }
@@ -67,7 +74,7 @@ async function verifyBundle(dir, files) {
 }
 
 // Relative paths of all the files under the allowed partitions of `dir`.
-function listFiles(dir) {
+function listFiles(dir, partitions = ALLOWED_PARTITIONS) {
   const out = [];
   const walk = (rel) => {
     const abs = path.join(dir, rel);
@@ -79,7 +86,7 @@ function listFiles(dir) {
       else out.push(r);
     }
   };
-  for (const partition of ALLOWED_PARTITIONS) walk(partition);
+  for (const partition of partitions) walk(partition);
   // package.json at the root is the only non-partition file that is expected.
   if (fs.existsSync(path.join(dir, 'package.json'))) out.push('package.json');
   return out;
@@ -107,10 +114,10 @@ function planCopies(files) {
 //   - If both exist but DIFFER, nothing is injected: the folder is not the package the
 //     database vouches for.
 // -> { pkg, source } | { error }
-function choosePackage(dbPackages, localPackage) {
-  const dbGapps = (dbPackages || []).filter((p) => p.tipo === 'gapps' && Array.isArray(p.archivos));
+function choosePackage(dbPackages, localPackage, tipo = 'gapps') {
+  const dbGapps = (dbPackages || []).filter((p) => p.tipo === tipo && Array.isArray(p.archivos));
   if (!localPackage || !Array.isArray(localPackage.archivos)) {
-    return { error: 'there is no package.json in the GApps folder (it is written by backend/scripts/gapps-extract-sdk.js)' };
+    return { error: 'there is no package.json in the GApps folder (it is written by the extraction tool, backend/scripts/sdk-extract.js)' };
   }
   const localDigest = bundleDigest(localPackage.archivos);
   const match = dbGapps.find((p) => bundleDigest(p.archivos) === localDigest);

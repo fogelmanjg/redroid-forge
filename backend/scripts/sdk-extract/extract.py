@@ -40,6 +40,38 @@ FILES = [
 ]
 PARTITIONS = ["product", "system_ext"]
 
+# The ARM translation (ndk_translation native bridge) that the same image carries in /system: the
+# translator and its runtime, one proxy library per system library an ARM app can call, and the ARM
+# side of the system (an ARM libc, linker, app_process... that the translated code runs against).
+# Command-line support (binfmt_misc registration, the program runner) is left out on purpose: see the
+# arm-translation module.
+ARM_PROXIES = [
+    "aaudio", "amidi", "android", "android_runtime", "binder_ndk", "c", "camera2ndk", "EGL", "GLESv1_CM",
+    "GLESv2", "GLESv3", "jnigraphics", "mediandk", "nativehelper", "nativewindow", "neuralnetworks",
+    "OpenMAXAL", "OpenSLES", "vulkan", "webviewchromium_plat_support",
+]
+ARM_FILES = (
+    ["system/lib64/libndk_translation.so", "system/lib64/libberberis_exec_region.so",
+     "system/bin/arm64/app_process64", "system/bin/arm64/linker64",
+     "system/etc/cpuinfo.arm64.txt", "system/etc/ld.config.arm64.txt"]
+    + ["system/lib64/libndk_translation_proxy_lib%s.so" % p for p in ARM_PROXIES]
+)
+# Every file of these folders too (the ARM system libraries: about 60, listed with their hash in package.json).
+ARM_DIRS = ["system/lib64/arm64"]
+# Files that must be executable once injected.
+ARM_EXEC = {"system/bin/arm64/app_process64", "system/bin/arm64/linker64"}
+
+# profile -> what to take out of the image. `src_root` is where the listed paths are looked up inside the
+# extracted partitions (the `system` partition of the SDK image holds a /system tree of its own).
+PROFILES = {
+    "gapps": {"partitions": PARTITIONS, "files": FILES, "src_root": "", "tipo": "gapps",
+              "id": "gapps-local", "nombre": "Google Mobile Services (from the Android SDK system image)"},
+    "arm-translation": {"partitions": ["system"], "files": ARM_FILES, "dirs": ARM_DIRS, "exec": ARM_EXEC, "src_root": "system", "tipo": "arm-translation",
+                        "id": "arm-translation-local",
+                        "nombre": "ARM64 translation, ndk_translation (from the Android SDK system image)"},
+}
+PROFILE = PROFILES[os.environ.get("PROFILE", "gapps")]
+
 
 def sha256(path):
     h = hashlib.sha256()
@@ -117,7 +149,7 @@ def main():
 
     root = os.path.join(WORK, "fs")
     os.makedirs(root, exist_ok=True)  # fsck.erofs creates only the last component
-    for part in PARTITIONS:
+    for part in PROFILE["partitions"]:
         if part not in lp:
             sys.exit(f"partition {part} is not in the super")
         raw = os.path.join(WORK, part + ".img")
@@ -135,21 +167,28 @@ def main():
         os.remove(raw)
 
     archivos = []
-    for rel in FILES:
-        src = os.path.join(root, rel)
+    wanted = list(PROFILE["files"])
+    for d in PROFILE.get("dirs", []):
+        base = os.path.join(root, PROFILE["src_root"], d)
+        if not os.path.isdir(base):
+            sys.exit(f"{d} is not in the image: it is not the system image this tool was written for")
+        wanted += [d + "/" + n for n in sorted(os.listdir(base)) if os.path.isfile(os.path.join(base, n))]
+    for rel in wanted:
+        src = os.path.join(root, PROFILE["src_root"], rel)
         if not os.path.isfile(src):
             sys.exit(f"{rel} is not in the image: it is not the system image this tool was written for")
         dst = os.path.join(OUT, rel)
         os.makedirs(os.path.dirname(dst), exist_ok=True)
         shutil.copyfile(src, dst)
-        os.chmod(dst, 0o644)
-        archivos.append({"path": rel, "sha256": sha256(dst), "tamano": os.path.getsize(dst)})
+        mode = 0o755 if rel in PROFILE.get("exec", ()) else 0o644
+        os.chmod(dst, mode)
+        archivos.append({"path": rel, "sha256": sha256(dst), "tamano": os.path.getsize(dst), "modo": mode})
 
     pkg_meta = json.loads(os.environ.get("PKG_META", "{}"))
     pkg = {
-        "id": pkg_meta.get("id", "gapps-local"),
-        "tipo": "gapps",
-        "nombre": pkg_meta.get("nombre", "Google Mobile Services (from the Android SDK system image)"),
+        "id": pkg_meta.get("id", PROFILE["id"]),
+        "tipo": PROFILE["tipo"],
+        "nombre": pkg_meta.get("nombre", PROFILE["nombre"]),
         "version": pkg_meta.get("version", ""),
         "androidVersion": [15],
         "arch": "x86_64",
