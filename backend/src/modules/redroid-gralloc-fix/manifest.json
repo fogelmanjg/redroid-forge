@@ -6,10 +6,11 @@
   "origen": "https://github.com/remote-android/redroid-doc/issues/930",
   "descripcion": "This is NOT a feature of redroid-forge: it works around a KNOWN BUG OF REDROID 15 that we reported upstream (redroid-doc#930). The graphics allocator of the official image crashes (SIGFPE, division by zero in gralloc_gbm_bo_create) when an app asks for a buffer in a pixel format its table does not know -- RGBA_1010102 (10-bit colour: Unity 6 games, benchmarks, HDR) or P010 -- and that crash restarts the whole of Android inside the container. It happens in host GPU mode on AMD (reported) and Intel (seen with P010). Remove this module when redroid fixes it.",
   "queToca": [
-    "in the stopped instance, before its first start, it changes 2 bytes of /vendor/lib64/hw/gralloc.gbm.so, a file of redroid (xor ecx,ecx -> mov cl,4: an unknown format is treated as 4 bytes per pixel instead of 0)",
+    "in the stopped instance, before its first start, it adds an init script (/vendor/etc/init/redroid-no-rgb10.rc) that sets allow_rgb10_configs=false for Mesa: its EGL stops offering 10-bit (RGBA_1010102) configurations, so apps such as 3DMark or Unity games use an 8-bit one and the picture comes out right",
+    "it also changes 2 bytes of /vendor/lib64/hw/gralloc.gbm.so, a file of redroid (xor ecx,ecx -> mov cl,4: an unknown format is treated as 4 bytes per pixel instead of 0), as a safety net for anything that still asks for a 10-bit buffer by another way; on its own this patch avoids the crash but a 10-bit app draws a garbled picture",
     "it only patches the file if the bytes around the change are exactly the known ones of the official redroid 15 image; with any other version of the file it leaves it as it is and says so in the log. It does nothing on hosts whose GPU is not AMD or Intel",
-    "the change is applied to the instance's own copy: the Docker image is not modified and nothing is downloaded or redistributed",
-    "a buffer in an unknown format is now allocated as 32 bits per pixel instead of crashing: correct for RGBA_1010102, only an approximation for other exotic formats"
+    "the changes are applied to the instance's own copy: the Docker image is not modified and nothing is downloaded or redistributed",
+    "an app can no longer use a 10-bit EGL configuration (10-bit colour output / HDR rendering): nothing in a normal Android 15 container used it, and without this the allocator crashed"
   ],
   "compatibleCon": {
     "androidVersion": [
@@ -23,17 +24,18 @@
     4
   ],
   "entry": "./integrate.js",
-  "version": 1,
+  "version": 2,
   "i18n": {
     "es": {
       "nombre": "Workaround de un bug de redroid: gralloc se cae con formatos de 10 bits",
       "licencia": "No es software de redroid-forge: un cambio de 2 bytes en la copia de un archivo de redroid que tiene la propia instancia; no se redistribuye nada",
       "descripcion": "Esto NO es una función de redroid-forge: es un workaround de un BUG CONOCIDO DE REDROID 15 que reportamos upstream (redroid-doc#930). El allocator de gráficos de la imagen oficial se cae (SIGFPE, división por cero en gralloc_gbm_bo_create) cuando una app pide un buffer en un formato de píxel que su tabla no conoce -- RGBA_1010102 (color de 10 bits: juegos de Unity 6, benchmarks, HDR) o P010 -- y esa caída reinicia todo Android dentro del contenedor. Pasa en modo GPU host con AMD (reportado) e Intel (visto con P010). Hay que sacar este módulo cuando redroid lo arregle.",
       "queToca": [
-        "en la instancia parada, antes de su primer arranque, cambia 2 bytes de /vendor/lib64/hw/gralloc.gbm.so, un archivo de redroid (xor ecx,ecx -> mov cl,4: un formato desconocido se trata como 4 bytes por píxel en vez de 0)",
+        "en la instancia parada, antes de su primer arranque, agrega un script de init (/vendor/etc/init/redroid-no-rgb10.rc) que pone allow_rgb10_configs=false para Mesa: su EGL deja de ofrecer configuraciones de 10 bits (RGBA_1010102), así que apps como 3DMark o los juegos de Unity usan una de 8 bits y la imagen sale bien",
+        "además cambia 2 bytes de /vendor/lib64/hw/gralloc.gbm.so, un archivo de redroid (xor ecx,ecx -> mov cl,4: un formato desconocido se trata como 4 bytes por píxel en vez de 0), como red de seguridad para lo que igual pida un buffer de 10 bits por otro camino; por sí solo ese parche evita el crash pero una app de 10 bits dibuja una imagen rota",
         "sólo parchea el archivo si los bytes alrededor del cambio son exactamente los conocidos de la imagen oficial de redroid 15; con cualquier otra versión del archivo lo deja como está y lo dice en el log. No hace nada en hosts cuya GPU no sea AMD ni Intel",
-        "el cambio se aplica a la copia de la propia instancia: la imagen de Docker no se modifica y no se descarga ni se redistribuye nada",
-        "un buffer en un formato desconocido ahora se reserva como 32 bits por píxel en vez de caerse: correcto para RGBA_1010102, sólo una aproximación para otros formatos exóticos"
+        "los cambios se aplican a la copia de la propia instancia: la imagen de Docker no se modifica y no se descarga ni se redistribuye nada",
+        "una app ya no puede usar una configuración EGL de 10 bits (salida de color de 10 bits / HDR): nada de un contenedor Android 15 normal lo usaba, y sin esto el allocator se caía"
       ]
     }
   },

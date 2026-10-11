@@ -288,6 +288,7 @@ async function checkGrallocFix({ readFile = runtime.readFile, vendorOf = hwAccel
   if (instances.length === 0) return [{ id, label, status: 'ok', detail: 'There are no instances to check.' }];
 
   const buggy = [];
+  const partial = []; // patched, but Mesa's EGL still offers 10-bit configurations: an app that uses one draws a garbled picture
   const unknown = [];
   let fixed = 0;
   for (const i of instances) {
@@ -295,18 +296,28 @@ async function checkGrallocFix({ readFile = runtime.readFile, vendorOf = hwAccel
       // eslint-disable-next-line no-await-in-loop
       const { status } = fix.patchGralloc(await readFile(i.containerId, fix.TARGET));
       if (status === 'patched') buggy.push(i.name); // "it would be patched" = it still has the bug
-      else if (status === 'already') fixed += 1;
-      else unknown.push(i.name);
+      else if (status === 'already') {
+        // eslint-disable-next-line no-await-in-loop
+        const hasRc = await readFile(i.containerId, fix.RC_TARGET).then(() => true, () => false);
+        if (hasRc) fixed += 1; else partial.push(i.name);
+      } else unknown.push(i.name);
     } catch (e) {
       unknown.push(i.name);
     }
   }
   if (buggy.length === 0) {
+    const notes = [];
+    if (partial.length) {
+      notes.push(`${partial.length} instance(s) (${partial.slice(0, 4).join(', ')}) have only the 2-byte patch: the crash is avoided, but an app that uses a 10-bit EGL configuration (3DMark, some Unity games) draws a garbled picture (green tint, vertical stripes) because Mesa's EGL still offers them. Create the instance again with the redroid-gralloc-fix module, or add /vendor/etc/init/redroid-no-rgb10.rc while it is stopped.`);
+    }
+    if (unknown.length) {
+      notes.push(`${unknown.length} could not be checked or carry another version of the file (${unknown.slice(0, 4).join(', ')}): an app asking for a 10-bit buffer could still restart Android there.`);
+    }
     return [{
       id,
       label,
-      status: unknown.length ? 'warn' : 'ok',
-      detail: `${fixed} instance(s) have the workaround.${unknown.length ? ` ${unknown.length} could not be checked or carry another version of the file (${unknown.slice(0, 4).join(', ')}): an app asking for a 10-bit buffer could still restart Android there.` : ''}`,
+      status: notes.length ? 'warn' : 'ok',
+      detail: `${fixed} instance(s) have the workaround.${notes.length ? ` ${notes.join(' ')}` : ''}`,
     }];
   }
   return [{

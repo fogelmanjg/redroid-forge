@@ -39,30 +39,39 @@ test('any other version of the file is not touched', () => {
   assert.strictEqual(fix.patchGralloc(fakeGralloc('9090')).status, 'unknown');
 });
 
-test('integrate copies the file out, patches it and copies it back with the same mode', async () => {
+test('integrate installs the init script, then copies the file out, patches it and copies it back with the same mode', async () => {
   const calls = [];
   await fix.integrate('cid', {}, {
     gpuVendor: 'amd',
     copyOut: async (src, dest) => { calls.push(['out', src]); fs.writeFileSync(dest, fakeGralloc(), { mode: 0o644 }); },
     copyIn: async (src, dest) => {
       calls.push(['in', dest]);
-      assert.strictEqual(fs.readFileSync(src).subarray(fix.OFFSET, fix.OFFSET + 2).toString('hex'), 'b104');
-      assert.strictEqual(fs.statSync(src).mode & 0o777, 0o644);
+      if (dest === fix.TARGET) {
+        assert.strictEqual(fs.readFileSync(src).subarray(fix.OFFSET, fix.OFFSET + 2).toString('hex'), 'b104');
+        assert.strictEqual(fs.statSync(src).mode & 0o777, 0o644);
+      }
     },
   });
-  assert.deepStrictEqual(calls, [['out', fix.TARGET], ['in', fix.TARGET]]);
+  assert.deepStrictEqual(calls, [['in', fix.RC_TARGET], ['out', fix.TARGET], ['in', fix.TARGET]]);
+});
+
+test('the init script sets the Mesa option that stops EGL from offering 10-bit configurations', () => {
+  const rc = fs.readFileSync(fix.RC_SOURCE, 'utf8');
+  assert.match(rc, /^on early-init$/m);
+  assert.match(rc, /^\s+export allow_rgb10_configs false$/m);
+  assert.strictEqual(fix.RC_TARGET, '/vendor/etc/init/redroid-no-rgb10.rc');
 });
 
 test('integrate does not copy anything back when the file is unknown or already fixed', async () => {
   for (const content of [Buffer.alloc(500), fakeGralloc('b104')]) {
-    let copiedBack = false;
+    const copiedBack = [];
     // eslint-disable-next-line no-await-in-loop
     await fix.integrate('cid', {}, {
       gpuVendor: 'intel',
       copyOut: async (src, dest) => fs.writeFileSync(dest, content),
-      copyIn: async () => { copiedBack = true; },
+      copyIn: async (src, dest) => { copiedBack.push(dest); },
     });
-    assert.strictEqual(copiedBack, false);
+    assert.deepStrictEqual(copiedBack, [fix.RC_TARGET], 'only the init script, never the library');
   }
 });
 
@@ -114,7 +123,7 @@ test('doctor: it flags the instances that still have the bug and says it is a kn
   const r = await checkGrallocFix({
     vendorOf: async () => 'amd',
     list: () => [{ name: 'a-old', containerId: 'old' }, { name: 'a-new', containerId: 'new' }],
-    readFile: async (id) => files[id],
+    readFile: async (id, p) => { if (p === fix.RC_TARGET) return Buffer.from('rc'); return files[id]; },
   });
   assert.strictEqual(r[0].status, 'warn');
   assert.match(r[0].detail, /a-old/);
@@ -124,7 +133,7 @@ test('doctor: it flags the instances that still have the bug and says it is a kn
 });
 
 test('doctor: ok when every instance has the fix, and not applicable on other GPUs', async () => {
-  const ok = await checkGrallocFix({ vendorOf: async () => 'intel', list: () => [{ name: 'n', containerId: 'c' }], readFile: async () => fakeGralloc('b104') });
+  const ok = await checkGrallocFix({ vendorOf: async () => 'intel', list: () => [{ name: 'n', containerId: 'c' }], readFile: async (id, p) => (p === fix.RC_TARGET ? Buffer.from('rc') : fakeGralloc('b104')) });
   assert.strictEqual(ok[0].status, 'ok');
   const na = await checkGrallocFix({ vendorOf: async () => 'nvidia', list: () => { throw new Error('must not be asked'); }, readFile: async () => null });
   assert.strictEqual(na[0].status, 'ok');
@@ -134,4 +143,15 @@ test('doctor: ok when every instance has the fix, and not applicable on other GP
 test('doctor: a file it does not recognise is a warning, never a pass', async () => {
   const r = await checkGrallocFix({ vendorOf: async () => 'amd', list: () => [{ name: 'x', containerId: 'c' }], readFile: async () => Buffer.alloc(100) });
   assert.strictEqual(r[0].status, 'warn');
+});
+
+test('doctor: an instance with only the 2-byte patch (no init script) is a warning that says the picture can be garbled', async () => {
+  const r = await checkGrallocFix({
+    vendorOf: async () => 'amd',
+    list: () => [{ name: 'half', containerId: 'h' }],
+    readFile: async (id, p) => { if (p === fix.RC_TARGET) throw new Error('no such file'); return fakeGralloc('b104'); },
+  });
+  assert.strictEqual(r[0].status, 'warn');
+  assert.match(r[0].detail, /half/);
+  assert.match(r[0].detail, /garbled picture/);
 });

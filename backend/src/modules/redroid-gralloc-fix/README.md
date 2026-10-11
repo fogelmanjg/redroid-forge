@@ -12,6 +12,8 @@ The `gralloc.gbm.so` of the official redroid 15 image computes the bytes per pix
 `SIGFPE` in `android.hardware.graphics.allocator@2.0-service`. That service is critical, so zygote and system_server restart
 and **the whole of Android restarts** inside the container (a connected scrcpy is left pointing at the old system).
 
+**The 2-byte patch is not enough on its own.** With it the allocator no longer dies, but it still allocates an unknown format as 8-bit XRGB8888, so an app that really renders in 10 bits (3DMark does) draws a garbled picture: green tint, regular vertical stripes (`screencap` inside Android shows it too, so it is not the encoder or scrcpy). What fixes the picture is that Mesa's EGL stops offering 10-bit configurations (`allow_rgb10_configs=false`, an environment variable Mesa honours for any of its options), so the app takes an 8-bit one: the module installs an init script for that (`redroid-no-rgb10.rc`, in `/vendor/etc/init`). The 2-byte patch stays as the safety net for anything that asks for a 10-bit buffer another way. Verified with 3DMark on the Polaris (garbled with the patch alone, clean with the script, hardware encoder on).
+
 Found and documented in [redroid-doc#930](https://github.com/remote-android/redroid-doc/issues/930). The module applies the
 binary workaround described there: in the stopped instance it changes `31 c9` (`xor ecx,ecx`) to `b1 04` (`mov cl,4`) at
 file offset `0x57d2` of `/vendor/lib64/hw/gralloc.gbm.so`, so an unknown format is allocated as 32 bits per pixel.

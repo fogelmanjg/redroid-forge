@@ -17,8 +17,14 @@
 // P010 on an Iris Xe). The binary workaround of the issue is the one used here: `xor ecx,ecx` ->
 // `mov cl,4` at file offset 0x57d2.
 //
+// Patching alone is NOT enough: an app that asks for a 10-bit config (3DMark does) then gets a buffer that
+// the gralloc allocates as 8-bit XRGB8888, and renders into it as 10-bit: a garbled picture (found with 3DMark on
+// 10/10/2026, the issue even shows "Angry Birds Worse Edition"). So the module does two things: the init script
+// that makes Mesa's EGL stop offering 10-bit configurations (apps then use an 8-bit one, and the picture is right),
+// and the 2-byte patch as the safety net for whatever asks for a 10-bit buffer by another way.
+//
 // It runs between runtime.create() and runtime.start() (the instance is stopped), on the instance's
-// OWN copy of the file: the image is not touched and nothing is redistributed.
+// OWN copy of the files: the image is not touched and nothing is redistributed.
 
 const fs = require('fs');
 const os = require('os');
@@ -31,6 +37,9 @@ const execFileAsync = promisify(execFile);
 const GPU_VENDORS = ['amd', 'intel'];
 
 const TARGET = '/vendor/lib64/hw/gralloc.gbm.so';
+// The init script that keeps Mesa's EGL from offering 10-bit configurations (see the file and the README).
+const RC_SOURCE = path.join(__dirname, 'redroid-no-rgb10.rc');
+const RC_TARGET = '/vendor/etc/init/redroid-no-rgb10.rc';
 const OFFSET = 0x57d2;
 // What has to be around the two bytes for the file to be the one the workaround was written for:
 // `cmpl $YV12 ...; jne ...; mov $1,%ecx; jmp` before, and `jmp; mov $3,%ecx; xor %edx,%edx; div %ecx` after.
@@ -53,7 +62,9 @@ function patchGralloc(input) {
   return { status: 'patched', buffer: data };
 }
 
-async function integrate(containerId, ctx = {}, { copyOut, copyIn, gpuVendor } = {}) {
+async function integrate(containerId, ctx = {}, {
+  copyOut, copyIn, gpuVendor, rcSource = RC_SOURCE,
+} = {}) {
   const vendor = gpuVendor || await hwAccel.detectGpuVendor();
   if (!GPU_VENDORS.includes(vendor)) {
     log(`the host GPU is "${vendor}" (the bug is known on ${GPU_VENDORS.join('/')}): ${TARGET} of ${containerId} left as it is`);
@@ -64,6 +75,10 @@ async function integrate(containerId, ctx = {}, { copyOut, copyIn, gpuVendor } =
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'redroid-gralloc-fix-'));
   const file = path.join(dir, path.basename(TARGET));
   try {
+    // 1. Mesa's EGL does not offer 10-bit configurations (the init script).
+    await put(rcSource, RC_TARGET);
+    log(`installed ${RC_TARGET} in ${containerId} (Mesa's EGL will not offer 10-bit configurations)`);
+    // 2. the safety net: the 2-byte patch.
     await out(TARGET, file);
     const mode = fs.statSync(file).mode & 0o777;
     const { status, buffer } = patchGralloc(fs.readFileSync(file));
@@ -82,5 +97,5 @@ async function integrate(containerId, ctx = {}, { copyOut, copyIn, gpuVendor } =
 }
 
 module.exports = {
-  integrate, patchGralloc, TARGET, OFFSET, GPU_VENDORS,
+  integrate, patchGralloc, TARGET, OFFSET, GPU_VENDORS, RC_TARGET, RC_SOURCE,
 };
