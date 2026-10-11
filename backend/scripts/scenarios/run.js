@@ -7,7 +7,7 @@
 //
 //   node backend/scripts/scenarios/run.js <scenario.json | name> --host <ssh-target>
 //        [--root-cmd "sudo -n"] [--hwenc-artifacts <dir on the host>] [--decode-tool <local path>]
-//        [--accept-contracts] [--out <dir>] [--keep] [--dry-run]
+//        [--accept-contracts] [--out <dir>] [--keep] [--dry-run] [--forge-env KEY=VALUE,...]
 //
 // The options can also be given in ~/.config/redroid-forge/scenarios.json:
 //   { "host": "...", "rootCmd": "...", "hwencArtifacts": "...", "decodeTool": "..." }
@@ -77,6 +77,17 @@ function armDirOf(cfg) {
 
 function usesModule(scenario, id) {
   return scenario.instances.some((i) => i.modules.includes(id));
+}
+
+// Extra environment for the forge of the run: `forgeEnv` of the config (an object) and/or --forge-env KEY=VALUE,KEY=VALUE.
+function forgeEnvOf(cfg, opts) {
+  const env = { ...(cfg.forgeEnv || {}) };
+  for (const pair of String(opts['forge-env'] || '').split(',').filter(Boolean)) {
+    const i = pair.indexOf('=');
+    if (i <= 0 || !/^[A-Z0-9_]+$/.test(pair.slice(0, i))) throw new Error(`--forge-env wants KEY=VALUE (KEY in capitals), got "${pair}"`);
+    env[pair.slice(0, i)] = pair.slice(i + 1);
+  }
+  return env;
 }
 
 async function main() {
