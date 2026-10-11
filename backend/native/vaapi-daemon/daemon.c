@@ -14,6 +14,8 @@
  * instead of allocating/filling one itself.
  */
 
+/* struct ucred (SO_PEERCRED: which process is on the other end of a connection) needs this before any include. */
+#define _GNU_SOURCE
 #include <fcntl.h>
 #include <stdint.h>
 #include <stdio.h>
