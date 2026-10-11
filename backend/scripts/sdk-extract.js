@@ -6,7 +6,7 @@
 //
 //   https://dl.google.com/android/repository/sys-img/google_apis_playstore/x86_64-35_r09.zip
 //
-//   node backend/scripts/sdk-extract.js <gapps|arm-translation> <x86_64-35_r09.zip> [outDir]
+//   node backend/scripts/sdk-extract.js <gapps|arm-translation> <system image zip, e.g. x86_64-35-ext15_r01.zip> [outDir]
 //
 //   gapps            Google Play services, Play Store and GSF  -> backend/data/gapps (REDROID_FORGE_GAPPS_DIR)
 //   arm-translation  the ndk_translation native bridge         -> backend/data/arm-translation (REDROID_FORGE_ARM_DIR)
@@ -27,11 +27,25 @@ const { spawnSync } = require('child_process');
 // (sys-img2-1.xml). It is only a sanity check of the download, not of what is injected:
 // every extracted file is verified one by one against package.json.
 const IMAGES = {
+  // Android 15 with the "ext15" platform extension (the QPR releases): the only image, of the ones found, whose
+  // ndk_translation runs Unity IL2CPP games (Loop Sort) -- see backend/src/modules/arm-translation/README.md.
+  // It is not in Google's current index (sys-img2-1.xml) but the file is still served from the same place.
+  'x86_64-35-ext15_r01.zip': {
+    sha1: '47bd387a6865762f7ae051365a70a3dc1eea2fdb',
+    version: 'Android 15 ext15 (API 35) Google Play x86_64, r01',
+    origen: 'https://dl.google.com/android/repository/sys-img/google_apis_playstore/x86_64-35-ext15_r01.zip',
+    ids: { gapps: 'gapps-sdk35-ext15-r01-x86_64', 'arm-translation': 'arm-translation-sdk35-ext15-r01-x86_64' },
+    notes: { gapps: 'WARNING: the GApps package that was validated comes from x86_64-35_r09.zip; this image was not tried for it.' },
+  },
   'x86_64-35_r09.zip': {
     sha1: '2f0054868e6aab3c098acd3decba17a82aed4176',
     version: 'Android 15 (API 35) Google Play x86_64, r09',
     origen: 'https://dl.google.com/android/repository/sys-img/google_apis_playstore/x86_64-35_r09.zip',
     ids: { gapps: 'gapps-sdk35-r09-x86_64', 'arm-translation': 'arm-translation-sdk35-r09-x86_64' },
+    notes: {
+      'arm-translation': 'WARNING: the ndk_translation of this image (r06-r09, ext14) makes Unity IL2CPP games crash inside the translator'
+        + ' (Loop Sort, deterministic). Use x86_64-35-ext15_r01.zip for the ARM translation; this image is still the validated one for GApps.',
+    },
   },
 };
 const PROFILES = {
@@ -49,7 +63,7 @@ function sha1File(file) {
 async function main() {
   const [profile, zip, outArg] = process.argv.slice(2);
   if (!PROFILES[profile] || !zip || !fs.existsSync(zip)) {
-    console.error(`Usage: node sdk-extract.js <${Object.keys(PROFILES).join('|')}> <x86_64-35_r09.zip> [outDir]`);
+    console.error(`Usage: node sdk-extract.js <${Object.keys(PROFILES).join('|')}> <system image zip, e.g. x86_64-35-ext15_r01.zip> [outDir]`);
     process.exit(1);
   }
   const out = path.resolve(outArg
@@ -57,6 +71,7 @@ async function main() {
     || path.join(__dirname, '..', 'data', PROFILES[profile].dir));
 
   const image = IMAGES[path.basename(zip)];
+  if (image && image.notes && image.notes[profile]) console.warn(`\n${image.notes[profile]}\n`);
   const known = image ? { sha1: image.sha1, version: image.version, origen: image.origen, id: image.ids[profile] } : undefined;
   const sha1 = await sha1File(zip);
   if (!known) {
