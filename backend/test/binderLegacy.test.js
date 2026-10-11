@@ -1,6 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const { binderBinds, useLegacyBinder } = require('../src/lib/binder');
+const binder = require('../src/lib/binder');
 
 test('useLegacyBinder: legacy when binder-control does not exist', () => {
   assert.strictEqual(useLegacyBinder(() => false), true);
@@ -169,4 +170,38 @@ test('binderBinds refuses a slot with root-only nodes (the instance would die af
   assert.deepStrictEqual(binderBinds(0, { legacy: true, exists, accessible: () => true }), [
     '/dev/binder:/dev/binder', '/dev/hwbinder:/dev/hwbinder', '/dev/vndbinder:/dev/vndbinder',
   ]);
+});
+
+// ---- slots in use by containers that are not ours (another forge, another orchestrator) ----
+
+test('slotsFromBinds reads the slot of the binder binds, legacy and binderfs, and ignores the rest', () => {
+  assert.deepStrictEqual(
+    binder.slotsFromBinds(['/dev/binder3:/dev/binder', '/dev/hwbinder3:/dev/hwbinder', '/dev/vndbinder3:/dev/vndbinder', 'vol:/data']).sort(),
+    [3],
+  );
+  assert.deepStrictEqual(binder.slotsFromBinds(['/dev/binder:/dev/binder', '/dev/binderfs/binder7:/dev/binder']).sort(), [0, 7]);
+  assert.deepStrictEqual(binder.slotsFromBinds(['/dev/binder3:/data', '/dev/null:/dev/null', 'x']), []);
+  assert.deepStrictEqual(binder.slotsFromBinds(undefined), []);
+});
+
+test('slotsInUseOnHost asks Docker for every running container, and a container that disappears does not break it', async () => {
+  const info = {
+    a: { HostConfig: { Binds: ['/dev/binder1:/dev/binder', '/dev/hwbinder1:/dev/hwbinder', '/dev/vndbinder1:/dev/vndbinder'] } },
+    c: { HostConfig: { Binds: ['/dev/binder4:/dev/binder'] } },
+  };
+  const docker = {
+    listContainers: async () => [{ Id: 'a' }, { Id: 'gone' }, { Id: 'c' }],
+    getContainer: (id) => ({ inspect: async () => { if (!info[id]) throw new Error('no such container'); return info[id]; } }),
+  };
+  assert.deepStrictEqual((await binder.slotsInUseOnHost(docker)).sort(), [1, 4]);
+});
+
+test('nextFreeSlot skips the slots that a running container of the host already uses', () => {
+  const exists = () => true;
+  const free = (inUse) => binder.nextFreeSlot({
+    legacy: true, exists, reserved: new Set(), accessible: () => true, inUse,
+  });
+  assert.strictEqual(free([]), 1);
+  assert.strictEqual(free([1]), 2);
+  assert.strictEqual(free([1, 2, 4]), 3);
 });

@@ -45,10 +45,13 @@ function reservedSlots(env = process.env) {
 // the case of a host with the module's default `devices=binder,hwbinder,
 // vndbinder` (confirmed on n02).
 function nextFreeSlot({
-  legacy = useLegacyBinder(), exists = fs.existsSync, reserved = reservedSlots(), accessible = worldAccessible,
+  legacy = useLegacyBinder(), exists = fs.existsSync, reserved = reservedSlots(), accessible = worldAccessible, inUse = [],
 } = {}) {
   const used = new Set(store.readAll().map((i) => i.binderSlot).filter((s) => s != null));
   for (const r of reserved) used.add(r);
+  // Slots that a RUNNING container of the host already has bound, whoever created it (another forge, another
+  // orchestrator): two Androids on the same binder nodes make each other's services abort in a loop.
+  for (const s of inUse) used.add(s);
   if (!legacy) {
     let slot = 1;
     while (used.has(slot)) slot++;
@@ -108,6 +111,31 @@ function restrictedNodes(slot, accessible = worldAccessible, exists = fs.existsS
   return legacyNodeNames(slot).map((n) => `/dev/${n}`).filter((p) => exists(p) && !accessible(p));
 }
 
+// The binder slots that a list of Docker binds ("/dev/binder3:/dev/binder", "/dev/binderfs/binder3:/dev/binder", ...) uses.
+// Slot 0 is the nodes without a suffix. Pure.
+function slotsFromBinds(binds) {
+  const slots = new Set();
+  for (const b of binds || []) {
+    const m = /^\/dev\/(?:binderfs\/)?(?:binder|hwbinder|vndbinder)(\d*):\/dev\/(?:binder|hwbinder|vndbinder)$/.exec(String(b));
+    if (m) slots.add(m[1] === '' ? 0 : Number(m[1]));
+  }
+  return [...slots];
+}
+
+// The slots in use by the running containers of the host (every one that has a binder bind, not only ours).
+async function slotsInUseOnHost(docker) {
+  const out = new Set();
+  const list = await docker.listContainers();
+  for (const c of list) {
+    try {
+      // eslint-disable-next-line no-await-in-loop
+      const info = await docker.getContainer(c.Id).inspect();
+      for (const s of slotsFromBinds(info.HostConfig && info.HostConfig.Binds)) out.add(s);
+    } catch { /* it went away while we looked */ }
+  }
+  return [...out];
+}
+
 function useLegacyBinder(exists = fs.existsSync) {
   return !exists(`${BINDERFS_ROOT}/binder-control`);
 }
@@ -141,5 +169,5 @@ function binderBinds(slot, { legacy = useLegacyBinder(), exists = fs.existsSync,
 }
 
 module.exports = {
-  nextFreeSlot, binderBinds, useLegacyBinder, reservedSlots, legacyDevicesParam, legacyNodeNames, restrictedNodes, worldAccessible, BINDERFS_ROOT,
+  nextFreeSlot, slotsFromBinds, slotsInUseOnHost, binderBinds, useLegacyBinder, reservedSlots, legacyDevicesParam, legacyNodeNames, restrictedNodes, worldAccessible, BINDERFS_ROOT,
 };
