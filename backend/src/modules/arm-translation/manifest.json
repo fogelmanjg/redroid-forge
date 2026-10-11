@@ -3,15 +3,16 @@
   "nombre": "ARM translation (arm64 apps on x86_64)",
   "esTerceroNoLibre": true,
   "licencia": "Proprietary (Google). redroid-forge neither includes, hosts nor downloads these files: you provide them and you are responsible for complying with Google's license terms",
-  "origen": "https://dl.google.com/android/repository/sys-img/google_apis_playstore/sys-img2-1.xml",
-  "descripcion": "Lets apps and games that only ship ARM64 native code run in the instance, through the ndk_translation native bridge (binary translation ARM64 -> x86_64) that Google ships in the Android SDK emulator images, from files that YOU provide in a folder of the host (extracted with the included tool from the same system image as the gapps module).",
+  "origen": "https://dl.google.com/android/repository/sys-img/google_apis_playstore/x86_64-35-ext15_r01.zip",
+  "descripcion": "Lets apps and games that only ship ARM64 native code run in the instance, through the ndk_translation native bridge (binary translation ARM64 -> x86_64) that Google ships in the Android SDK emulator images, from files that YOU provide in a folder of the host (extracted with the included tool from the x86_64-35-ext15_r01 system image).",
   "queToca": [
     "copies the translator (libndk_translation.so), its runtime and its proxy libraries (82 files: the translator, its proxy libraries and the ARM side of the system) into /system/lib64, /system/bin/arm64 and /system/etc of the instance -- before its first start, /system becomes unwritable for this purpose as soon as it boots",
     "verifies the sha256 of EVERY file against the package definition (from the known-combinations database, or from the local package.json written by the extraction tool, in which case the combination is reported as unsupported) and refuses to inject anything that does not match",
     "does NOT download anything and does NOT include any Google software: the files come from a folder of the host that you provide (REDROID_FORGE_ARM_DIR, by default backend/data/arm-translation)",
     "adds boot properties to the container (ro.dalvik.vm.native.bridge=libndk_translation.so and the ARM -> x86 instruction-set mapping): from then on Android installs and runs arm64 libraries of an app when it carries no x86_64 ones",
     "does NOT register ARM executables in the host kernel (binfmt_misc is shared by all the containers and the host): only apps (through the native bridge) are translated, not command-line ARM programs",
-    "translated code is slower than native code (typically 2x to 5x more CPU for the app's native parts), and a few apps detect the translation and refuse to run"
+    "translated code is slower than native code (typically 2x to 5x more CPU for the app's native parts), and a few apps detect the translation and refuse to run",
+    "the files must come from the image x86_64-35-ext15_r01 of the SDK: the translator of the older images (r06-r09) makes Unity games crash inside it"
   ],
   "compatibleCon": {
     "androidVersion": [
@@ -27,19 +28,20 @@
     4
   ],
   "entry": "./integrate.js",
-  "version": 1,
+  "version": 2,
   "i18n": {
     "es": {
       "nombre": "Traducción ARM (apps arm64 en x86_64)",
       "licencia": "Propietaria (Google). redroid-forge no incluye, no aloja ni descarga estos archivos: los ponés vos y sos responsable de cumplir los términos de licencia de Google",
-      "descripcion": "Permite que corran apps y juegos que sólo traen código nativo ARM64, a través del native bridge ndk_translation (traducción binaria ARM64 -> x86_64) que Google incluye en las imágenes del emulador del SDK de Android, a partir de archivos que VOS ponés en una carpeta del host (extraídos con la herramienta incluida de la misma imagen de sistema que usa el módulo gapps).",
+      "descripcion": "Permite que corran apps y juegos que sólo traen código nativo ARM64, a través del native bridge ndk_translation (traducción binaria ARM64 -> x86_64) que Google incluye en las imágenes del emulador del SDK de Android, a partir de archivos que VOS ponés en una carpeta del host (extraídos con la herramienta incluida de la imagen de sistema x86_64-35-ext15_r01).",
       "queToca": [
         "copia el traductor (libndk_translation.so), su runtime y sus librerías proxy (82 archivos: el traductor, sus librerías proxy y el lado ARM del sistema) dentro de /system/lib64, /system/bin/arm64 y /system/etc de la instancia -- antes de su primer arranque, porque apenas bootea no se puede escribir ahí con este método",
         "verifica el sha256 de CADA archivo contra la definición del paquete (de la base de combinaciones conocidas, o del package.json local que escribe la herramienta de extracción, en cuyo caso la combinación figura como sin soporte) y se niega a inyectar algo que no coincida",
         "NO descarga nada y NO incluye software de Google: los archivos salen de una carpeta del host que ponés vos (REDROID_FORGE_ARM_DIR, por defecto backend/data/arm-translation)",
         "agrega propiedades de arranque al contenedor (ro.dalvik.vm.native.bridge=libndk_translation.so y el mapeo de conjunto de instrucciones ARM -> x86): desde ahí Android instala y corre las librerías arm64 de una app cuando no trae las x86_64",
         "NO registra ejecutables ARM en el kernel del host (binfmt_misc es compartido por todos los contenedores y el host): se traducen las apps (por el native bridge), no los programas ARM de línea de comandos",
-        "el código traducido es más lento que el nativo (típicamente 2x a 5x más CPU en las partes nativas de la app), y unas pocas apps detectan la traducción y se niegan a correr"
+        "el código traducido es más lento que el nativo (típicamente 2x a 5x más CPU en las partes nativas de la app), y unas pocas apps detectan la traducción y se niegan a correr",
+        "los archivos tienen que salir de la imagen x86_64-35-ext15_r01 del SDK: el traductor de las imágenes más viejas (r06-r09) hace que los juegos Unity se caigan dentro de él"
       ]
     }
   }

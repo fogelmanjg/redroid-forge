@@ -71,7 +71,7 @@ async function resolveAndVerify(dir = ARM_DIR, packages = dbPackages()) {
   if (!local) {
     throw new Error(
       `ARM translation: there are no files in ${dir}. This project does not download Google software: `
-      + 'put it there yourself (backend/scripts/sdk-extract.js arm-translation <system image zip> extracts it from the '
+      + 'put it there yourself (backend/scripts/sdk-extract.js arm-translation <x86_64-35-ext15_r01.zip> extracts it from the '
       + 'system image of the Android SDK) and try again.',
     );
   }
