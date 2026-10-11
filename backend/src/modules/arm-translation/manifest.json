@@ -44,5 +44,8 @@
         "los archivos tienen que salir de la imagen x86_64-35-ext15_r01 del SDK: el traductor de las imágenes más viejas (r06-r09) hace que los juegos Unity se caigan dentro de él"
       ]
     }
-  }
+  },
+  "referencias": [
+    "https://github.com/fogelmanjg/redroid-ndk-translation"
+  ]
 }

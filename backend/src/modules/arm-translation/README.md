@@ -7,6 +7,8 @@ emulator images.
 It is **non-free third-party software**: redroid-forge neither includes, hosts nor downloads it. You get the files from the
 system image of the Android SDK and the module verifies the sha256 of every one before injecting.
 
+The catalog of builds (by hash), the compatibility matrix, how a build is traced to its image and the standalone extraction tools live in their own project: **[redroid-ndk-translation](https://github.com/fogelmanjg/redroid-ndk-translation)**. This module is the part that injects the files into an instance.
+
 **Use `x86_64-35-ext15_r01.zip` for the ARM translation** (not the `x86_64-35_r09.zip` that `gapps` uses): see "Which image" below.
 
 ```
