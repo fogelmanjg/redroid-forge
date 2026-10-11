@@ -120,6 +120,16 @@ async function ensureImage(image) {
 // docker-modem, which JSON-parses the body when it looks like JSON, so an output such as
 // 3607632867885909819 came back as the NUMBER 3607632867885909500 (precision lost) and
 // {"a":1} as the object "[object Object]". A stream is never parsed.
+// The content of ONE file of a container, running or stopped (the Docker archive API: the same one `docker cp` uses).
+async function readFile(containerId, filePath) {
+  const stream = await docker.getContainer(containerId).getArchive({ path: filePath });
+  const chunks = [];
+  for await (const c of stream) chunks.push(c);
+  const file = require('./tarFile').firstFileFromTar(Buffer.concat(chunks));
+  if (!file) throw new Error(`${filePath} is not a regular file of ${containerId}`);
+  return file;
+}
+
 async function readLogs(container) {
   const stream = await container.logs({ stdout: true, stderr: true, follow: true });
   const chunks = [];
@@ -157,5 +167,5 @@ async function runEphemeral(image, cmd, binds, timeoutMs = 30000) {
 
 module.exports = {
   docker, listLocalImageTags, create, start, stop, restart, remove, removeVolume,
-  inspect, getPid, getBridgeIp, exec, runEphemeral, readLogs,
+  inspect, getPid, getBridgeIp, exec, runEphemeral, readLogs, readFile,
 };

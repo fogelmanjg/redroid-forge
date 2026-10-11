@@ -47,7 +47,7 @@ test('moduleManifests: the catalog has the 6 modules of section 5 of REQUIREMENT
   // six -- this test also covers that moduleManifests.loadAll() discovers
   // both sources (see the comment there).
   const ids = manifests.list().map((m) => m.id).sort();
-  assert.deepEqual(ids, ['arm-translation', 'cpu-ram', 'device-profile', 'gapps', 'gpu-mode', 'hwenc', 'magisk', 'wifi-falso']);
+  assert.deepEqual(ids, ['arm-translation', 'cpu-ram', 'device-profile', 'gapps', 'gpu-mode', 'hwenc', 'magisk', 'redroid-gralloc-fix', 'wifi-falso']);
 });
 
 test('moduleManifests: hwenc is discovered from its own folder, with etapa/entry', () => {

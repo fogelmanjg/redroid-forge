@@ -9,8 +9,13 @@ const execFileAsync = promisify(execFile);
 // The same pattern as BINDERFS_ROOT in binder.js: a real directory of the host,
 // bind-mounted in docker-compose.yml into the backend's container, and into every
 // instance that needs it via the bind that daemonBind() returns.
-const VAAPI_ROOT = '/dev/vaapi-helper';
+// REDROID_FORGE_VAAPI_DIR gives a forge its OWN directory (and so its own daemon and socket): the scenario runner
+// starts one isolated forge per run on a host that may already have a forge in use, and two forges sharing the default
+// socket path made the second daemon take the name away from the first one, cutting its instances' encoder.
+const VAAPI_ROOT = process.env.REDROID_FORGE_VAAPI_DIR || '/dev/vaapi-helper';
 const SOCKET_PATH = `${VAAPI_ROOT}/socket`;
+// Where the Android side of every instance connects to (it is fixed in the component): the host directory is bound here.
+const INSTANCE_VAAPI_DIR = '/dev/vaapi-helper';
 const DAEMON_BIN = path.join(__dirname, '..', '..', 'native', 'vaapi-daemon', 'daemon');
 const DAEMON_START_TIMEOUT_MS = 5000;
 
@@ -89,9 +94,26 @@ function isDaemonAlive() {
 
 // A single daemon per host, shared by all the instances -- it is not a process
 // per instance. Idempotent: it does nothing if it is already running.
+// Is somebody listening on the socket? A daemon of ANOTHER forge on the same host (same default path) counts: that one is
+// adopted, never replaced -- unlinking its socket would leave it running but unreachable.
+function socketAnswers(socketPath = SOCKET_PATH, timeoutMs = 1000) {
+  return new Promise((resolve) => {
+    if (!fs.existsSync(socketPath)) { resolve(false); return; }
+    const c = net.connect(socketPath);
+    const done = (ok) => { c.destroy(); resolve(ok); };
+    c.setTimeout(timeoutMs, () => done(false));
+    c.on('connect', () => done(true));
+    c.on('error', () => done(false));
+  });
+}
+
 async function ensureDaemonRunning() {
   daemonWanted = true;
   if (isDaemonAlive()) return;
+  if (daemonProcess === null && await socketAnswers()) {
+    log(`a VA-API daemon of another forge already serves ${SOCKET_PATH}: using it (set REDROID_FORGE_VAAPI_DIR to give this forge its own)`);
+    return;
+  }
 
   if (!fs.existsSync(DAEMON_BIN)) {
     throw new Error(`VA-API daemon binary not found at ${DAEMON_BIN} (it should be built when the image is built, see backend/native/vaapi-daemon/Makefile)`);
@@ -102,7 +124,7 @@ async function ensureDaemonRunning() {
   // An old socket from a previous daemon that died without cleaning up blocks bind().
   fs.rmSync(SOCKET_PATH, { force: true });
 
-  daemonProcess = spawn(DAEMON_BIN, [], { stdio: ['ignore', 'pipe', 'pipe'] });
+  daemonProcess = spawn(DAEMON_BIN, [], { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, REDROID_FORGE_VAAPI_SOCKET: SOCKET_PATH } });
   daemonStartedAt = Date.now();
   daemonProcess.stdout.on('data', (d) => log(d.toString().trim()));
   daemonProcess.stderr.on('data', (d) => warn(d.toString().trim()));
@@ -125,7 +147,7 @@ async function ensureDaemonRunning() {
 // both sides, like binderBinds() in binder.js, so that the AF_UNIX socket is the
 // same real file seen by the backend and by the instance.
 function daemonBind() {
-  return `${VAAPI_ROOT}:${VAAPI_ROOT}`;
+  return `${VAAPI_ROOT}:${INSTANCE_VAAPI_DIR}`;
 }
 
 // ---- Hardware decode (hwdec protocol v2, backend/native/vaapi-daemon/protocol.h) ----
@@ -192,5 +214,5 @@ function queryHwdecCaps({ socketPath = SOCKET_PATH, timeoutMs = 3000 } = {}) {
 
 module.exports = {
   detectGpuVendor, encodeSupported, ensureDaemonRunning, stopDaemon, nextRestartDelay, daemonBind, queryHwdecCaps, parseHwdecCaps,
-  HWDEC_COMPONENTS, VAAPI_ROOT, SOCKET_PATH,
+  HWDEC_COMPONENTS, VAAPI_ROOT, SOCKET_PATH, INSTANCE_VAAPI_DIR, socketAnswers,
 };

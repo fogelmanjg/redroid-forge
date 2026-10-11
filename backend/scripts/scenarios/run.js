@@ -7,7 +7,7 @@
 //
 //   node backend/scripts/scenarios/run.js <scenario.json | name> --host <ssh-target>
 //        [--root-cmd "sudo -n"] [--hwenc-artifacts <dir on the host>] [--decode-tool <local path>]
-//        [--accept-contracts] [--out <dir>] [--keep] [--dry-run]
+//        [--accept-contracts] [--out <dir>] [--keep] [--dry-run] [--forge-env KEY=VALUE,...]
 //
 // The options can also be given in ~/.config/redroid-forge/scenarios.json:
 //   { "host": "...", "rootCmd": "...", "hwencArtifacts": "...", "decodeTool": "..." }
@@ -79,6 +79,17 @@ function usesModule(scenario, id) {
   return scenario.instances.some((i) => i.modules.includes(id));
 }
 
+// Extra environment for the forge of the run: `forgeEnv` of the config (an object) and/or --forge-env KEY=VALUE,KEY=VALUE.
+function forgeEnvOf(cfg, opts) {
+  const env = { ...(cfg.forgeEnv || {}) };
+  for (const pair of String(opts['forge-env'] || '').split(',').filter(Boolean)) {
+    const i = pair.indexOf('=');
+    if (i <= 0 || !/^[A-Z0-9_]+$/.test(pair.slice(0, i))) throw new Error(`--forge-env wants KEY=VALUE (KEY in capitals), got "${pair}"`);
+    env[pair.slice(0, i)] = pair.slice(i + 1);
+  }
+  return env;
+}
+
 async function main() {
   const opts = parseArgs(process.argv.slice(2));
   const cfg = { ...loadConfig() };
@@ -94,7 +105,7 @@ async function main() {
   if (!cfg.host) throw new Error('--host <ssh-target> is required (or "host" in ~/.config/redroid-forge/scenarios.json)');
 
   const host = new Host({ ssh: cfg.host, rootCmd: cfg.rootCmd === undefined ? 'sudo -n' : cfg.rootCmd, log });
-  const forge = new IsolatedForge(host, { hwencArtifacts: cfg.hwencArtifacts, armDir: usesModule(scenario, 'arm-translation') ? armDirOf(cfg) : null, log });
+  const forge = new IsolatedForge(host, { hwencArtifacts: cfg.hwencArtifacts, armDir: usesModule(scenario, 'arm-translation') ? armDirOf(cfg) : null, env: forgeEnvOf(cfg, opts), log });
   const assets = new Assets(host, { decodeTool: cfg.decodeTool, log });
   const startedAt = new Date().toISOString();
   const outDir = path.resolve(opts.out || path.join(REPO_ROOT, 'scenario-results', `${forge.runId}-${scenario.id}`));
@@ -131,7 +142,7 @@ async function main() {
       const rec = await forge.createInstance({
         name: `${tag}-${spec.name}`, imageId: 'android-15-official', modules: spec.modules,
         width: spec.width, height: spec.height, dpi: spec.dpi, fps: spec.fps,
-      });
+      }, { acceptContracts: opts.flags.has('accept-contracts') });
       const inst = new Instance(host, rec);
       inst.spec = spec;
       instances.push(inst);

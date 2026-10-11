@@ -156,7 +156,7 @@ router.post('/', async (req, res) => {
     // the image still being in the catalog afterwards.
     const requiredModuleIds = moduleGate.requiredModuleIds(img, modules);
     const adbPort = portAllocator.nextPort();
-    const slot = binder.nextFreeSlot();
+    const slot = binder.nextFreeSlot({ inUse: await binder.slotsInUseOnHost(runtime.docker).catch(() => []) });
     const volumeName = `redroid-forge-${name}`;
     const binds = [...binder.binderBinds(slot), `${volumeName}:/data`];
 
