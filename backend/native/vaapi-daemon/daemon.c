@@ -244,6 +244,10 @@ typedef struct {
     VAContextID vpp_context_id;
     unsigned int width, height;
     int have_context;
+    /* Every frame of this encoder is an IDR, and the standard requires two consecutive IDR pictures to carry
+     * a different idr_pic_id (7.4.3): a counter, modulo its 16-bit range. Written as 0 in every frame it made
+     * recent ffmpeg warn "idr_pic_id is invalid" on each one (found with scrcpy, 10/2026). */
+    unsigned int idr_pic_id;
     /* Tier 5.9: the real DRM format modifier a GPU-render-target RGBA
      * buffer ends up with is GPU-generation-specific (confirmed: differs
      * between a Renoir/GFX9 APU and a Polaris/GFX8 discrete card) and can't
@@ -738,6 +742,7 @@ static long encode_one_frame(vaapi_state_t *st, int dmabuf_fd, const EncodeReque
     slice.num_macroblocks = mb_width * mb_height;
     slice.macroblock_info = VA_INVALID_ID;
     slice.slice_type = 2;
+    slice.idr_pic_id = st->idr_pic_id++ & 0xFFFF;
     slice.direct_spatial_mv_pred_flag = 1;
     slice.num_ref_idx_active_override_flag = 1;
     for (int i = 0; i < 32; i++) {
