@@ -105,7 +105,7 @@ async function main() {
   if (!cfg.host) throw new Error('--host <ssh-target> is required (or "host" in ~/.config/redroid-forge/scenarios.json)');
 
   const host = new Host({ ssh: cfg.host, rootCmd: cfg.rootCmd === undefined ? 'sudo -n' : cfg.rootCmd, log });
-  const forge = new IsolatedForge(host, { hwencArtifacts: cfg.hwencArtifacts, armDir: usesModule(scenario, 'arm-translation') ? armDirOf(cfg) : null, log });
+  const forge = new IsolatedForge(host, { hwencArtifacts: cfg.hwencArtifacts, armDir: usesModule(scenario, 'arm-translation') ? armDirOf(cfg) : null, env: forgeEnvOf(cfg, opts), log });
   const assets = new Assets(host, { decodeTool: cfg.decodeTool, log });
   const startedAt = new Date().toISOString();
   const outDir = path.resolve(opts.out || path.join(REPO_ROOT, 'scenario-results', `${forge.runId}-${scenario.id}`));
