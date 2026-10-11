@@ -127,11 +127,25 @@ latency). Off by default until it has been validated on every GPU.
 - Rate control: an IDR may use 3x the budget of a frame (not counted as debt) and the complexity of P frames is estimated
   separately from the intra one (`ratectl.h`, `gop` field).
 - `REDROID_FORGE_ENCODE_INTRA_ONLY=1` forces the old behaviour even with a period set.
+- On the low-power entrypoint (`VAEntrypointEncSliceLP`, Intel VDEnc) the daemon stays all-intra and says so in its log, unless
+  `REDROID_FORGE_ENCODE_P_ON_LP=1` (see below).
 
 Measured on the Polaris (RX 480, VCE) with the scenario runner, `encode-low` (a scrolling screen, 2 Mbps asked; 2.49 Mbps reaches
 the daemon): all-intra delivered 2.35 Mbps at **QP 31**; with P frames, 1.59 Mbps at **QP 14** (the quality floor: the content
 fits in the budget at the best quality). A 18 s capture of scrcpy: 525 P frames and 5 IDR, no decode errors with
 `ffmpeg -err_detect aggressive+explode`, Constrained Baseline, 1 reference.
+
+**Validation on the other GPUs** (scenario `encode-low`, 1280x720, 2 Mbps asked, same content, all-intra vs P frames with
+`REDROID_FORGE_ENCODE_IDR_PERIOD=120`):
+
+| GPU (entrypoint) | all-intra | P frames | recording |
+|---|---|---|---|
+| RX 480 (EncSlice) | 2.35 Mbps, QP 31 | 1.59 Mbps, QP 14 | decodes clean |
+| Ryzen 5700G (EncSlice) | 2.4 Mbps, QP 31 | 1.12 Mbps, QP 14 | decodes clean |
+| Iris Xe (EncSliceLP) | 2.39 Mbps, QP 33 | 0.7 Mbps, QP 14 | **broken**: 520 of ~880 frames fail (`top block unavailable for requested intra mode`) |
+
+On Iris Xe the hand-written P slice header does not match what the low-power encoder expects, so the daemon refuses P frames there
+(`REDROID_FORGE_ENCODE_P_ON_LP=1` forces them, for whoever wants to find out why).
 
 ### Runtime options (environment variables)
 

@@ -598,7 +598,7 @@ static int64_t now_ns(void) {
  * validated on every GPU the default stays the old all-intra encoder. REDROID_FORGE_ENCODE_INTRA_ONLY=1 forces it either way. */
 static unsigned int g_gop_period = 1;
 static int g_gop_intra_only = 1;
-static void gop_config_init(void) {
+static void gop_config_init(const vaapi_state_t *st) {
     static int done;
     if (done) return;
     done = 1;
@@ -607,13 +607,24 @@ static void gop_config_init(void) {
     const char *io = getenv("REDROID_FORGE_ENCODE_INTRA_ONLY");
     g_gop_intra_only = (g_gop_period <= 1) || (io && atoi(io) != 0);
     g_rate_ctl.gop = !g_gop_intra_only;
+    /* The low-power entrypoint (Intel VDEnc: EncSliceLP) produces P frames that do not decode with the hand-written slice header
+     * (measured on an Iris Xe: most P frames fail with "top block unavailable for requested intra mode"). Stay all-intra there
+     * unless REDROID_FORGE_ENCODE_P_ON_LP=1, to experiment. */
+    if (!g_gop_intra_only && st->entrypoint == VAEntrypointEncSliceLP) {
+        const char *force = getenv("REDROID_FORGE_ENCODE_P_ON_LP");
+        if (!(force && atoi(force) != 0)) {
+            fprintf(stderr, "encoder: P frames are not supported on the low-power entrypoint (EncSliceLP): staying all-intra\n");
+            g_gop_intra_only = 1;
+            g_rate_ctl.gop = 0;
+        }
+    }
     if (!g_gop_intra_only) fprintf(stderr, "encoder: P frames, an IDR every %u frames\n", g_gop_period);
 }
 
 static long encode_one_frame(vaapi_state_t *st, int dmabuf_fd, const EncodeRequest *req, pid_t peer_pid,
                               unsigned char **out_buf) {
-    gop_config_init();
     if (vaapi_state_ensure_resolution(st, req->width, req->height) != 0) return -1;
+    gop_config_init(st);
     const int64_t gop_now = now_ns();
     const GopDecision gd = gop_next(&st->gop, peer_pid, req->width, req->height, gop_now, g_gop_period, g_gop_intra_only);
     const int qp = rc_next_qp_t(&g_rate_ctl, now_ns(), req->bitrate, req->width, req->height, gd.is_idr);
