@@ -20,7 +20,7 @@ function newRunId() {
 
 class IsolatedForge {
   constructor(host, {
-    runId = newRunId(), image = null, hwencArtifacts, armDir = null, log = () => {},
+    runId = newRunId(), image = null, hwencArtifacts, armDir = null, env = {}, log = () => {},
   } = {}) {
     this.host = host;
     this.runId = runId;
@@ -29,6 +29,7 @@ class IsolatedForge {
     this.image = image;
     this.builtImage = null;
     this.hwencArtifacts = hwencArtifacts;
+    this.env = env;                    // extra environment of the forge (e.g. REDROID_FORGE_ENCODE_IDR_PERIOD)
     this.armDir = armDir;
     this.log = log;
     this.name = `forge-scn-${runId}`;
@@ -78,12 +79,17 @@ class IsolatedForge {
     const home = (await host.run('echo $HOME', { check: true })).stdout.trim();
     this.home = home;
     // Only the data directory is mounted: the code (and the daemon) are the ones inside the image.
-    const mounts = `-v ${home}/${this.dir}/backend/data:/app/backend/data`;
+    // Its own VA-API daemon and socket (the same absolute path in the forge and on the host, like the hwenc artifacts): a
+    // second forge on a host where another one is in use must never take the shared /dev/vaapi-helper/socket away from it.
+    const vaapiDir = `${home}/${this.dir}/vaapi`;
+    await host.run(`mkdir -p ${q(vaapiDir)} && chmod 777 ${q(vaapiDir)}`, { check: true });
+    const mounts = `-v ${home}/${this.dir}/backend/data:/app/backend/data -v ${q(vaapiDir)}:${q(vaapiDir)}`;
+    const forgeEnv = Object.entries({ REDROID_FORGE_VAAPI_DIR: vaapiDir, ...this.env }).map(([k, v]) => `-e ${k}=${q(v)}`).join(' ');
     const cmd = `docker run -d --name ${this.name} --privileged --pid=host --network=host `
       + `-e PORT=${this.port} -e ADB_PORT_START=${this.adbRange[0]} -e ADB_PORT_END=${this.adbRange[1]} `
       + `-e REDROID_FORGE_HWDEC_DOWNLOAD=derive-sse -e REDROID_FORGE_ENCODE_STATS=1 ${hwencArgs} `
       + `-v /dev/binderfs:/dev/binderfs -v /lib/modules:/lib/modules -v /var/run/docker.sock:/var/run/docker.sock `
-      + `-v /dev/vaapi-helper:/dev/vaapi-helper ${mounts} ${this.image}`;
+      + `${forgeEnv} ${mounts} ${this.image}`;
     await host.run(cmd, { check: true });
     this.created = true;
 
