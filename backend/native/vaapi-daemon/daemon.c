@@ -14,6 +14,8 @@
  * instead of allocating/filling one itself.
  */
 
+/* struct ucred (SO_PEERCRED: which process is on the other end of a connection) needs this before any include. */
+#define _GNU_SOURCE
 #include <fcntl.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -49,6 +51,7 @@
 #include "protocol.h"
 #include "decode_h264.h"
 #include "ratectl.h"
+#include "gop.h"
 
 #ifdef HAVE_HWDEC
 #include <pthread.h>
@@ -186,15 +189,24 @@ static void build_slice_header_bits(bitstream_t *bs,
                                      const VAEncSequenceParameterBufferH264 *seq,
                                      const VAEncPictureParameterBufferH264 *pic,
                                      const VAEncSliceParameterBufferH264 *slice) {
-    bs_start_code_and_nal_header(bs, 3, 5);
+    const int is_idr = pic->pic_fields.bits.idr_pic_flag;
+    /* IDR: nal_unit_type 5. P frame: nal_unit_type 1 and nal_ref_idc != 0 (the next frame references it). */
+    bs_start_code_and_nal_header(bs, is_idr ? 3 : 2, is_idr ? 5 : 1);
     bs_put_ue(bs, slice->macroblock_address);
     bs_put_ue(bs, slice->slice_type);
     bs_put_ue(bs, slice->pic_parameter_set_id);
     bs_put_bits(bs, pic->frame_num,
                 seq->seq_fields.bits.log2_max_frame_num_minus4 + 4);
-    bs_put_ue(bs, slice->idr_pic_id);
-    bs_put_bit(bs, 0);
-    bs_put_bit(bs, 0);
+    if (is_idr) {
+        bs_put_ue(bs, slice->idr_pic_id);
+        bs_put_bit(bs, 0);  /* no_output_of_prior_pics_flag */
+        bs_put_bit(bs, 0);  /* long_term_reference_flag */
+    } else {
+        bs_put_bit(bs, 0);  /* num_ref_idx_active_override_flag: the PPS default (1 reference) */
+        bs_put_bit(bs, 0);  /* ref_pic_list_modification_flag_l0 */
+        bs_put_bit(bs, 0);  /* adaptive_ref_pic_marking_mode_flag: sliding window */
+        if (pic->pic_fields.bits.entropy_coding_mode_flag) bs_put_ue(bs, 0);  /* cabac_init_idc */
+    }
     bs_put_se(bs, slice->slice_qp_delta);
     if (pic->pic_fields.bits.deblocking_filter_control_present_flag) {
         bs_put_ue(bs, slice->disable_deblocking_filter_idc);
@@ -244,6 +256,14 @@ typedef struct {
     VAContextID vpp_context_id;
     unsigned int width, height;
     int have_context;
+    /* Every frame of this encoder is an IDR, and the standard requires two consecutive IDR pictures to carry
+     * a different idr_pic_id (7.4.3): a counter, modulo its 16-bit range. Written as 0 in every frame it made
+     * recent ffmpeg warn "idr_pic_id is invalid" on each one (found with scrcpy, 10/2026). */
+    unsigned int idr_pic_id;
+    /* P frames (gop.h): the two reconstruction surfaces that the frames alternate between (the previous one is the
+     * reference of the next), and the state of the stream that holds the reference. */
+    VASurfaceID recon[2];
+    GopState gop;
     /* Tier 5.9: the real DRM format modifier a GPU-render-target RGBA
      * buffer ends up with is GPU-generation-specific (confirmed: differs
      * between a Renoir/GFX9 APU and a Polaris/GFX8 discrete card) and can't
@@ -474,15 +494,16 @@ static int vaapi_state_ensure_resolution(vaapi_state_t *st, unsigned int width, 
     if (st->have_context) {
         vaDestroyContext(st->dpy, st->context_id);
         vaDestroyContext(st->dpy, st->vpp_context_id);
-        vaDestroySurfaces(st->dpy, &st->surfaces[1], 1);
+        vaDestroySurfaces(st->dpy, st->recon, 2);
         vaDestroySurfaces(st->dpy, &st->surfaces[2], 1);
         st->have_context = 0;
     }
+    gop_reset(&st->gop);  /* a new context has no reference */
     CHECK_VA(vaCreateSurfaces(st->dpy, VA_RT_FORMAT_YUV420, width, height,
-                               &st->surfaces[1], 1, NULL, 0),
+                               st->recon, 2, NULL, 0),
              "vaCreateSurfaces(recon)");
     CHECK_VA(vaCreateContext(st->dpy, st->config_id, width, height, VA_PROGRESSIVE,
-                              &st->surfaces[1], 1, &st->context_id),
+                              st->recon, 2, &st->context_id),
              "vaCreateContext");
 
     /* Tier 5.8: the NV12 surface VPP converts into and the encode context
@@ -573,10 +594,29 @@ static int64_t now_ns(void) {
     return (int64_t)ts.tv_sec * 1000000000LL + ts.tv_nsec;
 }
 
-static long encode_one_frame(vaapi_state_t *st, int dmabuf_fd, const EncodeRequest *req,
+/* P frames (gop.h): off unless REDROID_FORGE_ENCODE_IDR_PERIOD > 1 (frames per IDR; 120 is about 2 s at 60 fps). Until it has been
+ * validated on every GPU the default stays the old all-intra encoder. REDROID_FORGE_ENCODE_INTRA_ONLY=1 forces it either way. */
+static unsigned int g_gop_period = 1;
+static int g_gop_intra_only = 1;
+static void gop_config_init(void) {
+    static int done;
+    if (done) return;
+    done = 1;
+    const char *p = getenv("REDROID_FORGE_ENCODE_IDR_PERIOD");
+    if (p && atoi(p) > 1) g_gop_period = (unsigned int)atoi(p);
+    const char *io = getenv("REDROID_FORGE_ENCODE_INTRA_ONLY");
+    g_gop_intra_only = (g_gop_period <= 1) || (io && atoi(io) != 0);
+    g_rate_ctl.gop = !g_gop_intra_only;
+    if (!g_gop_intra_only) fprintf(stderr, "encoder: P frames, an IDR every %u frames\n", g_gop_period);
+}
+
+static long encode_one_frame(vaapi_state_t *st, int dmabuf_fd, const EncodeRequest *req, pid_t peer_pid,
                               unsigned char **out_buf) {
-    const int qp = rc_next_qp(&g_rate_ctl, now_ns(), req->bitrate, req->width, req->height);
+    gop_config_init();
     if (vaapi_state_ensure_resolution(st, req->width, req->height) != 0) return -1;
+    const int64_t gop_now = now_ns();
+    const GopDecision gd = gop_next(&st->gop, peer_pid, req->width, req->height, gop_now, g_gop_period, g_gop_intra_only);
+    const int qp = rc_next_qp_t(&g_rate_ctl, now_ns(), req->bitrate, req->width, req->height, gd.is_idr);
 
     uint32_t import_stride = req->stride_y;
     uint32_t import_size = req->dmabuf_size;
@@ -700,9 +740,9 @@ static long encode_one_frame(vaapi_state_t *st, int dmabuf_fd, const EncodeReque
     VAEncSequenceParameterBufferH264 seq = {0};
     seq.seq_parameter_set_id = 0;
     seq.level_idc = 30;
-    seq.intra_period = 1;
-    seq.intra_idr_period = 1;
-    seq.ip_period = 0;
+    seq.intra_period = g_gop_intra_only ? 1 : g_gop_period;
+    seq.intra_idr_period = g_gop_intra_only ? 1 : g_gop_period;
+    seq.ip_period = g_gop_intra_only ? 0 : 1;
     seq.bits_per_second = req->bitrate ? req->bitrate : 2000000;
     seq.max_num_ref_frames = 1;
     seq.picture_width_in_mbs = mb_width;
@@ -719,14 +759,25 @@ static long encode_one_frame(vaapi_state_t *st, int dmabuf_fd, const EncodeReque
     vaCreateBuffer(st->dpy, st->context_id, VAEncSequenceParameterBufferType, sizeof(seq), 1, &seq, &seq_buf);
 
     VAEncPictureParameterBufferH264 pic = {0};
-    pic.CurrPic.picture_id = st->surfaces[1];
+    pic.CurrPic.picture_id = st->recon[gd.cur];
+    pic.CurrPic.frame_idx = gd.frame_num;
+    pic.CurrPic.TopFieldOrderCnt = (int32_t)gd.poc;
+    pic.CurrPic.BottomFieldOrderCnt = (int32_t)gd.poc;
+    pic.frame_num = (uint16_t)gd.frame_num;
     for (int i = 0; i < 16; i++) {
         pic.ReferenceFrames[i].picture_id = VA_INVALID_ID;
         pic.ReferenceFrames[i].flags = VA_PICTURE_H264_INVALID;
     }
+    if (!gd.is_idr) {
+        pic.ReferenceFrames[0].picture_id = st->recon[gd.ref];
+        pic.ReferenceFrames[0].frame_idx = gd.ref_frame_num;
+        pic.ReferenceFrames[0].flags = VA_PICTURE_H264_SHORT_TERM_REFERENCE;
+        pic.ReferenceFrames[0].TopFieldOrderCnt = (int32_t)gd.ref_poc;
+        pic.ReferenceFrames[0].BottomFieldOrderCnt = (int32_t)gd.ref_poc;
+    }
     pic.coded_buf = coded_buf;
     pic.pic_init_qp = qp;
-    pic.pic_fields.bits.idr_pic_flag = 1;
+    pic.pic_fields.bits.idr_pic_flag = gd.is_idr;
     pic.pic_fields.bits.reference_pic_flag = 1;
     pic.pic_fields.bits.entropy_coding_mode_flag = 1;
     pic.pic_fields.bits.deblocking_filter_control_present_flag = 1;
@@ -737,7 +788,8 @@ static long encode_one_frame(vaapi_state_t *st, int dmabuf_fd, const EncodeReque
     VAEncSliceParameterBufferH264 slice = {0};
     slice.num_macroblocks = mb_width * mb_height;
     slice.macroblock_info = VA_INVALID_ID;
-    slice.slice_type = 2;
+    slice.slice_type = gd.is_idr ? 2 : 0;
+    if (gd.is_idr) slice.idr_pic_id = st->idr_pic_id++ & 0xFFFF;
     slice.direct_spatial_mv_pred_flag = 1;
     slice.num_ref_idx_active_override_flag = 1;
     for (int i = 0; i < 32; i++) {
@@ -745,6 +797,10 @@ static long encode_one_frame(vaapi_state_t *st, int dmabuf_fd, const EncodeReque
         slice.RefPicList0[i].flags = VA_PICTURE_H264_INVALID;
         slice.RefPicList1[i].picture_id = VA_INVALID_ID;
         slice.RefPicList1[i].flags = VA_PICTURE_H264_INVALID;
+    }
+    if (!gd.is_idr) {
+        slice.num_ref_idx_l0_active_minus1 = 0;
+        slice.RefPicList0[0] = pic.ReferenceFrames[0];
     }
 
     VABufferID slice_buf;
@@ -754,25 +810,33 @@ static long encode_one_frame(vaapi_state_t *st, int dmabuf_fd, const EncodeReque
     bs_init(&sps_bs);
     bs_init(&pps_bs);
     bs_init(&slice_hdr_bs);
-    build_sps_rbsp(&sps_bs, &seq);
-    build_pps_rbsp(&pps_bs, &pic);
+    if (gd.is_idr) {
+        build_sps_rbsp(&sps_bs, &seq);
+        build_pps_rbsp(&pps_bs, &pic);
+    }
     build_slice_header_bits(&slice_hdr_bs, &seq, &pic, &slice);
 
     VABufferID sps_param_buf, sps_data_buf, pps_param_buf, pps_data_buf;
     VABufferID slice_hdr_param_buf, slice_hdr_data_buf;
-    submit_packed_header(st->dpy, st->context_id, VAEncPackedHeaderSequence, &sps_bs, &sps_param_buf, &sps_data_buf);
-    submit_packed_header(st->dpy, st->context_id, VAEncPackedHeaderPicture, &pps_bs, &pps_param_buf, &pps_data_buf);
+    if (gd.is_idr) {
+        submit_packed_header(st->dpy, st->context_id, VAEncPackedHeaderSequence, &sps_bs, &sps_param_buf, &sps_data_buf);
+        submit_packed_header(st->dpy, st->context_id, VAEncPackedHeaderPicture, &pps_bs, &pps_param_buf, &pps_data_buf);
+    }
     submit_packed_header(st->dpy, st->context_id, VAEncPackedHeaderSlice, &slice_hdr_bs, &slice_hdr_param_buf, &slice_hdr_data_buf);
 
     CHECK_VA(vaBeginPicture(st->dpy, st->context_id, st->surfaces[2]), "vaBeginPicture");
     VABufferID b1[] = {seq_buf};
     vaRenderPicture(st->dpy, st->context_id, b1, 1);
-    VABufferID b2[] = {sps_param_buf, sps_data_buf};
-    vaRenderPicture(st->dpy, st->context_id, b2, 2);
+    if (gd.is_idr) {
+        VABufferID b2[] = {sps_param_buf, sps_data_buf};
+        vaRenderPicture(st->dpy, st->context_id, b2, 2);
+    }
     VABufferID b3[] = {pic_buf};
     vaRenderPicture(st->dpy, st->context_id, b3, 1);
-    VABufferID b4[] = {pps_param_buf, pps_data_buf};
-    vaRenderPicture(st->dpy, st->context_id, b4, 2);
+    if (gd.is_idr) {
+        VABufferID b4[] = {pps_param_buf, pps_data_buf};
+        vaRenderPicture(st->dpy, st->context_id, b4, 2);
+    }
     VABufferID b5[] = {slice_hdr_param_buf, slice_hdr_data_buf};
     vaRenderPicture(st->dpy, st->context_id, b5, 2);
     VABufferID b6[] = {slice_buf};
@@ -799,7 +863,8 @@ static long encode_one_frame(vaapi_state_t *st, int dmabuf_fd, const EncodeReque
     vaDestroySurfaces(st->dpy, &st->surfaces[0], 1);
 
     out = normalize_start_codes(out, total, &total);
-    rc_frame_done(&g_rate_ctl, now_ns(), total, qp);
+    rc_frame_done_t(&g_rate_ctl, now_ns(), total, qp, gd.is_idr);
+    gop_commit(&st->gop, &gd, peer_pid, req->width, req->height, gop_now);
     if (getenv("REDROID_FORGE_ENCODE_STATS")) {
         static int64_t t0; static uint64_t frames, bytes;
         int64_t t = now_ns();
@@ -810,6 +875,17 @@ static long encode_one_frame(vaapi_state_t *st, int dmabuf_fd, const EncodeReque
             t0 = t; frames = 0; bytes = 0;
         }
         frames++; bytes += total;
+    }
+    if (getenv("REDROID_FORGE_ENCODE_STATS")) {
+        static int64_t g0; static uint64_t gi, gp, gib, gpb;
+        int64_t t = now_ns();
+        if (!g0 || t - g0 > 5000000000LL) {
+            if (g0 && (gi + gp)) fprintf(stderr, "gop-stats: %llu IDR (%.0f KB avg), %llu P (%.0f KB avg) in %.1f s\n",
+                                         (unsigned long long)gi, gi ? gib / 1024.0 / gi : 0.0, (unsigned long long)gp,
+                                         gp ? gpb / 1024.0 / gp : 0.0, (t - g0) / 1e9);
+            g0 = t; gi = gp = gib = gpb = 0;
+        }
+        if (gd.is_idr) { gi++; gib += total; } else { gp++; gpb += total; }
     }
     *out_buf = out;
     return (long)total;
@@ -875,11 +951,16 @@ static void handle_encode(vaapi_state_t *st, int have_encode, int conn_fd) {
     fprintf(stderr, "Request: %ux%u, stride_y=%u stride_uv=%u offset_uv=%u dmabuf_size=%u fd=%d\n",
             req.width, req.height, req.stride_y, req.stride_uv, req.offset_uv, req.dmabuf_size, dmabuf_fd);
 
+    struct ucred cred = {0};
+    socklen_t cred_len = sizeof(cred);
+    if (getsockopt(conn_fd, SOL_SOCKET, SO_PEERCRED, &cred, &cred_len) != 0) cred.pid = 0;
+
     unsigned char *out_buf = NULL;
-    long n = encode_one_frame(st, dmabuf_fd, &req, &out_buf);
+    long n = encode_one_frame(st, dmabuf_fd, &req, cred.pid, &out_buf);
     close(dmabuf_fd);
 
     if (n < 0) {
+        gop_reset(&st->gop);  /* the reference may be lost: the next frame is an IDR */
         send_response(conn_fd, -1, NULL, 0);
     } else {
         fprintf(stderr, "Encoded %ld bytes\n", n);

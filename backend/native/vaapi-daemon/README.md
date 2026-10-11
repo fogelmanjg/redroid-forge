@@ -105,10 +105,33 @@ inline through the socket, as before.
 
 ### Encoder rate control
 
-The encoder is all-intra and runs in constant-QP mode; `ratectl.h` picks the QP of every frame so the average
-reaches the bitrate in `EncodeRequest.bitrate` (what MediaCodec/scrcpy asked for). Without a bitrate (an older
-Android component) it keeps its historical QP 26. Check the controller on its own with
+The encoder runs in constant-QP mode; `ratectl.h` picks the QP of every frame so the average reaches the bitrate in
+`EncodeRequest.bitrate` (what MediaCodec/scrcpy asked for). Without a bitrate (an older Android component) it keeps its
+historical QP 26. Check the controller on its own with
 `cc -O2 -o /tmp/ratectl-test test/ratectl-test.c -I. -lm && /tmp/ratectl-test`.
+
+### P frames (`REDROID_FORGE_ENCODE_IDR_PERIOD`)
+
+By default every frame is an IDR (all-intra: stateless, simple, but it compresses far worse than any normal encoder: on busy
+content at 8 Mbps the QP climbs to 30–48). With `REDROID_FORGE_ENCODE_IDR_PERIOD=N` (N > 1; 120 is about 2 s at 60 fps) the
+encoder makes an IDR every N frames and **P frames in between** (one reference frame, no B frames, so no reordering or extra
+latency). Off by default until it has been validated on every GPU.
+
+- A request has no stream identity, but the process that sends it is known from the socket (`SO_PEERCRED`): every instance runs
+  its own encoder service, so `(pid, width, height)` identifies the stream and the protocol and the Android component did not
+  change. One stream at a time holds the reference; a frame from another stream, a resolution change, a pause longer than
+  1.5 s or a failed frame is an IDR, which is always correct (two interleaved streams simply stay all-intra). The policy is in
+  `gop.h` with its own test: `cc -O2 -o /tmp/gop-test test/gop-test.c -I. && /tmp/gop-test`.
+- Two reconstruction surfaces alternate (the previous one is the reference of the next); the P slice header is written by hand
+  like the IDR one (`nal_unit_type` 1, `frame_num` modulo 16, sliding-window reference marking, `cabac_init_idc` 0).
+- Rate control: an IDR may use 3x the budget of a frame (not counted as debt) and the complexity of P frames is estimated
+  separately from the intra one (`ratectl.h`, `gop` field).
+- `REDROID_FORGE_ENCODE_INTRA_ONLY=1` forces the old behaviour even with a period set.
+
+Measured on the Polaris (RX 480, VCE) with the scenario runner, `encode-low` (a scrolling screen, 2 Mbps asked; 2.49 Mbps reaches
+the daemon): all-intra delivered 2.35 Mbps at **QP 31**; with P frames, 1.59 Mbps at **QP 14** (the quality floor: the content
+fits in the budget at the best quality). A 18 s capture of scrcpy: 525 P frames and 5 IDR, no decode errors with
+`ffmpeg -err_detect aggressive+explode`, Constrained Baseline, 1 reference.
 
 ### Runtime options (environment variables)
 
@@ -117,5 +140,7 @@ Android component) it keeps its historical QP 26. Check the controller on its ow
 | `REDROID_FORGE_DRM_NODE` | DRM render node to use (default `/dev/dri/renderD128`). |
 | `REDROID_FORGE_HWDEC_DOWNLOAD` | How a decoded frame is brought from the GPU to RAM: `derive-sse` (default: `vaDeriveImage` + SSE4.1 non-temporal loads), `derive`, `getimage` (`vaGetImage`) or `ffmpeg` (`av_hwframe_transfer_data`). The first frame of every session is also downloaded through ffmpeg and compared byte by byte; if the direct download fails or differs, that session goes back to the ffmpeg path and says so on stderr. |
 | `REDROID_FORGE_HWDEC_STATS` | If set, every session prints its average time per stage (send, GPU wait, download, copy) when it closes, and the daemon prints the wait/queue/socket averages. |
-| `REDROID_FORGE_ENCODE_STATS` | If set, the daemon prints the real encoded bitrate (against the target) every 5 s. |
+| `REDROID_FORGE_ENCODE_STATS` | If set, the daemon prints the real encoded bitrate (against the target) every 5 s, and how many IDR and P frames it made (`gop-stats`). |
+| `REDROID_FORGE_ENCODE_IDR_PERIOD` | Frames per IDR; > 1 turns the P frames on (see above). Default 1: all-intra. |
+| `REDROID_FORGE_ENCODE_INTRA_ONLY` | `1` forces all-intra even if a period is set. |
 | `REDROID_FORGE_HWDEC_DEBUG` | If set, logs the first bytes of every access unit that arrives (to see how Android delivers it). |
