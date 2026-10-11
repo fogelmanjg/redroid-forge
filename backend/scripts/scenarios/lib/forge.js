@@ -115,8 +115,14 @@ class IsolatedForge {
     return r.stdout;
   }
 
-  async createInstance(spec) {
-    const r = await this.api('POST', '/instances', spec);
+  // `acceptContracts`: if the API asks for the contract of a module (428) -- also the ones the IMAGE is bound to,
+  // which the scenario does not list -- it is accepted for this isolated forge and the request is repeated.
+  async createInstance(spec, { acceptContracts = false } = {}) {
+    let r = await this.api('POST', '/instances', spec);
+    if (r.status === 428 && acceptContracts && r.json && Array.isArray(r.json.modules)) {
+      for (const m of r.json.modules) await this.acceptContract(m.id);
+      r = await this.api('POST', '/instances', spec);
+    }
     if (r.status !== 201) throw new Error(`creating ${spec.name}: HTTP ${r.status} ${JSON.stringify(r.json).slice(0, 200)}`);
     return r.json;
   }
