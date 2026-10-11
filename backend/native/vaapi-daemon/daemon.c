@@ -1399,8 +1399,24 @@ int main(void) {
     /* Parent directory is the shared bind-mount point between this host
      * process and the redroid container (see README.md) -- created here
      * so the daemon can run before that mount is even set up manually. */
-    mkdir("/dev/vaapi-helper", 0755);
-    unlink(VAAPI_DAEMON_SOCKET_PATH);
+    const char *socket_path = getenv("REDROID_FORGE_VAAPI_SOCKET");
+    if (!socket_path || !*socket_path) socket_path = VAAPI_DAEMON_SOCKET_PATH;
+    if (strcmp(socket_path, VAAPI_DAEMON_SOCKET_PATH) == 0) mkdir("/dev/vaapi-helper", 0755);
+    /* Never take the name away from a daemon that is alive (another forge on this host): that one would keep running but
+     * nobody could reach it. A socket nobody listens on is a leftover and is replaced. */
+    {
+        int probe = socket(AF_UNIX, SOCK_STREAM, 0);
+        struct sockaddr_un pa = {0};
+        pa.sun_family = AF_UNIX;
+        strncpy(pa.sun_path, socket_path, sizeof(pa.sun_path) - 1);
+        if (probe >= 0 && connect(probe, (struct sockaddr *)&pa, sizeof(pa)) == 0) {
+            fprintf(stderr, "Another daemon is already listening on %s: not starting\n", socket_path);
+            close(probe);
+            return 1;
+        }
+        if (probe >= 0) close(probe);
+    }
+    unlink(socket_path);
 
     int listen_fd = socket(AF_UNIX, SOCK_STREAM, 0);
     if (listen_fd < 0) {
@@ -1409,17 +1425,17 @@ int main(void) {
     }
     struct sockaddr_un addr = {0};
     addr.sun_family = AF_UNIX;
-    strncpy(addr.sun_path, VAAPI_DAEMON_SOCKET_PATH, sizeof(addr.sun_path) - 1);
+    strncpy(addr.sun_path, socket_path, sizeof(addr.sun_path) - 1);
     if (bind(listen_fd, (struct sockaddr *)&addr, sizeof(addr)) != 0) {
         perror("bind");
         return 1;
     }
-    chmod(VAAPI_DAEMON_SOCKET_PATH, 0666);
+    chmod(socket_path, 0666);
     if (listen(listen_fd, 4) != 0) {
         perror("listen");
         return 1;
     }
-    fprintf(stderr, "Listening on %s\n", VAAPI_DAEMON_SOCKET_PATH);
+    fprintf(stderr, "Listening on %s\n", socket_path);
 
     while (1) {
         int conn_fd = accept(listen_fd, NULL, NULL);
