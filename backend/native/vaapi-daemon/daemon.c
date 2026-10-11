@@ -607,13 +607,14 @@ static void gop_config_init(const vaapi_state_t *st) {
     const char *io = getenv("REDROID_FORGE_ENCODE_INTRA_ONLY");
     g_gop_intra_only = (g_gop_period <= 1) || (io && atoi(io) != 0);
     g_rate_ctl.gop = !g_gop_intra_only;
-    /* The low-power entrypoint (Intel VDEnc: EncSliceLP) produces P frames that do not decode with the hand-written slice header
-     * (measured on an Iris Xe: most P frames fail with "top block unavailable for requested intra mode"). Stay all-intra there
-     * unless REDROID_FORGE_ENCODE_P_ON_LP=1, to experiment. */
-    if (!g_gop_intra_only && st->entrypoint == VAEntrypointEncSliceLP) {
-        const char *force = getenv("REDROID_FORGE_ENCODE_P_ON_LP");
+    /* The Intel driver (iHD) produces P frames that do not decode with the hand-written slice header (measured on an Iris Xe,
+     * entrypoint EncSlice: most P frames fail with "top block unavailable for requested intra mode"). Stay all-intra there
+     * unless REDROID_FORGE_ENCODE_P_ON_INTEL=1, to experiment. */
+    const char *vendor = vaQueryVendorString(st->dpy);
+    if (!g_gop_intra_only && vendor && strstr(vendor, "Intel")) {
+        const char *force = getenv("REDROID_FORGE_ENCODE_P_ON_INTEL");
         if (!(force && atoi(force) != 0)) {
-            fprintf(stderr, "encoder: P frames are not supported on the low-power entrypoint (EncSliceLP): staying all-intra\n");
+            fprintf(stderr, "encoder: P frames are not supported on the Intel driver (%s): staying all-intra\n", vendor);
             g_gop_intra_only = 1;
             g_rate_ctl.gop = 0;
         }
