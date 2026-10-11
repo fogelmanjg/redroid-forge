@@ -9,6 +9,7 @@
     "hasGapps": false,
     "hasMagisk": false,
     "hwEncCapable": true,
+    "needsGrallocFix": true,
     "soporte": "oficial",
     "notaSoporte": "Unmodified official image: it is the only base planned for redroid-forge. The extras (GApps, Magisk, hwenc, fake WiFi) are integrated per instance when it is created, as modules. hwenc validated against this image (29-30/09).",
     "i18n": {

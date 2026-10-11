@@ -131,7 +131,7 @@ async function main() {
       const rec = await forge.createInstance({
         name: `${tag}-${spec.name}`, imageId: 'android-15-official', modules: spec.modules,
         width: spec.width, height: spec.height, dpi: spec.dpi, fps: spec.fps,
-      });
+      }, { acceptContracts: opts.flags.has('accept-contracts') });
       const inst = new Instance(host, rec);
       inst.spec = spec;
       instances.push(inst);

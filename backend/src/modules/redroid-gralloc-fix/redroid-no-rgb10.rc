@@ -1,0 +1,6 @@
+# Part of redroid-gralloc-fix (a workaround for a known redroid bug, redroid-doc#930): Mesa's EGL must not offer
+# 10-bit (RGBA_1010102) configurations to apps. The gralloc of the official image cannot allocate that format
+# (it crashes, or with the 2-byte patch allocates 8-bit XRGB8888 and the picture comes out garbled: green tint,
+# vertical stripes). Mesa takes any driconf option from an environment variable of the same name.
+on early-init
+    export allow_rgb10_configs false
