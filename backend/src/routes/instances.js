@@ -117,6 +117,68 @@ function assertDeviceProfileReady(img) {
   }
 }
 
+// Shared by the on-demand route below (instance already running -- a deliberate, visible
+// action the user chose right now) and reconcileDeviceProfile (a change that was only
+// stored while stopped, now due): exec the spoof into the container's filesystem, then
+// restart so Android's cached build.prop values actually pick it up (see deviceProfile.js).
+// `deviceProfileApplied` tracks what is really baked into the container right now, separate
+// from `deviceProfile` (what the user wants) -- they can disagree while stopped, never once
+// this returns.
+async function applyAndRestartDeviceProfile(instance, img, profileKey) {
+  assertDeviceProfileReady(img);
+  const appliedKey = await deviceProfile.applyDeviceProfile(instance.containerId, img.androidVersion, profileKey);
+  const normalized = appliedKey === deviceProfile.DEFAULT_PROFILE ? null : appliedKey;
+  const updated = store.upsert({ ...instance, deviceProfile: normalized, deviceProfileApplied: normalized });
+  await moduleRunner.ensureHostInfraReady(requiredModuleIdsFor(updated));
+  await runtime.restart(instance.containerId);
+  // The restart recreates the container's netns -- without running this again, an instance
+  // with fake wifi is left without radios until the next manual start/restart.
+  scheduleWifiFixes(updated);
+  return updated;
+}
+
+// Changing the device profile while the instance was STOPPED only updates what is stored
+// (see the route below) -- nothing to exec against yet, and nothing running to disrupt
+// either. Called right after start()/restart() bring the container up, BEFORE the rest of
+// their own post-boot steps, so that by the time those run the container is already in its
+// final state: one settle restart here if a change was pending, not a second visible boot
+// the caller would have to account for separately. A silent no-op when nothing is pending
+// (the common case, checked every start/restart) and left pending again (not thrown) if the
+// image is no longer in the catalog or the spoof itself fails -- same as if the user had
+// never opened the on-demand route, the next start retries.
+async function reconcileDeviceProfile(instance) {
+  const desired = instance.deviceProfile || null;
+  const applied = instance.deviceProfileApplied || null;
+  if (desired === applied) return instance;
+  const img = catalog.find((i) => i.id === instance.imageId);
+  if (!img) return instance;
+  // Right after runtime.start()/restart() returns, /system is not populated yet -- confirmed
+  // for real: the very first attempt here failed with "su: no such file or directory",
+  // Android's own init had not gotten far enough along. A few retries with a short wait
+  // covers it, same convention as hwsimWifi.js's own boot-timing retries (ensureEth0Routing).
+  // Bounded and awaited HERE, not fire-and-forget: a pending profile change makes start()/
+  // restart() take a little longer (the rare case -- only right after the profile was
+  // changed while stopped), but the user never sees the OLD profile come up and then gets
+  // yanked by a surprise restart moments later -- same reasoning as jg-dashboard's own
+  // applyDeviceProfileEarly, awaited inside doStart() before the instance is reachable.
+  const MAX_ATTEMPTS = 10;
+  const RETRY_DELAY_MS = 3000;
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    try {
+      // eslint-disable-next-line no-await-in-loop
+      return await applyAndRestartDeviceProfile(instance, img, desired);
+    } catch (e) {
+      console.warn(`[instances] device profile reconciliation attempt ${attempt}/${MAX_ATTEMPTS} failed for ${instance.id}: ${e.message}`);
+      if (attempt < MAX_ATTEMPTS) {
+        // eslint-disable-next-line no-await-in-loop
+        await new Promise((r) => setTimeout(r, RETRY_DELAY_MS));
+      }
+    }
+  }
+  console.warn(`[instances] device profile reconciliation gave up for ${instance.id} -- still pending, next start/restart retries`);
+  return instance;
+}
+
 function scheduleWifiFixes(instance) {
   if (!instance.needsHwsimWifi) return;
   hwsimWifi.scheduleHwsimWifiFix(instance.id, instance.containerId);
@@ -258,10 +320,11 @@ router.post('/:id/start', async (req, res) => {
     const requiredModuleIds = requiredModuleIdsFor(instance);
     await moduleRunner.ensureHostInfraReady(requiredModuleIds);
     await runtime.start(instance.containerId);
-    scheduleWifiFixes(instance);
-    moduleRunner.scheduleRuntimeFixups(requiredModuleIds, instance.containerId);
-    moduleScheduler.start(instance.id, instance.containerId, requiredModuleIds);
-    res.json(await withRuntimeStatus(instance));
+    const reconciled = await reconcileDeviceProfile(instance);
+    scheduleWifiFixes(reconciled);
+    moduleRunner.scheduleRuntimeFixups(requiredModuleIds, reconciled.containerId);
+    moduleScheduler.start(reconciled.id, reconciled.containerId, requiredModuleIds);
+    res.json(await withRuntimeStatus(reconciled));
   } catch (e) {
     sendError(res, e);
   }
@@ -288,10 +351,11 @@ router.post('/:id/restart', async (req, res) => {
     await moduleRunner.ensureHostInfraReady(requiredModuleIds);
     moduleScheduler.stop(instance.id); // cleared and rescheduled below -- never double-ticking across a restart
     await runtime.restart(instance.containerId);
-    scheduleWifiFixes(instance);
-    moduleRunner.scheduleRuntimeFixups(requiredModuleIds, instance.containerId);
-    moduleScheduler.start(instance.id, instance.containerId, requiredModuleIds);
-    res.json(await withRuntimeStatus(instance));
+    const reconciled = await reconcileDeviceProfile(instance);
+    scheduleWifiFixes(reconciled);
+    moduleRunner.scheduleRuntimeFixups(requiredModuleIds, reconciled.containerId);
+    moduleScheduler.start(reconciled.id, reconciled.containerId, requiredModuleIds);
+    res.json(await withRuntimeStatus(reconciled));
   } catch (e) {
     sendError(res, e);
   }
@@ -326,35 +390,19 @@ router.post('/:id/device-profile', async (req, res) => {
       );
     }
     assertDeviceProfileReady(img);
+    const normalized = (profile === undefined || profile === deviceProfile.DEFAULT_PROFILE) ? null : profile;
 
+    // Stopped: nothing to exec against (no running process to reach), and nothing running to
+    // disrupt either -- just record what the user wants. reconcileDeviceProfile (see above)
+    // applies it on the next start/restart, before the instance is ever reachable again, so
+    // the change is never silently lost. Running: apply it right now -- a deliberate, visible
+    // action (it restarts the instance) the user chose while something may already be using
+    // it, same distinction jg-dashboard's own edit flow makes (editing while stopped only
+    // stores it there too; editing while running restarts on the spot).
     const info = await runtime.inspect(instance.containerId).catch(() => null);
-    if (!info || info.State.Status !== 'running') {
-      throw httpError('The instance has to be running to apply a device profile.', 409);
-    }
-
-    const appliedKey = await deviceProfile.applyDeviceProfile(instance.containerId, img.androidVersion, profile);
-    // The store is updated HERE, as soon as the spoof itself (the only real mutation
-    // on the container) succeeded -- not after the restart below. If the restart
-    // happens to fail, the container's filesystem ALREADY has the new profile
-    // applied; leaving the store out of date until the restart finishes would mean
-    // reporting the old profile while the real file has already changed (a real
-    // code-review finding, PR #3).
-    const updated = store.upsert({ ...instance, deviceProfile: appliedKey === deviceProfile.DEFAULT_PROFILE ? null : appliedKey });
-
-    // "mount -o remount,rw /" leaves the filesystem writable on the fly, but several
-    // build.prop props stay cached by Android's runtime until the next full boot --
-    // without this restart, the spoof is left half-applied (see ROADMAP.md Phase 3,
-    // jg-dashboard note). The same guard as /start and /restart (post Phase 5: via
-    // moduleRunner, not the hardcoded ensureHwAccelIfNeeded that existed when this
-    // fix was written) -- if this instance requires hwenc, the VA-API daemon has to
-    // be up before restarting it (before, this route did not check it, unlike its
-    // sibling routes).
-    await moduleRunner.ensureHostInfraReady(requiredModuleIdsFor(updated));
-    await runtime.restart(instance.containerId);
-    // The restart recreates the container's netns -- without running this again, an
-    // instance with fake wifi is left without radios until the next manual
-    // start/restart.
-    scheduleWifiFixes(updated);
+    const updated = info && info.State.Status === 'running'
+      ? await applyAndRestartDeviceProfile(instance, img, normalized)
+      : store.upsert({ ...instance, deviceProfile: normalized });
 
     res.json(await withRuntimeStatus(updated));
   } catch (e) {

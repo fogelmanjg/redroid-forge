@@ -323,6 +323,12 @@ function buildResourcesEditRow(inst, allInstances) {
 // The backend only allows applying a profile while the instance is running (it needs the overlay
 // writable, see deviceProfile.js) -- the select+button only render in that state, matching how the
 // Actions column already hides start/stop/restart/delete that do not apply to the current status.
+// Editable in BOTH states, unlike before -- the backend route itself now decides what
+// changing it actually DOES: stopped, it only stores the choice (reconciled silently on the
+// next start, see routes/instances.js reconcileDeviceProfile); running, it applies and
+// restarts right there. Was gated to "running only" here, which backwards -- the one state
+// where changing it is disruptive (it kills whatever is currently running inside Android) is
+// exactly the one that used to be required.
 function buildDeviceProfileCell(inst) {
   const wrap = document.createElement('div');
   const current = inst.deviceProfile || 'redroid';
@@ -330,7 +336,6 @@ function buildDeviceProfileCell(inst) {
   label.className = 'muted';
   label.textContent = current === 'redroid' ? t('instances.deviceProfile.default') : current;
   wrap.appendChild(label);
-  if (inst.status !== 'running') return wrap;
   wrap.appendChild(document.createElement('br'));
   const select = document.createElement('select');
   for (const [value, text] of [['redroid', t('instances.deviceProfile.default')], ['samsung', 'Samsung Galaxy A55']]) {
@@ -344,6 +349,7 @@ function buildDeviceProfileCell(inst) {
   btn.type = 'button';
   btn.className = 'secondary';
   btn.textContent = t('instances.deviceProfile.apply');
+  btn.title = inst.status === 'running' ? t('instances.deviceProfile.applyNowHint') : t('instances.deviceProfile.applyNextStartHint');
   btn.addEventListener('click', async () => {
     btn.disabled = true;
     try {
