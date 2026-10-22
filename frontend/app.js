@@ -88,6 +88,66 @@ async function applyDeviceProfile(instanceId, profileValue) {
   }
 }
 
+// Unlike device profile (which needs the overlay writable, so only while running), Docker's own
+// Update API accepts Memory/CpusetCpus changes regardless of the container's state -- no
+// running-only gate here.
+async function applyResources(instanceId, { memoryMb, cpusetCpus }) {
+  const body = {};
+  if (memoryMb !== undefined) body.memoryMb = memoryMb;
+  if (cpusetCpus !== undefined) body.cpusetCpus = cpusetCpus;
+  await api(`/instances/${instanceId}/resources`, { method: 'POST', body: JSON.stringify(body) });
+}
+
+function buildResourcesCell(inst) {
+  const wrap = document.createElement('div');
+  const label = document.createElement('span');
+  label.className = 'muted';
+  label.textContent = `${inst.memoryMb ? `${inst.memoryMb}MB` : t('instances.resources.noLimit')} / ${inst.cpusetCpus || t('instances.resources.noLimit')}`;
+  wrap.appendChild(label);
+  wrap.appendChild(document.createElement('br'));
+
+  const memInput = document.createElement('input');
+  memInput.type = 'number';
+  memInput.min = '128';
+  memInput.max = '65536';
+  memInput.placeholder = t('new.memoryMb');
+  memInput.style.width = '5.5em';
+  memInput.value = inst.memoryMb || '';
+
+  const cpuInput = document.createElement('input');
+  cpuInput.type = 'text';
+  cpuInput.pattern = '[0-9,-]*';
+  cpuInput.placeholder = t('new.cpusetCpus');
+  cpuInput.style.width = '5.5em';
+  cpuInput.value = inst.cpusetCpus || '';
+
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'secondary';
+  btn.textContent = t('instances.resources.apply');
+  btn.addEventListener('click', async () => {
+    btn.disabled = true;
+    try {
+      // Empty field = leave that one as it is (applyResources/the backend route only touch the
+      // keys given) -- this is NOT a way to clear an already-set limit, same as the backend.
+      const payload = {};
+      if (memInput.value) payload.memoryMb = Number(memInput.value);
+      if (cpuInput.value) payload.cpusetCpus = cpuInput.value;
+      await applyResources(inst.id, payload);
+    } catch (e) {
+      alert(e.message);
+    } finally {
+      btn.disabled = false;
+      await loadInstances({ silent: true });
+    }
+  });
+
+  wrap.appendChild(memInput);
+  wrap.appendChild(cpuInput);
+  wrap.appendChild(btn);
+  return wrap;
+}
+
 // The backend only allows applying a profile while the instance is running (it needs the overlay
 // writable, see deviceProfile.js) -- the select+button only render in that state, matching how the
 // Actions column already hides start/stop/restart/delete that do not apply to the current status.
@@ -131,11 +191,11 @@ function buildDeviceProfileCell(inst) {
 // `silent`: the periodic refresh does not flash "Loading..." over the table.
 async function loadInstances({ silent = false } = {}) {
   const tbody = $('#instances-table tbody');
-  if (!silent) tbody.innerHTML = `<tr><td colspan="7">${t('common.loading')}</td></tr>`;
+  if (!silent) tbody.innerHTML = `<tr><td colspan="8">${t('common.loading')}</td></tr>`;
   try {
     const instances = await api('/instances');
     if (instances.length === 0) {
-      tbody.innerHTML = `<tr><td colspan="7">${t('instances.none')}</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="8">${t('instances.none')}</td></tr>`;
       return;
     }
     // Built off-screen and swapped in one go, so a refresh never leaves the table half drawn.
@@ -149,11 +209,13 @@ async function loadInstances({ silent = false } = {}) {
         <td>${inst.adbPort}</td>
         <td class="android-id-cell">${androidIdCellHtml(inst)}</td>
         <td class="device-profile-cell"></td>
+        <td class="resources-cell"></td>
         <td class="actions"></td>
       `;
       const state = InstanceState.describe(inst.status);
       tr.querySelector('.status-cell').innerHTML = `<span class="status-dot ${state.tone}"></span>${t('instances.status.' + state.key)}`;
       tr.querySelector('.device-profile-cell').appendChild(buildDeviceProfileCell(inst));
+      tr.querySelector('.resources-cell').appendChild(buildResourcesCell(inst));
       const actions = tr.querySelector('.actions');
       if (inst.hasGapps && inst.androidId && !inst.androidIdRegisteredAt) {
         const link = document.createElement('a');
@@ -225,7 +287,7 @@ async function loadInstances({ silent = false } = {}) {
     }
     tbody.replaceChildren(rows);
   } catch (e) {
-    tbody.innerHTML = `<tr><td colspan="7">${t('common.error', { msg: e.message })}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="8">${t('common.error', { msg: e.message })}</td></tr>`;
   }
 }
 
