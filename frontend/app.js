@@ -489,6 +489,10 @@ $('#new-instance-form').addEventListener('submit', async (e) => {
   const display = {
     width: Number(form.width.value), height: Number(form.height.value), dpi: Number(form.dpi.value), fps: Number(form.fps.value),
   };
+  // Empty = no limit (the backend's own default, see instanceParams.parseResources) -- only sent
+  // when the user actually typed something.
+  if (form.memoryMb.value) display.memoryMb = Number(form.memoryMb.value);
+  if (form.cpusetCpus.value) display.cpusetCpus = form.cpusetCpus.value;
   await createInstance(name, imageId, form, modules, display);
 });
 

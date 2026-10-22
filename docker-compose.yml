@@ -17,6 +17,10 @@ services:
       # backend/src/modules/hwenc/integrate.js) -- empty by default so as not to
       # demand this AOSP tree from anyone who brings up redroid-forge.
       - REDROID_HWENC_ARTIFACTS_DIR=${REDROID_HWENC_ARTIFACTS_DIR:-}
+      # P-frames (see backend/native/vaapi-daemon/daemon.c) -- off (all-intra) unless set
+      # to an integer > 1 (frames per IDR). Off by default in the repo's own compose
+      # (nobody turned it on here yet); set in .env for this lab host, not committed.
+      - REDROID_FORGE_ENCODE_IDR_PERIOD=${REDROID_FORGE_ENCODE_IDR_PERIOD:-1}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - /lib/modules:/lib/modules:ro

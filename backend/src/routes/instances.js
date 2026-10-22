@@ -142,6 +142,7 @@ router.post('/', async (req, res) => {
   try {
     const { name, imageId, modules } = req.body;
     const display = instanceParams.parseDisplay(req.body);
+    const resources = instanceParams.parseResources(req.body);
     if (!name || !imageId) throw httpError('name and imageId are required', 400);
     // The same pattern the UI enforces: the name ends up in container and volume names.
     if (typeof name !== 'string' || !/^[a-z0-9][a-z0-9-]{0,39}$/.test(name)) {
@@ -184,6 +185,7 @@ router.post('/', async (req, res) => {
       cmd,
       binds,
       adbPort,
+      ...resources,
     });
 
     // Stage 4: between create() and start() -- the only window in which /vendor is
@@ -218,6 +220,8 @@ router.post('/', async (req, res) => {
       hwEncCapable: !!img.hwEncCapable,
       requiredModuleIds,
       display,
+      memoryMb: resources.memoryMb || null,
+      cpusetCpus: resources.cpusetCpus || null,
       androidId: null,
       androidIdRegisteredAt: null,
       createdAt: new Date().toISOString(),
@@ -373,6 +377,27 @@ router.post('/:id/android-id/registered', (req, res) => {
   const updated = androidIdentity.markRegistered(req.params.id);
   if (!updated) return res.status(404).json({ error: 'Instancia no encontrada' });
   res.json({ androidId: updated.androidId, androidIdRegisteredAt: updated.androidIdRegisteredAt });
+});
+
+// Live update of CPU/RAM limits -- unlike width/height/dpi/fps (baked into the kernel cmdline
+// at create time, a real recreate), Docker's own Update API supports changing Memory/CpusetCpus
+// on a container that already exists. Only the fields given are touched: {} changes nothing
+// (not a way to "clear" a limit once set -- not asked for, not built).
+router.post('/:id/resources', async (req, res) => {
+  const instance = store.get(req.params.id);
+  if (!instance) return res.status(404).json({ error: 'Instancia no encontrada' });
+  try {
+    const resources = instanceParams.parseResources(req.body);
+    await runtime.updateResources(instance.containerId, resources);
+    const updated = store.upsert({
+      ...instance,
+      memoryMb: resources.memoryMb !== undefined ? resources.memoryMb : instance.memoryMb,
+      cpusetCpus: resources.cpusetCpus !== undefined ? resources.cpusetCpus : instance.cpusetCpus,
+    });
+    res.json(await withRuntimeStatus(updated));
+  } catch (e) {
+    sendError(res, e);
+  }
 });
 
 router.get('/:id/watchdogs', (req, res) => {

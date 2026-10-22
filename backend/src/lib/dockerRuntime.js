@@ -17,7 +17,9 @@ async function listLocalImageTags() {
 // gpuMode=host, to the rest of the host's GPU devices — plenum-redroid solves
 // this with Privileged:true instead of listing /dev/dri by hand (see
 // instance-orchestrator.service.ts:170), and the same criterion is kept here.
-async function create({ name, image, cmd, binds, adbPort, memoryMb }) {
+async function create({
+  name, image, cmd, binds, adbPort, memoryMb, cpusetCpus,
+}) {
   const container = await docker.createContainer({
     name,
     Image: image,
@@ -27,11 +29,39 @@ async function create({ name, image, cmd, binds, adbPort, memoryMb }) {
       Binds: binds,
       PortBindings: { '5555/tcp': [{ HostIp: '0.0.0.0', HostPort: String(adbPort) }] },
       RestartPolicy: { Name: 'unless-stopped' },
-      ...(memoryMb ? { Memory: memoryMb * 1024 * 1024 } : {}),
+      // MemorySwap == Memory (not left to Docker's own default, and not -1/unlimited): a cap
+      // with unlimited swap behind it is not really a hard cap -- Android can keep growing
+      // past it by swapping instead of ever triggering the cgroup OOM kill, which defeats the
+      // point (see updateResources' comment for the Update API's own version of this).
+      ...(memoryMb ? { Memory: memoryMb * 1024 * 1024, MemorySwap: memoryMb * 1024 * 1024 } : {}),
+      ...(cpusetCpus ? { CpusetCpus: cpusetCpus } : {}),
     },
     ExposedPorts: { '5555/tcp': {} },
   });
   return container.id;
+}
+
+// Live update of an already-running (or stopped) container's resource limits -- unlike width/
+// height/dpi/fps (RECREATE_FIELDS-style in jg-dashboard, since those are kernel cmdline
+// arguments baked in at create time), Docker's own Update API supports changing Memory/
+// CpusetCpus on a container that already exists, no stop/recreate needed.
+async function updateResources(containerId, { memoryMb, cpusetCpus }) {
+  const update = {};
+  if (memoryMb) {
+    update.Memory = memoryMb * 1024 * 1024;
+    // Docker's Update API rejects a new Memory limit on its own if the container's current
+    // MemorySwap would end up smaller than it (found for real: a container created with no
+    // limit at all gets a 409 "Memory limit should be smaller than already set memoryswap
+    // limit" otherwise) -- MemorySwap == Memory means no swap beyond the hard limit, not "no
+    // swap at all" (that would be MemorySwap == -1, unlimited, the opposite of what a memory
+    // cap is for). Same value both places is also what create() effectively gets by default
+    // from Docker when only Memory is given at creation time -- update() just does not infer
+    // it the way create() does.
+    update.MemorySwap = update.Memory;
+  }
+  if (cpusetCpus) update.CpusetCpus = cpusetCpus;
+  if (Object.keys(update).length === 0) return;
+  await docker.getContainer(containerId).update(update);
 }
 
 async function start(containerId) {
@@ -176,5 +206,5 @@ async function runEphemeral(image, cmd, binds, timeoutMs = 30000) {
 
 module.exports = {
   docker, listLocalImageTags, create, start, stop, restart, remove, removeVolume,
-  inspect, getPid, getBridgeIp, exec, runEphemeral, readLogs, readFile,
+  inspect, getPid, getBridgeIp, exec, runEphemeral, readLogs, readFile, updateResources,
 };

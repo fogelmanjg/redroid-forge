@@ -34,4 +34,41 @@ function parseDisplay(body = {}) {
   return out;
 }
 
-module.exports = { parseDisplay, DEFAULTS, LIMITS };
+// CPU/RAM limits -- unlike display, there is no default: omitting them keeps today's behavior
+// exactly (no limit at all, Docker's own default). dockerRuntime.create() already accepted
+// `memoryMb` since it was written, nothing ever called it with one -- this is what actually
+// wires it through from a request. `cpusetCpus` goes straight into HostConfig.CpusetCpus, which
+// Docker itself validates against the real host topology; the character-set check here is only
+// defense in depth (same reasoning as parseDisplay: never let a request body smuggle something
+// unexpected into a Docker HostConfig field), not a topology check.
+const MEMORY_MB_LIMITS = [128, 65536];
+const CPUSET_RE = /^[\d,-]{1,64}$/;
+
+// -> { memoryMb?, cpusetCpus? } -- only the keys that were actually given, so the caller (e.g.
+// dockerRuntime.create's `...(memoryMb ? {...} : {})`) keeps behaving exactly as it does for an
+// instance that never asked for a limit. Throws Error with httpStatus 400.
+function parseResources(body = {}) {
+  const out = {};
+  if (body.memoryMb !== undefined && body.memoryMb !== null && body.memoryMb !== '') {
+    const raw = body.memoryMb;
+    const ok = (typeof raw === 'number' && Number.isInteger(raw))
+      || (typeof raw === 'string' && /^\d{1,6}$/.test(raw));
+    const n = ok ? Number(raw) : NaN;
+    const [min, max] = MEMORY_MB_LIMITS;
+    if (!Number.isInteger(n) || n < min || n > max) {
+      throw httpError(`"memoryMb" must be an integer between ${min} and ${max}`, 400);
+    }
+    out.memoryMb = n;
+  }
+  if (body.cpusetCpus !== undefined && body.cpusetCpus !== null && body.cpusetCpus !== '') {
+    if (typeof body.cpusetCpus !== 'string' || !CPUSET_RE.test(body.cpusetCpus)) {
+      throw httpError('"cpusetCpus" must look like "0,1,8,9" or "0-3" (digits, commas and hyphens only)', 400);
+    }
+    out.cpusetCpus = body.cpusetCpus;
+  }
+  return out;
+}
+
+module.exports = {
+  parseDisplay, DEFAULTS, LIMITS, parseResources, MEMORY_MB_LIMITS, CPUSET_RE,
+};
