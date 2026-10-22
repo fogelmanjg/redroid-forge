@@ -5,7 +5,8 @@
 const I18n = (() => {
   const strings = {
     en: {
-      'nav.instances': 'Instances', 'nav.modules': 'Modules', 'nav.doctor': 'Doctor', 'nav.help': 'Help',
+      'nav.instances': 'Instances', 'nav.modules': 'Modules', 'nav.userModules': 'User modules', 'nav.doctor': 'Doctor', 'nav.help': 'Help',
+      'userModules.intro': 'Per-game/situation automations (stage 7) -- a different category from Modules: they don\'t apply to any instance in general, they automate one specific thing (e.g. CIFI). Attach one to an instance from the create form\'s "User modules" section.',
       'common.refresh': 'Refresh', 'common.cancel': 'Cancel', 'common.loading': 'Loading...', 'common.error': 'Error: {msg}',
       'instances.new': '+ New instance',
       'instances.col.name': 'Name', 'instances.col.image': 'Image', 'instances.col.status': 'Status',
@@ -69,7 +70,8 @@ const I18n = (() => {
       'contract.failed': 'Could not record the module acceptance',
     },
     es: {
-      'nav.instances': 'Instancias', 'nav.modules': 'Módulos', 'nav.doctor': 'Doctor', 'nav.help': 'Ayuda',
+      'nav.instances': 'Instancias', 'nav.modules': 'Módulos', 'nav.userModules': 'Módulos de usuario', 'nav.doctor': 'Doctor', 'nav.help': 'Ayuda',
+      'userModules.intro': 'Automatizaciones por juego/situación (etapa 7) — categoría distinta de Módulos: no aplican a cualquier instancia en general, automatizan algo puntual (ej. CIFI). Se adjuntan a una instancia desde la sección "User modules" del formulario de creación.',
       'common.refresh': 'Actualizar', 'common.cancel': 'Cancelar', 'common.loading': 'Cargando...', 'common.error': 'Error: {msg}',
       'instances.new': '+ Nueva instancia',
       'instances.col.name': 'Nombre', 'instances.col.image': 'Imagen', 'instances.col.status': 'Estado',

@@ -7,6 +7,7 @@ function switchTab(name) {
   $$('.tab').forEach((t) => t.classList.toggle('active', t.id === `tab-${name}`));
   if (name === 'instances') loadInstances();
   if (name === 'modules') loadModules();
+  if (name === 'user-modules') loadUserModulesTab();
   if (name === 'doctor') loadDoctor();
 }
 
@@ -234,53 +235,82 @@ function moduleStatusBadge(m) {
   return `<span class="status-dot warn"></span> ${t('modules.pending')}`;
 }
 
+// Shared renderer for both the Modules tab and the User modules tab -- same card shape (status
+// badge, description, what it touches, accept/revoke), the only difference between the two tabs
+// is WHICH modules get fetched/filtered before calling this (see loadModules/loadUserModulesTab).
+function renderModuleCards(list, modules, { onChange }) {
+  list.innerHTML = '';
+  for (const m of modules) {
+    const li = document.createElement('li');
+    li.className = 'doctor-item';
+    const tipo = m.esTerceroNoLibre ? t('modules.thirdParty') : t('modules.own');
+    li.innerHTML = `
+      <div class="label">${moduleStatusBadge(m)} — <strong>${loc(m, 'nombre')}</strong> <span class="muted">(${tipo}, v${m.version})</span></div>
+      <p class="detail">${loc(m, 'descripcion')}</p>
+      <p class="detail muted">${t('modules.compatible', { android: m.compatibleCon.androidVersion.join('/'), gpu: m.compatibleCon.gpuMode.join('/') })}</p>
+      <ul>${loc(m, 'queToca').map((item) => `<li>${item}</li>`).join('')}</ul>
+    `;
+    // Accepting from here is the same contract flow the reactive 428 path already uses
+    // (Contracts.ensureAccepted) -- this just lets it be done ahead of time instead of only
+    // at the moment something needs it.
+    if (!m.accepted) {
+      const btn = document.createElement('button');
+      btn.textContent = t('contract.accept');
+      btn.addEventListener('click', async () => {
+        btn.disabled = true;
+        try {
+          await Contracts.ensureAccepted([m]);
+        } catch (e) {
+          alert(e.message);
+        } finally {
+          await onChange();
+        }
+      });
+      li.appendChild(btn);
+    } else {
+      // Deliberate stub, not a real feature yet (22/10/2026): whether revoking should even be
+      // possible is an open question (an instance already using the module keeps running on
+      // what it has -- does revoking block its NEXT start/restart? does it force-stop it?),
+      // not decided. This button exists on purpose so the gap stays visible in the UI instead
+      // of silently missing, until that design question gets resolved.
+      const btn = document.createElement('button');
+      btn.className = 'secondary';
+      btn.textContent = t('modules.revoke');
+      btn.addEventListener('click', () => alert(t('modules.revokeNotImplemented')));
+      li.appendChild(btn);
+    }
+    list.appendChild(li);
+  }
+}
+
+const isUserModule = (m) => Array.isArray(m.etapa) && m.etapa.includes(7);
+
+// The generic per-instance capabilities (gapps/hwenc/arm/etc.) -- user modules (stage 7, CIFI
+// today) are excluded here and shown in their own tab instead (loadUserModulesTab), not
+// duplicated in both -- explicit feedback from the user, 22/10/2026.
 async function loadModules() {
   const list = $('#modules-list');
   list.innerHTML = `<li>${t('common.loading')}</li>`;
   try {
-    const modules = await api('/modules');
-    list.innerHTML = '';
-    for (const m of modules) {
-      const li = document.createElement('li');
-      li.className = 'doctor-item';
-      const tipo = m.esTerceroNoLibre ? t('modules.thirdParty') : t('modules.own');
-      li.innerHTML = `
-        <div class="label">${moduleStatusBadge(m)} — <strong>${loc(m, 'nombre')}</strong> <span class="muted">(${tipo}, v${m.version})</span></div>
-        <p class="detail">${loc(m, 'descripcion')}</p>
-        <p class="detail muted">${t('modules.compatible', { android: m.compatibleCon.androidVersion.join('/'), gpu: m.compatibleCon.gpuMode.join('/') })}</p>
-        <ul>${loc(m, 'queToca').map((item) => `<li>${item}</li>`).join('')}</ul>
-      `;
-      // Accepting from here is the same contract flow the reactive 428 path already uses
-      // (Contracts.ensureAccepted) -- this just lets it be done ahead of time instead of only
-      // at the moment something needs it.
-      if (!m.accepted) {
-        const btn = document.createElement('button');
-        btn.textContent = t('contract.accept');
-        btn.addEventListener('click', async () => {
-          btn.disabled = true;
-          try {
-            await Contracts.ensureAccepted([m]);
-          } catch (e) {
-            alert(e.message);
-          } finally {
-            await loadModules();
-          }
-        });
-        li.appendChild(btn);
-      } else {
-        // Deliberate stub, not a real feature yet (22/10/2026): whether revoking should even be
-        // possible is an open question (an instance already using the module keeps running on
-        // what it has -- does revoking block its NEXT start/restart? does it force-stop it?),
-        // not decided. This button exists on purpose so the gap stays visible in the UI instead
-        // of silently missing, until that design question gets resolved.
-        const btn = document.createElement('button');
-        btn.className = 'secondary';
-        btn.textContent = t('modules.revoke');
-        btn.addEventListener('click', () => alert(t('modules.revokeNotImplemented')));
-        li.appendChild(btn);
-      }
-      list.appendChild(li);
+    const modules = (await api('/modules')).filter((m) => !isUserModule(m));
+    renderModuleCards(list, modules, { onChange: loadModules });
+  } catch (e) {
+    list.innerHTML = `<li>${t('common.error', { msg: e.message })}</li>`;
+  }
+}
+
+// Per-game/situation automations (stage 7) -- a different category from the generic
+// capabilities above: they don't apply to "any instance", they automate ONE specific thing.
+async function loadUserModulesTab() {
+  const list = $('#user-modules-tab-list');
+  list.innerHTML = `<li>${t('common.loading')}</li>`;
+  try {
+    const modules = (await api('/modules')).filter(isUserModule);
+    if (modules.length === 0) {
+      list.innerHTML = `<li class="muted">${t('new.noUserModules')}</li>`;
+      return;
     }
+    renderModuleCards(list, modules, { onChange: loadUserModulesTab });
   } catch (e) {
     list.innerHTML = `<li>${t('common.error', { msg: e.message })}</li>`;
   }
@@ -309,6 +339,7 @@ async function loadDoctor() {
 
 $('#btn-refresh-instances').addEventListener('click', loadInstances);
 $('#btn-refresh-modules').addEventListener('click', loadModules);
+$('#btn-refresh-user-modules').addEventListener('click', loadUserModulesTab);
 $('#btn-run-doctor').addEventListener('click', loadDoctor);
 
 const dialog = $('#new-instance-dialog');
@@ -347,6 +378,11 @@ async function refreshHwencOption() {
 }
 $('#image-select').addEventListener('change', refreshHwencOption);
 
+// Checked ids survive a re-render of #user-modules-list (see loadUserModules below) -- cleared
+// only when a creation actually succeeds (createInstance's success path), not on every dialog
+// close, so a retry after an unrelated error keeps the selection the user already made.
+const checkedUserModuleIds = new Set();
+
 // User modules (stage 7, see moduleRunner.js/moduleScheduler.js) are a separate category from the
 // generic per-instance capabilities above (hwenc/gapps/arm) -- they automate ONE specific
 // game/situation (CIFI today), not a capability any instance might want, so they get their own
@@ -362,12 +398,24 @@ async function loadUserModules() {
       box.innerHTML = `<span class="muted">${t('new.noUserModules')}</span>`;
       return;
     }
+    // Re-checks whatever was already ticked before this re-render (checkedUserModuleIds, updated
+    // on every change below) -- without this, reopening the dialog (e.g. to retry after an
+    // unrelated error on a previous attempt) silently drops the selection back to nothing, with
+    // no visual cue that it happened. Found for real 22/10/2026: a user retried after an
+    // unrelated hwenc-artifacts error and the instance was created without CIFI, which they had
+    // ticked on the earlier attempt.
     box.innerHTML = modules.map((m) => `
       <label class="contract-checkbox">
-        <input type="checkbox" class="user-module-chk" data-id="${m.id}" />
+        <input type="checkbox" class="user-module-chk" data-id="${m.id}" ${checkedUserModuleIds.has(m.id) ? 'checked' : ''} />
         <span>${loc(m, 'nombre')}</span>
       </label>
     `).join('');
+    for (const chk of box.querySelectorAll('.user-module-chk')) {
+      chk.addEventListener('change', () => {
+        if (chk.checked) checkedUserModuleIds.add(chk.dataset.id);
+        else checkedUserModuleIds.delete(chk.dataset.id);
+      });
+    }
   } catch (e) {
     box.innerHTML = `<span class="fail-text">${t('common.error', { msg: e.message })}</span>`;
   }
@@ -407,6 +455,7 @@ async function createInstance(name, imageId, form, modules, display) {
     dialog.close();
     form.reset();
     resetGappsStatus();
+    checkedUserModuleIds.clear();
     await loadInstances();
   } catch (err) {
     if (err.status === 428 && err.modules) {

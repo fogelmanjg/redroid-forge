@@ -12,6 +12,7 @@
     <nav>
       <button class="tab-btn active" data-tab="instances" data-i18n="nav.instances">Instances</button>
       <button class="tab-btn" data-tab="modules" data-i18n="nav.modules">Modules</button>
+      <button class="tab-btn" data-tab="user-modules" data-i18n="nav.userModules">User modules</button>
       <button class="tab-btn" data-tab="doctor" data-i18n="nav.doctor">Doctor</button>
       <button class="tab-btn" data-tab="help" data-i18n="nav.help">Help</button>
     </nav>
@@ -40,6 +41,14 @@
         <button id="btn-refresh-modules" data-i18n="common.refresh">Refresh</button>
       </div>
       <ul id="modules-list" class="doctor-list"></ul>
+    </section>
+
+    <section id="tab-user-modules" class="tab">
+      <p class="tab-intro" data-i18n="userModules.intro"></p>
+      <div class="toolbar">
+        <button id="btn-refresh-user-modules" data-i18n="common.refresh">Refresh</button>
+      </div>
+      <ul id="user-modules-tab-list" class="doctor-list"></ul>
     </section>
 
     <section id="tab-doctor" class="tab">
