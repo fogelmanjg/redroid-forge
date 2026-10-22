@@ -14,13 +14,16 @@ function httpError(message, httpStatus) {
   return Object.assign(new Error(message), { httpStatus });
 }
 
-// `body`: the request body. A missing (undefined, null or empty) value takes the default.
+// `body`: the request body. A missing (undefined, null or empty) value takes `fallback[key]`
+// (DEFAULTS at creation; an existing instance's own current `display` when editing one, see
+// POST /:id/display -- so changing just `dpi` there does not reset width/height/fps back to
+// the generic defaults).
 // -> { width, height, dpi, fps } as integers. Throws Error with httpStatus 400.
-function parseDisplay(body = {}) {
+function parseDisplay(body = {}, fallback = DEFAULTS) {
   const out = {};
   for (const key of Object.keys(DEFAULTS)) {
     const raw = body[key];
-    if (raw === undefined || raw === null || raw === '') { out[key] = DEFAULTS[key]; continue; }
+    if (raw === undefined || raw === null || raw === '') { out[key] = fallback[key] ?? DEFAULTS[key]; continue; }
     // Numbers, or strings made only of digits: nothing else (no spaces, signs or decimals).
     const ok = (typeof raw === 'number' && Number.isInteger(raw))
       || (typeof raw === 'string' && /^\d{1,5}$/.test(raw));

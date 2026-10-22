@@ -51,6 +51,12 @@ test('parseDisplay: defaults for what is missing, integers for what is given', (
   assert.deepStrictEqual(parseDisplay({ width: '', fps: null }), DEFAULTS);
 });
 
+test('parseDisplay: a `fallback` other than DEFAULTS is used for whatever is missing (editing an existing instance)', () => {
+  const current = { width: 1920, height: 1080, dpi: 240, fps: 30 };
+  assert.deepStrictEqual(parseDisplay({}, current), current);
+  assert.deepStrictEqual(parseDisplay({ dpi: 320 }, current), { ...current, dpi: 320 });
+});
+
 test('parseDisplay: rejects anything that is not a plain integer in range (they go into the kernel command line)', () => {
   const bad = [
     { width: '720 androidboot.redroid_gpu_mode=guest' }, { width: '7.5' }, { width: '-1' }, { width: '+720' },

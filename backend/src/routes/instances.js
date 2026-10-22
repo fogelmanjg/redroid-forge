@@ -471,6 +471,109 @@ router.post('/:id/resources', async (req, res) => {
   }
 });
 
+// width/height/dpi/fps/gpuMode are baked into the container's kernel command line at create
+// time (androidboot.redroid_*) -- unlike resources (Docker's own Update API) or device-profile
+// (exec + restart on the existing container), none of them has a live-update path. Changing
+// any of them means a real recreate: stop (tolerant if already stopped, inside remove) + remove
+// the CONTAINER ONLY (never the named volume -- dockerRuntime.remove's `v:true` only ever
+// touches anonymous volumes, see its own comment) + create a fresh one with the new cmdline,
+// reusing the same adbPort/binderSlot/volume/resources -- then start it again if it was
+// already running, so the instance ends up in the state it was already in, just booted with
+// the new values. `instance.id` is kept exactly as it was (it is NOT re-set to the new
+// containerId): this codebase already threads id/containerId as two separate values
+// everywhere (moduleScheduler.start(id, containerId, ...), scheduleWifiFixes(instance), ...),
+// they just happen to start out equal at creation -- keeping `id` stable is what lets the
+// instance's URL/identity survive a recreate at all.
+router.post('/:id/display', async (req, res) => {
+  const instance = store.get(req.params.id);
+  if (!instance) return res.status(404).json({ error: 'Instancia no encontrada' });
+  try {
+    const display = instanceParams.parseDisplay(req.body, instance.display);
+    const gpuModeChoice = instanceParams.parseGpuMode(req.body);
+    const catalogImg = catalog.find((i) => i.id === instance.imageId);
+    if (!catalogImg) {
+      throw httpError(`Image "${instance.imageId}" of this instance was not found in the catalog -- it cannot be recreated.`, 409);
+    }
+    const effectiveGpuMode = gpuModeChoice.gpuMode || instance.gpuMode || catalogImg.gpuMode;
+    if (effectiveGpuMode === 'host') assertStandaloneModuleReady('gpu-mode', catalogImg);
+    const img = effectiveGpuMode === catalogImg.gpuMode ? catalogImg : { ...catalogImg, gpuMode: effectiveGpuMode };
+
+    // Every module's compatibility is re-checked against what the instance will boot with
+    // next (hwenc/redroid-gralloc-fix among them) -- same gate as creation, not skipped just
+    // because the instance already exists. The optional modules already chosen stay exactly
+    // those: this route only ever changes display/gpuMode, never adds or drops a module.
+    const extras = instance.requiredModuleIds
+      ? instance.requiredModuleIds.filter((id) => moduleGate.OPTIONAL_PER_INSTANCE.includes(id))
+      : undefined;
+    await assertModulesReady(img, extras);
+    const requiredModuleIds = moduleGate.requiredModuleIds(img, extras);
+
+    const info = await runtime.inspect(instance.containerId).catch(() => null);
+    const wasRunning = info?.State?.Status === 'running';
+
+    await runtime.remove(instance.containerId, { force: true });
+    // Persisted right away, before create() is even attempted: if create() itself fails below
+    // (a real possibility -- missing image, no free binder slot, ...), the stored record still
+    // correctly says "no container" rather than pointing at the one just deleted. The volume
+    // (the actual data) was never touched either way.
+    instance.containerId = null;
+    store.upsert({ ...instance });
+
+    const binds = [...binder.binderBinds(instance.binderSlot), `${instance.volumeName}:/data`];
+    const cmd = [
+      `androidboot.redroid_width=${display.width}`,
+      `androidboot.redroid_height=${display.height}`,
+      `androidboot.redroid_dpi=${display.dpi}`,
+      `androidboot.redroid_fps=${display.fps}`,
+      `androidboot.redroid_gpu_mode=${img.gpuMode}`,
+    ];
+    const createReq = await moduleRunner.prepareCreate(requiredModuleIds);
+    binds.push(...createReq.binds);
+    cmd.push(...createReq.cmd);
+
+    const containerId = await runtime.create({
+      name: `redroid-${instance.name}`,
+      image: img.dockerImage,
+      cmd,
+      binds,
+      adbPort: instance.adbPort,
+      memoryMb: instance.memoryMb,
+      cpusetCpus: instance.cpusetCpus,
+    });
+
+    try {
+      await moduleRunner.integrate(requiredModuleIds, containerId, {
+        display: { width: display.width, height: display.height },
+      });
+    } catch (e) {
+      await runtime.remove(containerId, { force: true }).catch(() => {});
+      throw e;
+    }
+
+    // build.prop lives in the container's OWN filesystem layer, not in the persistent /data
+    // volume -- any previously-applied device profile spoof is gone with the old container.
+    // deviceProfileApplied reset to null so reconcileDeviceProfile (see /start) knows to
+    // re-apply the still-desired `deviceProfile` on the next boot, exactly like a change made
+    // while the instance was stopped already does.
+    let updated = store.upsert({
+      ...instance, containerId, display, gpuMode: img.gpuMode, requiredModuleIds, deviceProfileApplied: null,
+    });
+
+    if (wasRunning) {
+      await moduleRunner.ensureHostInfraReady(requiredModuleIds);
+      await runtime.start(containerId);
+      updated = await reconcileDeviceProfile(updated);
+      scheduleWifiFixes(updated);
+      moduleRunner.scheduleRuntimeFixups(requiredModuleIds, containerId);
+      moduleScheduler.start(updated.id, containerId, requiredModuleIds);
+    }
+
+    res.json(await withRuntimeStatus(updated));
+  } catch (e) {
+    sendError(res, e);
+  }
+});
+
 router.get('/:id/watchdogs', (req, res) => {
   const instance = store.get(req.params.id);
   if (!instance) return res.status(404).json({ error: 'Instancia no encontrada' });

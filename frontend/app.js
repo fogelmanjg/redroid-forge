@@ -323,6 +323,128 @@ function buildResourcesEditRow(inst, allInstances) {
   return tr;
 }
 
+// Same idea as applyDeviceProfile/createInstance: a 428 here means gpuMode is moving to
+// "host" and that contract has not been accepted yet (see assertStandaloneModuleReady in
+// routes/instances.js) -- show the modal, retry once.
+async function applyDisplay(instanceId, payload) {
+  try {
+    await api(`/instances/${instanceId}/display`, { method: 'POST', body: JSON.stringify(payload) });
+  } catch (err) {
+    if (err.status === 428 && err.modules) {
+      const allAccepted = await Contracts.ensureAccepted(err.modules);
+      if (allAccepted) return applyDisplay(instanceId, payload);
+      return;
+    }
+    throw err;
+  }
+}
+
+// Which instance's display/GPU-mode panel is open -- same single-panel-at-a-time pattern as
+// openResourcesId, independent of it (both could in principle be open for different
+// instances at once, nothing stops that).
+let openDisplayId = null;
+
+// width/height/dpi/fps/gpuMode are baked into the container's kernel cmdline at create time
+// (see routes/instances.js POST /:id/display) -- there is no live-update path for any of
+// them, changing one always means a real recreate (/data is preserved, the container itself
+// is not). Unlike the resources panel, Apply always confirms first when the instance is
+// running (resources only confirms/blocks for a RAM decrease -- here EVERY change restarts
+// the instance, there is no softer option).
+function buildDisplayEditRow(inst) {
+  const tr = document.createElement('tr');
+  tr.className = 'edit-row';
+  const td = document.createElement('td');
+  td.colSpan = 8;
+  const panel = document.createElement('div');
+  panel.className = 'resources-edit-panel';
+
+  const header = document.createElement('div');
+  header.className = 'resources-edit-header';
+  header.textContent = t('instances.display.header');
+  panel.appendChild(header);
+
+  const grid = document.createElement('div');
+  grid.className = 'display-edit-grid';
+  const d = inst.display || {};
+  const fields = [
+    ['width', t('new.width'), d.width, 240, 7680],
+    ['height', t('new.height'), d.height, 240, 7680],
+    ['dpi', t('new.dpi'), d.dpi, 72, 640],
+    ['fps', t('new.fps'), d.fps, 1, 120],
+  ];
+  const inputs = {};
+  for (const [key, label, value, min, max] of fields) {
+    const wrap = document.createElement('label');
+    wrap.className = 'display-edit-field';
+    const span = document.createElement('span');
+    span.textContent = label;
+    const input = document.createElement('input');
+    input.type = 'number';
+    input.min = String(min);
+    input.max = String(max);
+    input.value = value ?? '';
+    inputs[key] = input;
+    wrap.appendChild(span);
+    wrap.appendChild(input);
+    grid.appendChild(wrap);
+  }
+  panel.appendChild(grid);
+
+  const gpuWrap = document.createElement('label');
+  gpuWrap.className = 'display-edit-field';
+  const gpuSpan = document.createElement('span');
+  gpuSpan.textContent = t('new.gpuMode');
+  const gpuSelect = document.createElement('select');
+  for (const [value, text] of [['host', t('new.gpuModeHost')], ['guest', t('new.gpuModeGuest')]]) {
+    const opt = document.createElement('option');
+    opt.value = value;
+    opt.textContent = text;
+    if (value === inst.gpuMode) opt.selected = true;
+    gpuSelect.appendChild(opt);
+  }
+  gpuWrap.appendChild(gpuSpan);
+  gpuWrap.appendChild(gpuSelect);
+  panel.appendChild(gpuWrap);
+
+  const applyBtn = document.createElement('button');
+  applyBtn.type = 'button';
+  applyBtn.className = 'secondary';
+  applyBtn.textContent = t('instances.resources.apply');
+  applyBtn.addEventListener('click', async () => {
+    if (inst.status === 'running' && !confirm(t('instances.display.confirmRunning'))) return;
+    applyBtn.disabled = true;
+    try {
+      await applyDisplay(inst.id, {
+        width: Number(inputs.width.value),
+        height: Number(inputs.height.value),
+        dpi: Number(inputs.dpi.value),
+        fps: Number(inputs.fps.value),
+        gpuMode: gpuSelect.value,
+      });
+      openDisplayId = null;
+    } catch (e) {
+      alert(e.message);
+    } finally {
+      applyBtn.disabled = false;
+      await loadInstances({ silent: true });
+    }
+  });
+  panel.appendChild(applyBtn);
+
+  const cancelBtn = document.createElement('button');
+  cancelBtn.type = 'button';
+  cancelBtn.textContent = t('common.cancel');
+  cancelBtn.addEventListener('click', () => {
+    openDisplayId = null;
+    loadInstances({ silent: true });
+  });
+  panel.appendChild(cancelBtn);
+
+  td.appendChild(panel);
+  tr.appendChild(td);
+  return tr;
+}
+
 // The backend only allows applying a profile while the instance is running (it needs the overlay
 // writable, see deviceProfile.js) -- the select+button only render in that state, matching how the
 // Actions column already hides start/stop/restart/delete that do not apply to the current status.
@@ -395,6 +517,15 @@ async function loadInstances({ silent = false } = {}) {
       `;
       const state = InstanceState.describe(inst.status);
       tr.querySelector('.status-cell').innerHTML = `<span class="status-dot ${state.tone}"></span>${t('instances.status.' + state.key)}`;
+      const metaSpan = tr.querySelector('.instance-meta');
+      if (metaSpan) {
+        metaSpan.classList.add('resource-chip');
+        metaSpan.title = t('instances.display.changeHint');
+        metaSpan.addEventListener('click', () => {
+          openDisplayId = openDisplayId === inst.id ? null : inst.id;
+          loadInstances({ silent: true });
+        });
+      }
       tr.querySelector('.device-profile-cell').appendChild(buildDeviceProfileCell(inst));
       tr.querySelector('.resources-cell').appendChild(buildResourcesCell(inst));
       const actions = tr.querySelector('.actions');
@@ -466,6 +597,7 @@ async function loadInstances({ silent = false } = {}) {
       }
       rows.appendChild(tr);
       if (openResourcesId === inst.id) rows.appendChild(buildResourcesEditRow(inst, instances));
+      if (openDisplayId === inst.id) rows.appendChild(buildDisplayEditRow(inst));
     }
     tbody.replaceChildren(rows);
   } catch (e) {
@@ -801,12 +933,12 @@ loadInstances();
 
 // The state of an instance changes by itself (it boots, it crashes, someone uses adb/docker): refresh
 // every few seconds while the Instances tab is the one on screen. It does not run while a dialog is
-// open, while a resources edit panel is open (same reasoning -- it rebuilds the whole table from
-// the server's last-known values, which would silently wipe out whatever the user already typed/
-// checked there before they got to click Apply; found for real, 22/10/2026) nor when the browser
-// tab is hidden.
+// open, while a resources or display edit panel is open (same reasoning -- it rebuilds the whole
+// table from the server's last-known values, which would silently wipe out whatever the user
+// already typed/checked there before they got to click Apply; found for real, 22/10/2026) nor
+// when the browser tab is hidden.
 setInterval(() => {
   const onInstances = $('.tab-btn.active')?.dataset.tab === 'instances';
   const dialogOpen = $$('dialog').some((d) => d.open);
-  if (onInstances && !dialogOpen && openResourcesId === null && !document.hidden) loadInstances({ silent: true });
+  if (onInstances && !dialogOpen && openResourcesId === null && openDisplayId === null && !document.hidden) loadInstances({ silent: true });
 }, 4000);

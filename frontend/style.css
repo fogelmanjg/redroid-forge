@@ -177,5 +177,8 @@ tr.edit-row > td { background: rgba(58, 109, 240, 0.06); padding: 0.8rem 1rem; }
 .resources-edit-header:first-child { margin-top: 0; }
 .resources-cpu-grid { display: flex; flex-wrap: wrap; gap: 0.3rem 0.6rem; }
 .resources-core-check { display: flex; align-items: center; gap: 0.2rem; font-family: monospace; font-size: 0.85rem; }
+.display-edit-grid { display: flex; flex-wrap: wrap; gap: 0.6rem; }
+.display-edit-field { display: flex; flex-direction: column; gap: 0.2rem; font-size: 0.85rem; }
+.display-edit-field input { width: 6em; }
 .resources-warn { font-size: 0.8rem; opacity: 0.85; }
 .resources-warn-error { color: var(--fail); opacity: 1; }
