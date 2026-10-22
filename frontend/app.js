@@ -71,14 +71,70 @@ function androidIdCellHtml(inst) {
   `;
 }
 
+// Applies (profileValue='redroid') or reverts a device profile; handles the Phase 4 contract
+// gate the same way createInstance does (428 + pending manifests -> show the modal -> retry once).
+async function applyDeviceProfile(instanceId, profileValue) {
+  const body = { profile: profileValue === 'redroid' ? undefined : profileValue };
+  try {
+    await api(`/instances/${instanceId}/device-profile`, { method: 'POST', body: JSON.stringify(body) });
+  } catch (err) {
+    if (err.status === 428 && err.modules) {
+      const allAccepted = await Contracts.ensureAccepted(err.modules);
+      if (allAccepted) return applyDeviceProfile(instanceId, profileValue);
+      return;
+    }
+    throw err;
+  }
+}
+
+// The backend only allows applying a profile while the instance is running (it needs the overlay
+// writable, see deviceProfile.js) -- the select+button only render in that state, matching how the
+// Actions column already hides start/stop/restart/delete that do not apply to the current status.
+function buildDeviceProfileCell(inst) {
+  const wrap = document.createElement('div');
+  const current = inst.deviceProfile || 'redroid';
+  const label = document.createElement('span');
+  label.className = 'muted';
+  label.textContent = current === 'redroid' ? t('instances.deviceProfile.default') : current;
+  wrap.appendChild(label);
+  if (inst.status !== 'running') return wrap;
+  wrap.appendChild(document.createElement('br'));
+  const select = document.createElement('select');
+  for (const [value, text] of [['redroid', t('instances.deviceProfile.default')], ['samsung', 'Samsung Galaxy A55']]) {
+    const opt = document.createElement('option');
+    opt.value = value;
+    opt.textContent = text;
+    if (value === current) opt.selected = true;
+    select.appendChild(opt);
+  }
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'secondary';
+  btn.textContent = t('instances.deviceProfile.apply');
+  btn.addEventListener('click', async () => {
+    btn.disabled = true;
+    try {
+      await applyDeviceProfile(inst.id, select.value);
+    } catch (e) {
+      alert(e.message);
+    } finally {
+      btn.disabled = false;
+      await loadInstances({ silent: true });
+    }
+  });
+  wrap.appendChild(select);
+  wrap.appendChild(btn);
+  return wrap;
+}
+
 // `silent`: the periodic refresh does not flash "Loading..." over the table.
 async function loadInstances({ silent = false } = {}) {
   const tbody = $('#instances-table tbody');
-  if (!silent) tbody.innerHTML = `<tr><td colspan="6">${t('common.loading')}</td></tr>`;
+  if (!silent) tbody.innerHTML = `<tr><td colspan="7">${t('common.loading')}</td></tr>`;
   try {
     const instances = await api('/instances');
     if (instances.length === 0) {
-      tbody.innerHTML = `<tr><td colspan="6">${t('instances.none')}</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="7">${t('instances.none')}</td></tr>`;
       return;
     }
     // Built off-screen and swapped in one go, so a refresh never leaves the table half drawn.
@@ -91,10 +147,12 @@ async function loadInstances({ silent = false } = {}) {
         <td class="status-cell"></td>
         <td>${inst.adbPort}</td>
         <td class="android-id-cell">${androidIdCellHtml(inst)}</td>
+        <td class="device-profile-cell"></td>
         <td class="actions"></td>
       `;
       const state = InstanceState.describe(inst.status);
       tr.querySelector('.status-cell').innerHTML = `<span class="status-dot ${state.tone}"></span>${t('instances.status.' + state.key)}`;
+      tr.querySelector('.device-profile-cell').appendChild(buildDeviceProfileCell(inst));
       const actions = tr.querySelector('.actions');
       if (inst.hasGapps && inst.androidId && !inst.androidIdRegisteredAt) {
         const link = document.createElement('a');
@@ -166,7 +224,7 @@ async function loadInstances({ silent = false } = {}) {
     }
     tbody.replaceChildren(rows);
   } catch (e) {
-    tbody.innerHTML = `<tr><td colspan="6">${t('common.error', { msg: e.message })}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="7">${t('common.error', { msg: e.message })}</td></tr>`;
   }
 }
 

@@ -111,7 +111,12 @@ function resolveProfile(profileKey) {
 async function applyDeviceProfile(containerId, androidVersion, profileKey) {
   const { key, profile } = resolveProfile(profileKey);
   const script = buildDeviceProfileScript(profile, androidVersion);
-  await runtime.exec(containerId, ['su', '-c', script]);
+  // toybox's su (the official redroid image) parses its first argument as a WHO
+  // (uid/user), not as a getopt-style flag -- `su -c '...'` fails with "invalid
+  // uid/gid '-c'". The portable form across su implementations is `su 0 sh -c
+  // '...'` (run as uid 0, then sh -c the script) -- confirmed against a live
+  // instance (see docs/ROADMAP.md Phase 3).
+  await runtime.exec(containerId, ['su', '0', 'sh', '-c', script]);
   log(`profile "${key}" applied in container ${containerId}`);
   return key;
 }

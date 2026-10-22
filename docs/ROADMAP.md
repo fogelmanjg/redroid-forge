@@ -319,14 +319,56 @@ and adapting the `build.prop` paths that are already known to vary per image.
    not by copying a method that does not exist. **Validated only with a mocked unit test**
    (`backend/test/hwsimWifiConcurrency.test.js` — it mocks `child_process.execFile`/`dockerRuntime`,
    simulates 2 concurrent calls against a shared host state and verifies disjoint claims); **not yet tested
-   against a real dual-instance startup race on hardware**, which remains pending before trusting this in
-   production.
+   against a real dual-instance startup race on hardware** — attempted on 22/10/2026 directly against
+   `jg-dashboard` v1's production instances on server01 (not redroid-forge's own port, there is no catalog
+   image wiring `needsHwsimWifi` yet to create a real redroid-forge instance with it) by reloading
+   `mac80211_hwsim`, which **broke 3 real production instances** (destroyed the phys already living in their
+   netns) — recovered via the dashboard's own stop/start API, no data lost. **Do not reload
+   `mac80211_hwsim` on a host with other live hwsim users again** — if this needs re-testing, do it on an
+   isolated host or during an announced maintenance window, never opportunistically next to production.
+   Real root cause of the *operational* symptom this gate cares about (several restarts needed before WiFi
+   takes) turned out to be different from the race itself — see the dashboard-side bug found and fixed the
+   same day, next paragraph.
+
+5. **Real root cause of the "needs several restarts" symptom, found and fixed in `jg-dashboard` v1 (not
+   redroid-forge) on 22/10/2026 — port the fix here too when wiring an instance's `needsHwsimWifi`.** Phys
+   moved into a container's netns tie their lifecycle to it: if Docker tears the netns down while a phy is
+   still inside (a plain `stop()`), the kernel frees the phy instead of returning it to the host's default
+   netns — confirmed for real (`iw phy` showed them gone after a stop, back after adding the fix). With a
+   pool sized exactly to the number of WiFi-capable instances (no slack), any one leaked phy permanently
+   starves one instance until every WiFi instance happens to be down at once (the only path that re-triggers
+   a full `modprobe` reload). Fixed in `jg-dashboard/api/src/remote/redroid/redroid.service.ts`
+   (`releaseHwsimPhys`, called before `stop()`/`delete()`/the two device-profile-triggered `restart()`s) —
+   validated with 3 consecutive real stop/start cycles on a live production instance, WiFi connected on the
+   first try every time (previously intermittent). **`hwsimWifi.js` here has the same gap** (only ever moves
+   phys IN via `claimHwsimPhyPair`, never OUT before a stop) — port the same fix (release on stop, using
+   `nsenter -t <pid> -n iw dev` + `iw phy <phy> set netns 1`, matching `parsePhyIfacePairs`) once an instance
+   actually uses this module for real, before trusting it in production.
+
+6. **Found and fixed on 22/10/2026, validated against real Docker (the Phase 3 gate's "needs a host with
+   real Docker" is now met for this part): `dockerRuntime.exec()` never set `Env`, so a bare `docker exec`
+   got a generic Linux `PATH` without `/system/bin`/`/system/xbin` — every `su`/`ip`/`getprop` call failed
+   with "executable file not found in $PATH" despite the binaries being right there.** Fixed centrally in
+   `dockerRuntime.js` (`ANDROID_EXEC_ENV`), not per caller. **Second, separate bug found in the same pass:
+   toybox's `su` (the official redroid image) parses its first argument as a WHO/uid, not a `-c` flag** —
+   `su -c '...'` fails with `su: invalid uid/gid '-c'`; the portable form is `su 0 sh -c '...'`. Fixed in all
+   4 call sites (`deviceProfile.js`, `hwsimWifi.js` ×3) and their test (`deviceProfile.test.js`'s index-based
+   assertions updated to the new 5-element array shape). **Validated for real**: applied the `samsung`
+   profile to a live instance via the real API, confirmed with `getprop ro.product.brand` → `samsung`;
+   reverted, confirmed back to `redroid`. Not yet known whether this exact `su` syntax issue also affects
+   `jg-dashboard`'s own `su -c` calls — checked by hand for its wifi-v3 image (a different, Magisk-ish `su`
+   that DOES accept `-c`) and it does not reproduce there; don't assume it's fine on every image without
+   checking its `su` the same way.
 
 **Gate:** the profile spoof can be applied/reverted from the new UI, with the correct `build.prop` files
 according to the image, and restarting two or more instances with fake WiFi at the same time leaves none
-without radios. **Partial:** the concurrency fix and the profile spoof (via API) are done and have a unit
-test; the UI (step 3) and the validation on real hardware with two instances starting/restarting at once
-are missing to close the gate completely.
+without radios. **Partial:** the concurrency fix, the profile spoof (via API, now verified against real
+Docker, not just a mock), the exec PATH/su-syntax bugs, and the phy-leak-on-stop root cause are all done;
+missing to close the gate completely: the UI (step 3, device-profile selector — the instances table/API
+wiring for it was actually built this same session, see `frontend/app.js`'s device-profile column, but
+double-check it's current before assuming step 3 is done too), wiring `needsHwsimWifi` to a real catalog
+image so this module can be exercised end-to-end as redroid-forge itself (not just via `jg-dashboard`), and
+re-validating the concurrency fix on real hardware under a safe (non-production) setup.
 
 ## Phase 4 — Generic module contract system
 
@@ -485,6 +527,22 @@ mechanism is picked up again (section 8 of `REQUIREMENTS.md`), not before.
 - Other "large" projects to read that could add something (pending in `REQUIREMENTS.md` section 10) — they
   are evaluated and inserted in the corresponding phase when identified, they do not generate a phase of
   their own.
+- **Android does not see the container's real RAM limit (idea, 22/10/2026).** `dumpsys meminfo`
+  inside a redroid container reports the HOST's total RAM (e.g. 63GB, "status moderate"), not the
+  Docker cgroup's actual `memoryMb` ceiling — confirmed with real numbers on a production
+  `jg-dashboard` v1 instance (3030MB used of a 4096MB limit, 74%, after under an hour of uptime; see
+  [[project_redroid_forge_meminfo_cgroup_visibility]] for the full writeup). Because Android never
+  sees the real ceiling, its own low-memory killer/cache trimming never engages preventively — growth
+  goes unchecked until the host kernel's cgroup OOM killer intervenes abruptly, which reads as a
+  stutter/freeze inside whatever app is running, not a video/network symptom. **Counter-intuitive,
+  confirmed by the user with real usage: raising `memoryMb` makes this WORSE, not better** (more
+  visible headroom just lets Android accumulate more before anything stops it — same pattern already
+  seen with the CIFI instance, and with a physical Android phone that needs a manual background-app
+  purge every ~2 days). Likely fix: overlay a container-local `/proc/meminfo` reflecting the real
+  `memoryMb` instead of the host's, so `ActivityManager`'s own memory-pressure handling activates in
+  time. Not designed yet — candidate for a module alongside `cpu-ram`/`AndroidProvisioning`. Likely
+  contributing factor for this specific case: a user used to abundant hardware who never manually
+  closes apps, eventually running into a limit that was always there but never enforced gracefully.
 - **Configurable ad blocker (idea, 04/10/2026).** At system level and per application. It fits as a Phase 5
   user module (manifest + script), not as part of the core. Design to be decided; options seen:
   - *Local VPN client* (NetGuard tested by hand, it needs no root): it allows per-app (uid) rules. Platform

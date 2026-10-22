@@ -243,21 +243,23 @@ function scheduleHwsimWifiFix(instanceId, containerId) {
 }
 
 // The fake wifi HAL only fires when something asks Android to connect.
+// `su 0 sh -c '...'`, not `su -c '...'`: toybox's su (the official redroid image) parses
+// its first argument as a WHO (uid/user), not a getopt flag -- see deviceProfile.js.
 async function ensureWifiConnected(instanceId, containerId) {
   const MAX_ATTEMPTS = 6;
   for (let i = 0; i < MAX_ATTEMPTS; i++) {
     let status = '';
     try {
-      status = await runtime.exec(containerId, ['su', '-c', 'cmd wifi status']);
+      status = await runtime.exec(containerId, ['su', '0', 'sh', '-c', 'cmd wifi status']);
     } catch (e) {
       warn(`status check failed for ${instanceId}: ${e}`);
     }
     if (status.includes('Wifi is connected')) return;
 
     try {
-      await runtime.exec(containerId, ['su', '-c', 'svc wifi enable']);
+      await runtime.exec(containerId, ['su', '0', 'sh', '-c', 'svc wifi enable']);
       await new Promise((r) => setTimeout(r, 3000));
-      await runtime.exec(containerId, ['su', '-c', 'cmd wifi connect-network jg-wifi open']);
+      await runtime.exec(containerId, ['su', '0', 'sh', '-c', 'cmd wifi connect-network jg-wifi open']);
     } catch (e) {
       warn(`attempt ${i + 1} failed for ${instanceId}: ${e}`);
     }
@@ -283,7 +285,7 @@ async function ensureEth0Routing(instanceId, containerId) {
 
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     try {
-      await runtime.exec(containerId, ['su', '-c', script]);
+      await runtime.exec(containerId, ['su', '0', 'sh', '-c', script]);
     } catch (e) {
       warn(`ip rule add failed for ${instanceId} (attempt ${attempt}): ${e}`);
       await new Promise((r) => setTimeout(r, RETRY_DELAY_MS));

@@ -67,7 +67,7 @@ test('applyDeviceProfile: an unknown profile rejects without touching the contai
   assert.equal(execMock.mock.callCount(), 0);
 });
 
-test('applyDeviceProfile: runs the script as root via "su -c", the same pattern as ensureWifiConnected', async (t) => {
+test('applyDeviceProfile: runs the script as root via "su 0 sh -c", the same pattern as ensureWifiConnected', async (t) => {
   let seenArgs = null;
   t.mock.method(runtime, 'exec', async (containerId, cmd) => {
     seenArgs = { containerId, cmd };
@@ -78,14 +78,16 @@ test('applyDeviceProfile: runs the script as root via "su -c", the same pattern 
   assert.equal(applied, 'samsung');
   assert.equal(seenArgs.containerId, 'container-x');
   assert.equal(seenArgs.cmd[0], 'su');
-  assert.equal(seenArgs.cmd[1], '-c');
-  assert.match(seenArgs.cmd[2], /samsung/);
+  assert.equal(seenArgs.cmd[1], '0');
+  assert.equal(seenArgs.cmd[2], 'sh');
+  assert.equal(seenArgs.cmd[3], '-c');
+  assert.match(seenArgs.cmd[4], /samsung/);
 });
 
 test('applyDeviceProfile: without profileKey (or "redroid") it applies the revert script', async (t) => {
   let script = null;
   t.mock.method(runtime, 'exec', async (containerId, cmd) => {
-    script = cmd[2];
+    script = cmd[4];
     return '';
   });
 

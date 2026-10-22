@@ -80,12 +80,21 @@ async function getBridgeIp(containerId) {
   return info.NetworkSettings?.Networks?.bridge?.IPAddress;
 }
 
+// Default exec environment: a bare `docker exec` does NOT inherit the PATH an Android
+// container's own init sets up for its boot (that's internal to Android's own process
+// tree) -- it gets a generic Linux PATH that doesn't include /system/bin or /system/xbin,
+// so even common calls like `su`/`ip`/`getprop` fail with "executable file not found in
+// $PATH" despite the binaries being right there. Found for real running this against a
+// live instance (see docs/ROADMAP.md Phase 3) -- not a hypothetical.
+const ANDROID_EXEC_ENV = ['PATH=/system/bin:/system/xbin:/vendor/bin:/vendor/xbin:/sbin:/bin'];
+
 // Equivalent to `docker exec <containerId> <cmd>` but through dockerode instead
 // of shelling out to the docker CLI. It rejects if the command ends with an exit
 // code != 0, just like the CLI.
 async function exec(containerId, cmd, timeoutMs = 15000) {
   const e = await docker.getContainer(containerId).exec({
     Cmd: cmd,
+    Env: ANDROID_EXEC_ENV,
     AttachStdout: true,
     AttachStderr: true,
   });
