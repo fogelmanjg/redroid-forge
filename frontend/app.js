@@ -90,12 +90,23 @@ async function applyDeviceProfile(instanceId, profileValue) {
 
 // Unlike device profile (which needs the overlay writable, so only while running), Docker's own
 // Update API accepts Memory/CpusetCpus changes regardless of the container's state -- no
-// running-only gate here.
+// running-only gate here. Same 428 + pending manifests -> modal -> retry gate as
+// applyDeviceProfile/createInstance (the backend requires accepting the "cpu-ram" module's
+// contract the first time a limit is actually set, not on every call).
 async function applyResources(instanceId, { memoryMb, cpusetCpus }) {
   const body = {};
   if (memoryMb !== undefined) body.memoryMb = memoryMb;
   if (cpusetCpus !== undefined) body.cpusetCpus = cpusetCpus;
-  await api(`/instances/${instanceId}/resources`, { method: 'POST', body: JSON.stringify(body) });
+  try {
+    await api(`/instances/${instanceId}/resources`, { method: 'POST', body: JSON.stringify(body) });
+  } catch (err) {
+    if (err.status === 428 && err.modules) {
+      const allAccepted = await Contracts.ensureAccepted(err.modules);
+      if (allAccepted) return applyResources(instanceId, { memoryMb, cpusetCpus });
+      return;
+    }
+    throw err;
+  }
 }
 
 // Host core count, for the per-core checkbox grid (see buildResourcesEditRow) -- fetched once
@@ -381,7 +392,7 @@ async function loadInstances({ silent = false } = {}) {
     for (const inst of instances) {
       const tr = document.createElement('tr');
       tr.innerHTML = `
-        <td>${inst.name}${inst.display ? `<span class="instance-meta muted">${inst.display.width}×${inst.display.height} · ${inst.display.dpi} dpi · ${inst.display.fps} fps</span>` : ''}</td>
+        <td>${inst.name}${inst.display ? `<span class="instance-meta muted">${inst.display.width}×${inst.display.height} · ${inst.display.dpi} dpi · ${inst.display.fps} fps${inst.gpuMode ? ` · gpu:${inst.gpuMode}` : ''}</span>` : ''}</td>
         <td>${inst.dockerImage}</td>
         <td class="status-cell"></td>
         <td>${inst.adbPort}</td>
@@ -734,6 +745,8 @@ $('#new-instance-form').addEventListener('submit', async (e) => {
   // when the user actually typed something.
   if (form.memoryMb.value) display.memoryMb = Number(form.memoryMb.value);
   if (form.cpusetCpus.value) display.cpusetCpus = form.cpusetCpus.value;
+  // Empty option = the image's own default, same as never sending it (see instanceParams.parseGpuMode).
+  if (form.gpuMode.value) display.gpuMode = form.gpuMode.value;
   await createInstance(name, imageId, form, modules, display);
 });
 

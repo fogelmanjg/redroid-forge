@@ -69,6 +69,23 @@ function parseResources(body = {}) {
   return out;
 }
 
+// gpuMode override -- same family of boot-cmdline value as display (androidboot.redroid_gpu_mode),
+// not a runtime toggle: changing it on an existing instance needs a real recreate, there is no
+// live-update route for it (unlike resources/device-profile). Omitted = the image's own default
+// (img.gpuMode), the only behavior there was before this existed.
+const GPU_MODES = ['host', 'guest'];
+
+// -> { gpuMode? } -- only set if the request actually asked for a specific one. Throws Error
+// with httpStatus 400 for anything that is not exactly 'host' or 'guest'.
+function parseGpuMode(body = {}) {
+  const raw = body.gpuMode;
+  if (raw === undefined || raw === null || raw === '') return {};
+  if (!GPU_MODES.includes(raw)) {
+    throw httpError(`"gpuMode" must be one of: ${GPU_MODES.join(', ')}`, 400);
+  }
+  return { gpuMode: raw };
+}
+
 module.exports = {
-  parseDisplay, DEFAULTS, LIMITS, parseResources, MEMORY_MB_LIMITS, CPUSET_RE,
+  parseDisplay, DEFAULTS, LIMITS, parseResources, MEMORY_MB_LIMITS, CPUSET_RE, parseGpuMode, GPU_MODES,
 };

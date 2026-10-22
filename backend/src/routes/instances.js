@@ -41,9 +41,21 @@ async function assertModulesReady(img, requested) {
   }
 }
 
-// Strict use (create): the image has to exist in the catalog.
-async function resolveImageAndGate(imageId, requested) {
-  const img = findImage(imageId);
+// Strict use (create): the image has to exist in the catalog. `gpuModeOverride`, if given and
+// different from the image's own default, replaces `img.gpuMode` BEFORE gating -- so every
+// compatibility check that follows (hwenc's compatibleCon.gpuMode among them) is evaluated
+// against what the instance will actually boot with, not the catalog's default it is
+// overriding. Gated itself (cpu-ram/gpu-mode are not in moduleGate.requiredModuleIdsForImage,
+// so moduleGate.check never sees them) via assertStandaloneModuleReady against the ORIGINAL
+// image (the override itself is what is being consented to, so it has to be checked before
+// being applied).
+async function resolveImageAndGate(imageId, requested, gpuModeOverride) {
+  const rawImg = findImage(imageId);
+  let img = rawImg;
+  if (gpuModeOverride && gpuModeOverride !== rawImg.gpuMode) {
+    assertStandaloneModuleReady('gpu-mode', rawImg);
+    img = { ...rawImg, gpuMode: gpuModeOverride };
+  }
   await assertModulesReady(img, requested);
   return img;
 }
@@ -53,11 +65,18 @@ async function resolveImageAndGate(imageId, requested) {
 // creating the instance), it does not block the start -- before this gate,
 // start/restart never depended on the catalog.
 async function revalidateModulesIfImageKnown(instance) {
-  const img = catalog.find((i) => i.id === instance.imageId);
-  if (!img) {
+  const catalogImg = catalog.find((i) => i.id === instance.imageId);
+  if (!catalogImg) {
     console.warn(`[instances] "${instance.imageId}" is no longer in the catalog -- module revalidation is skipped for ${instance.id}`);
     return;
   }
+  // instance.gpuMode (set at creation, see resolveImageAndGate) may differ from the catalog's
+  // own default if it was overridden there -- revalidation has to check every module's
+  // compatibleCon.gpuMode against what this instance actually boots with, not the catalog's
+  // default it chose to override.
+  const img = instance.gpuMode && instance.gpuMode !== catalogImg.gpuMode
+    ? { ...catalogImg, gpuMode: instance.gpuMode }
+    : catalogImg;
   // The optional modules chosen when it was created are revalidated too -- exactly those (an
   // instance that opted out of hwenc stays out). An instance created before the per-instance
   // options has no persisted list: it gets the image's defaults, as it did.
@@ -94,24 +113,24 @@ function sendError(res, e, fallbackStatus = 500) {
   res.status(status).json({ error: e.message, ...(e.modules ? { modules: e.modules } : {}) });
 }
 
-// device-profile is opt-in per request, never hard-required by an image (it is not
-// in moduleGate.requiredModuleIdsForImage because no image requires it) -- that is
-// why it does not go through moduleGate.check (that method only looks at the
-// modules the CHOSEN image requires), it is gated by querying its acceptance
-// directly, just as strict: without a current acceptance of the manifest, nothing
+// Shared by device-profile, cpu-ram and gpu-mode: each is opt-in per request, never hard-
+// required by an image (none of them is in moduleGate.requiredModuleIdsForImage because no
+// image requires them) -- that is why none goes through moduleGate.check (that method only
+// looks at the modules the CHOSEN image requires), they are gated by querying their own
+// acceptance directly, just as strict: without a current acceptance of the manifest, nothing
 // runs.
-function assertDeviceProfileReady(img) {
-  const manifest = moduleManifests.get('device-profile');
-  if (!manifest) throw httpError('The manifest of module "device-profile" does not exist.', 500);
+function assertStandaloneModuleReady(moduleId, img) {
+  const manifest = moduleManifests.get(moduleId);
+  if (!manifest) throw httpError(`The manifest of module "${moduleId}" does not exist.`, 500);
 
   if (img) {
     const reason = moduleManifests.incompatibilityReason(manifest, img);
-    if (reason) throw httpError(`The device profile cannot be applied: ${reason}`, 409);
+    if (reason) throw httpError(`"${manifest.nombre}" cannot be applied: ${reason}`, 409);
   }
 
-  if (!moduleAcceptance.isAccepted('device-profile', manifest.version)) {
+  if (!moduleAcceptance.isAccepted(moduleId, manifest.version)) {
     throw Object.assign(
-      new Error('The contract of module "device-profile" has to be read and accepted before continuing.'),
+      new Error(`The contract of module "${moduleId}" has to be read and accepted before continuing.`),
       { httpStatus: 428, modules: [manifest] },
     );
   }
@@ -125,7 +144,7 @@ function assertDeviceProfileReady(img) {
 // from `deviceProfile` (what the user wants) -- they can disagree while stopped, never once
 // this returns.
 async function applyAndRestartDeviceProfile(instance, img, profileKey) {
-  assertDeviceProfileReady(img);
+  assertStandaloneModuleReady('device-profile', img);
   const appliedKey = await deviceProfile.applyDeviceProfile(instance.containerId, img.androidVersion, profileKey);
   const normalized = appliedKey === deviceProfile.DEFAULT_PROFILE ? null : appliedKey;
   const updated = store.upsert({ ...instance, deviceProfile: normalized, deviceProfileApplied: normalized });
@@ -205,6 +224,7 @@ router.post('/', async (req, res) => {
     const { name, imageId, modules } = req.body;
     const display = instanceParams.parseDisplay(req.body);
     const resources = instanceParams.parseResources(req.body);
+    const gpuModeChoice = instanceParams.parseGpuMode(req.body);
     if (!name || !imageId) throw httpError('name and imageId are required', 400);
     // The same pattern the UI enforces: the name ends up in container and volume names.
     if (typeof name !== 'string' || !/^[a-z0-9][a-z0-9-]{0,39}$/.test(name)) {
@@ -213,8 +233,14 @@ router.post('/', async (req, res) => {
     if (store.readAll().some((i) => i.name === name)) {
       throw httpError(`An instance named "${name}" already exists`, 409);
     }
+    // cpu-ram is opt-in per request too (like device-profile/gpu-mode), checked before create()
+    // even touches Docker -- an instance without a limit never has to accept anything, matching
+    // every other standalone module here.
+    if (resources.memoryMb !== undefined || resources.cpusetCpus !== undefined) {
+      assertStandaloneModuleReady('cpu-ram', findImage(imageId));
+    }
 
-    const img = await resolveImageAndGate(imageId, modules);
+    const img = await resolveImageAndGate(imageId, modules, gpuModeChoice.gpuMode);
     // Which modules this image requires (moduleGate.js) -- it is persisted on the
     // instance (see requiredModuleIdsFor()) so that start/restart do not depend on
     // the image still being in the catalog afterwards.
@@ -282,6 +308,7 @@ router.post('/', async (req, res) => {
       hwEncCapable: !!img.hwEncCapable,
       requiredModuleIds,
       display,
+      gpuMode: img.gpuMode,
       memoryMb: resources.memoryMb || null,
       cpusetCpus: resources.cpusetCpus || null,
       androidId: null,
@@ -389,7 +416,7 @@ router.post('/:id/device-profile', async (req, res) => {
         409,
       );
     }
-    assertDeviceProfileReady(img);
+    assertStandaloneModuleReady('device-profile', img);
     const normalized = (profile === undefined || profile === deviceProfile.DEFAULT_PROFILE) ? null : profile;
 
     // Stopped: nothing to exec against (no running process to reach), and nothing running to
@@ -436,6 +463,10 @@ router.post('/:id/resources', async (req, res) => {
   if (!instance) return res.status(404).json({ error: 'Instancia no encontrada' });
   try {
     const resources = instanceParams.parseResources(req.body);
+    if (resources.memoryMb !== undefined || resources.cpusetCpus !== undefined) {
+      const img = catalog.find((i) => i.id === instance.imageId);
+      assertStandaloneModuleReady('cpu-ram', img);
+    }
     await runtime.updateResources(instance.containerId, resources);
     const updated = store.upsert({
       ...instance,

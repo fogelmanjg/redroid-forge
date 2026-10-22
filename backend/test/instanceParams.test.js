@@ -3,7 +3,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { parseResources } = require('../src/lib/instanceParams');
+const { parseResources, parseGpuMode } = require('../src/lib/instanceParams');
 
 test('parseResources: empty body -> no limit at all, same behavior as before this existed', () => {
   assert.deepEqual(parseResources({}), {});
@@ -35,4 +35,21 @@ test('parseResources: both given at once', () => {
     parseResources({ memoryMb: 4096, cpusetCpus: '0,1,8,9' }),
     { memoryMb: 4096, cpusetCpus: '0,1,8,9' },
   );
+});
+
+test('parseGpuMode: omitted/empty -> {} (the image\'s own default applies, same as before this existed)', () => {
+  assert.deepEqual(parseGpuMode({}), {});
+  assert.deepEqual(parseGpuMode(), {});
+  assert.deepEqual(parseGpuMode({ gpuMode: '' }), {});
+});
+
+test('parseGpuMode: accepts exactly "host" or "guest"', () => {
+  assert.deepEqual(parseGpuMode({ gpuMode: 'host' }), { gpuMode: 'host' });
+  assert.deepEqual(parseGpuMode({ gpuMode: 'guest' }), { gpuMode: 'guest' });
+});
+
+test('parseGpuMode: rejects anything else (including a boot-cmdline injection attempt)', () => {
+  assert.throws(() => parseGpuMode({ gpuMode: 'soft' }), /gpuMode/);
+  assert.throws(() => parseGpuMode({ gpuMode: 'host androidboot.x=1' }), /gpuMode/);
+  assert.throws(() => parseGpuMode({ gpuMode: 5 }), /gpuMode/);
 });

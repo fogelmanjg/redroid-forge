@@ -99,6 +99,16 @@ gunzip -c image.tar.gz | docker load</pre>
         <label><span data-i18n="new.memoryMb">Memory (MB)</span> <input type="number" name="memoryMb" placeholder="4096" min="256" max="65536" step="256" /></label>
         <label><span data-i18n="new.cpusetCpus">Cpuset</span> <input type="text" name="cpusetCpus" placeholder="0,1,8,9" pattern="[0-9,-]*" /></label>
       </fieldset>
+      <fieldset class="display-fields">
+        <legend data-i18n="new.gpuModeLegend">GPU mode (optional -- fixed for the instance's lifetime)</legend>
+        <label><span data-i18n="new.gpuMode">Mode</span>
+          <select name="gpuMode">
+            <option value="" data-i18n="new.gpuModeImageDefault">Image default</option>
+            <option value="host">host</option>
+            <option value="guest">guest</option>
+          </select>
+        </label>
+      </fieldset>
       <label class="contract-checkbox"><input type="checkbox" name="hwenc" id="chk-hwenc" />
         <span data-i18n="new.hwenc">Hardware video acceleration (VA-API)</span></label>
       <p id="hwenc-status" class="muted" hidden></p>
