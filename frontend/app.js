@@ -272,11 +272,23 @@ function buildResourcesEditRow(inst, allInstances) {
   ramApplyBtn.className = 'secondary';
   ramApplyBtn.textContent = t('instances.resources.apply');
 
+  // Lowering a RUNNING container's memory.max means the kernel has to reclaim pages the
+  // instance is already using right now to get under the new limit -- confirmed for real
+  // against jg-dashboard (user tested it directly): it also just calls Docker's live update
+  // for a lower value, no separate recreate path despite its own UI text -- and in practice
+  // it does not take effect while running (the call is wrapped in try/catch there and the
+  // failure is only logged, never surfaced, which from the UI looks exactly like "no me deja
+  // bajarla"). So: block it the same way, but say why, and point at the real fix -- stop the
+  // instance (then raising OR lowering both just become the next start()'s container creation,
+  // no live-update risk at all).
+  function isLowering(v) {
+    return !!inst.memoryMb && v > 0 && v < inst.memoryMb;
+  }
   function refreshRamState() {
     const v = Number(ramInput.value);
-    const tooLow = !!inst.memoryMb && v > 0 && v <= inst.memoryMb;
-    ramWarn.innerHTML = tooLow ? `<div class="resources-warn">${t('instances.resources.ramLowerNotLive')}</div>` : '';
-    ramApplyBtn.disabled = !v || tooLow;
+    const blocked = isLowering(v) && inst.status === 'running';
+    ramWarn.innerHTML = blocked ? `<div class="resources-warn">${t('instances.resources.ramLowerBlocked')}</div>` : '';
+    ramApplyBtn.disabled = !v || blocked;
   }
   ramInput.addEventListener('input', refreshRamState);
   refreshRamState();

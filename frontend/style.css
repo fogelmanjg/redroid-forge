@@ -64,6 +64,11 @@ button {
 }
 
 button.secondary { background: transparent; color: var(--fg); }
+/* A disabled transparent-background button is hard to tell apart from a non-interactive
+   label -- without this, it can look like it vanished rather than "greyed out" (found for
+   real with the resources panel's Apply button -- it was only relying on each browser's own
+   default, which isn't consistent and isn't especially visible against var(--border)). */
+button:disabled { opacity: 0.45; cursor: not-allowed; }
 
 table { width: 100%; border-collapse: collapse; }
 th, td { text-align: left; padding: 0.5rem; border-bottom: 1px solid var(--border); font-size: 0.9rem; }
