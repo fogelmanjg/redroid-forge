@@ -777,10 +777,13 @@ loadHostCoreCount();
 loadInstances();
 
 // The state of an instance changes by itself (it boots, it crashes, someone uses adb/docker): refresh
-// every few seconds while the Instances tab is the one on screen. It does not run while a dialog is open
-// (the user is typing) nor when the browser tab is hidden.
+// every few seconds while the Instances tab is the one on screen. It does not run while a dialog is
+// open, while a resources edit panel is open (same reasoning -- it rebuilds the whole table from
+// the server's last-known values, which would silently wipe out whatever the user already typed/
+// checked there before they got to click Apply; found for real, 22/10/2026) nor when the browser
+// tab is hidden.
 setInterval(() => {
   const onInstances = $('.tab-btn.active')?.dataset.tab === 'instances';
   const dialogOpen = $$('dialog').some((d) => d.open);
-  if (onInstances && !dialogOpen && !document.hidden) loadInstances({ silent: true });
+  if (onInstances && !dialogOpen && openResourcesId === null && !document.hidden) loadInstances({ silent: true });
 }, 4000);
