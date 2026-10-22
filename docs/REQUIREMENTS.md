@@ -270,11 +270,15 @@ simpler scripts be written on top (take a screenshot, find this image, tap there
 reimplementing exec calls and retry loops from scratch. Per the user: neither approach excludes the
 other (someone can keep writing raw `exec()` modules); and the catalog of engines itself should be
 user-extensible too — SikuliX would just be the first one someone builds, not the only one that can
-ever exist. **Open question, deliberately left unresolved:** when a leaf module depends on an engine,
-does that dependency have to be declared in the leaf's own manifest (so the engine enters the same
-consent contract the user already sees — "this module also pulls in SikuliX, which does X") or is a
-plain code-level `require()` of the engine's module folder enough, with the engine staying invisible to
-the contract? Revisit when there is a second real case to design against, not in the abstract.
+ever exist. **Decided (22/10/2026): a leaf module's dependency on an engine MUST be declared in its own
+manifest, so the engine enters the same consent contract the user already sees** ("this module also
+pulls in SikuliX, which does X") — never a plain code-level `require()` that leaves the engine invisible
+to the contract. Explicit reasoning from the user: it is preferable to bore the user with one more
+thing to accept than to run something potentially dangerous without them having agreed to the real risk
+— especially for something like SikuliX, which, well implemented, can do real damage (full input/screen
+control) with no limit on what it is allowed to touch. The exact mechanism (how a manifest declares
+"dependeDe: [engine-id]" and how the runner/gate resolves and shows it) is still not designed — only the
+policy is decided. Revisit the mechanism when there is a second real case to design against.
 
 ## 6. License policy and third-party content
 
