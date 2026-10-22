@@ -151,3 +151,26 @@ dialog form { display: flex; flex-direction: column; gap: 0.8rem; min-width: 280
 
 header nav { flex: 1; }
 #btn-lang { min-width: 2.6rem; }
+
+/* CPU/RAM resources: chips in the instances table + the expandable edit panel they open
+   (same idea as jg-dashboard's redroid panel: per-core checkboxes, not a free-text cpuset,
+   plus live conflict warnings against other instances). */
+.resource-chip {
+  display: inline-block;
+  font-size: 0.8rem;
+  font-family: monospace;
+  padding: 0.1rem 0.4rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  cursor: pointer;
+  margin: 0.1rem 0;
+}
+.resource-chip:hover { border-color: var(--accent); }
+tr.edit-row > td { background: rgba(58, 109, 240, 0.06); padding: 0.8rem 1rem; }
+.resources-edit-panel { display: flex; flex-direction: column; gap: 0.4rem; max-width: 40rem; }
+.resources-edit-header { font-weight: 600; font-size: 0.85rem; opacity: 0.85; margin-top: 0.4rem; }
+.resources-edit-header:first-child { margin-top: 0; }
+.resources-cpu-grid { display: flex; flex-wrap: wrap; gap: 0.3rem 0.6rem; }
+.resources-core-check { display: flex; align-items: center; gap: 0.2rem; font-family: monospace; font-size: 0.85rem; }
+.resources-warn { font-size: 0.8rem; opacity: 0.85; }
+.resources-warn-error { color: var(--fail); opacity: 1; }

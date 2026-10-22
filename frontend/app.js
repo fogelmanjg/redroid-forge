@@ -98,54 +98,213 @@ async function applyResources(instanceId, { memoryMb, cpusetCpus }) {
   await api(`/instances/${instanceId}/resources`, { method: 'POST', body: JSON.stringify(body) });
 }
 
+// Host core count, for the per-core checkbox grid (see buildResourcesEditRow) -- fetched once
+// at startup (loadHostCoreCount, called near the bottom of this file), not on every table
+// refresh. Falls back to 16 (this host's real count) if Doctor could not be reached yet.
+let hostCoreCount = null;
+async function loadHostCoreCount() {
+  try {
+    const checks = await api('/doctor');
+    const cpu = checks.find((c) => c.id === 'cpu-count');
+    hostCoreCount = cpu && typeof cpu.cores === 'number' ? cpu.cores : null;
+  } catch { hostCoreCount = null; }
+}
+
+// Which instance's resources panel is open, like jg-dashboard's affinityId()/rdRamId()
+// signals -- one at a time, both CPU and RAM together (simpler than its two separate toggles,
+// same underlying idea). Re-rendered via the normal loadInstances() cycle, not a separate
+// DOM-patching path -- consistent with how this file already rebuilds the whole tbody on every
+// refresh.
+let openResourcesId = null;
+
+// "0,1,8,9" or "0-3" (Docker's own cpuset syntax, see instanceParams.js) -> Set of core
+// numbers, for the checkbox grid and conflict detection below.
+function parseCoreSet(str) {
+  const set = new Set();
+  if (!str) return set;
+  for (const part of str.split(',')) {
+    const range = part.match(/^(\d+)-(\d+)$/);
+    if (range) {
+      for (let i = Number(range[1]); i <= Number(range[2]); i++) set.add(i);
+    } else if (/^\d+$/.test(part)) {
+      set.add(Number(part));
+    }
+  }
+  return set;
+}
+function coreSetToCpuset(set) {
+  return Array.from(set).sort((a, b) => a - b).join(',');
+}
+
 function buildResourcesCell(inst) {
   const wrap = document.createElement('div');
-  const label = document.createElement('span');
-  label.className = 'muted';
-  label.textContent = `${inst.memoryMb ? `${inst.memoryMb}MB` : t('instances.resources.noLimit')} / ${inst.cpusetCpus || t('instances.resources.noLimit')}`;
-  wrap.appendChild(label);
+  const mk = (text, hint) => {
+    const chip = document.createElement('span');
+    chip.className = 'resource-chip';
+    chip.textContent = text;
+    chip.title = hint;
+    chip.addEventListener('click', () => {
+      openResourcesId = openResourcesId === inst.id ? null : inst.id;
+      loadInstances({ silent: true });
+    });
+    return chip;
+  };
+  wrap.appendChild(mk(`cpu: ${inst.cpusetCpus || t('instances.resources.noLimit')}`, t('instances.resources.changeAffinity')));
   wrap.appendChild(document.createElement('br'));
+  wrap.appendChild(mk(`ram: ${inst.memoryMb ? `${inst.memoryMb}MB` : t('instances.resources.noLimit')}`, t('instances.resources.changeRam')));
+  return wrap;
+}
 
-  const memInput = document.createElement('input');
-  memInput.type = 'number';
-  memInput.min = '128';
-  memInput.max = '65536';
-  memInput.placeholder = t('new.memoryMb');
-  memInput.style.width = '5.5em';
-  memInput.value = inst.memoryMb || '';
+// The expandable panel a chip click opens, spanning the full table width -- same idea as
+// jg-dashboard's "edit-row" (an inline panel in the table flow, not a modal). `allInstances`
+// is only used to compute cpuset conflicts against the OTHER rows already loaded, nothing of
+// its own is fetched here.
+function buildResourcesEditRow(inst, allInstances) {
+  const tr = document.createElement('tr');
+  tr.className = 'edit-row';
+  const td = document.createElement('td');
+  td.colSpan = 8;
+  const panel = document.createElement('div');
+  panel.className = 'resources-edit-panel';
 
-  const cpuInput = document.createElement('input');
-  cpuInput.type = 'text';
-  cpuInput.pattern = '[0-9,-]*';
-  cpuInput.placeholder = t('new.cpusetCpus');
-  cpuInput.style.width = '5.5em';
-  cpuInput.value = inst.cpusetCpus || '';
+  // --- CPU affinity: a checkbox per core, never free text a user has to get the syntax of
+  // right by hand -- and a live warning if the selection overlaps a core another instance
+  // already has, the same conflict check jg-dashboard's panel does.
+  const cpuHeader = document.createElement('div');
+  cpuHeader.className = 'resources-edit-header';
+  cpuHeader.textContent = t('instances.resources.cpuHeader');
+  panel.appendChild(cpuHeader);
 
-  const btn = document.createElement('button');
-  btn.type = 'button';
-  btn.className = 'secondary';
-  btn.textContent = t('instances.resources.apply');
-  btn.addEventListener('click', async () => {
-    btn.disabled = true;
+  const selected = parseCoreSet(inst.cpusetCpus);
+  const othersUsing = new Map(); // core number -> [instance names using it]
+  for (const other of allInstances) {
+    if (other.id === inst.id || !other.cpusetCpus) continue;
+    for (const core of parseCoreSet(other.cpusetCpus)) {
+      if (!othersUsing.has(core)) othersUsing.set(core, []);
+      othersUsing.get(core).push(other.name);
+    }
+  }
+
+  const grid = document.createElement('div');
+  grid.className = 'resources-cpu-grid';
+  const warnBox = document.createElement('div');
+  function renderWarnings() {
+    warnBox.innerHTML = '';
+    if (selected.size === 0) {
+      const w = document.createElement('div');
+      w.className = 'resources-warn resources-warn-error';
+      w.textContent = t('instances.resources.pickAtLeastOne');
+      warnBox.appendChild(w);
+    }
+    const coresByConflictingName = new Map();
+    for (const core of selected) {
+      for (const name of (othersUsing.get(core) || [])) {
+        if (!coresByConflictingName.has(name)) coresByConflictingName.set(name, []);
+        coresByConflictingName.get(name).push(core);
+      }
+    }
+    for (const [name, cores] of coresByConflictingName) {
+      const w = document.createElement('div');
+      w.className = 'resources-warn resources-warn-error';
+      w.textContent = t('instances.resources.conflict', { cores: cores.join(', '), name });
+      warnBox.appendChild(w);
+    }
+  }
+  for (let i = 0; i < (hostCoreCount || 16); i++) {
+    const label = document.createElement('label');
+    label.className = 'resources-core-check';
+    const chk = document.createElement('input');
+    chk.type = 'checkbox';
+    chk.checked = selected.has(i);
+    chk.addEventListener('change', () => {
+      if (chk.checked) selected.add(i); else selected.delete(i);
+      renderWarnings();
+    });
+    label.appendChild(chk);
+    label.appendChild(document.createTextNode(String(i)));
+    grid.appendChild(label);
+  }
+  panel.appendChild(grid);
+  renderWarnings();
+  panel.appendChild(warnBox);
+
+  const cpuApplyBtn = document.createElement('button');
+  cpuApplyBtn.type = 'button';
+  cpuApplyBtn.className = 'secondary';
+  cpuApplyBtn.textContent = t('instances.resources.apply');
+  cpuApplyBtn.addEventListener('click', async () => {
+    if (selected.size === 0) return;
+    cpuApplyBtn.disabled = true;
     try {
-      // Empty field = leave that one as it is (applyResources/the backend route only touch the
-      // keys given) -- this is NOT a way to clear an already-set limit, same as the backend.
-      const payload = {};
-      if (memInput.value) payload.memoryMb = Number(memInput.value);
-      if (cpuInput.value) payload.cpusetCpus = cpuInput.value;
-      await applyResources(inst.id, payload);
+      await applyResources(inst.id, { cpusetCpus: coreSetToCpuset(selected) });
+      openResourcesId = null;
     } catch (e) {
       alert(e.message);
     } finally {
-      btn.disabled = false;
+      cpuApplyBtn.disabled = false;
       await loadInstances({ silent: true });
     }
   });
+  panel.appendChild(cpuApplyBtn);
 
-  wrap.appendChild(memInput);
-  wrap.appendChild(cpuInput);
-  wrap.appendChild(btn);
-  return wrap;
+  // --- RAM: a plain MB input, but it can only be RAISED live (same rule jg-dashboard already
+  // learned: Docker's Update API lowering a running cgroup's limit below what it may already be
+  // using is not something to do blind from here -- lowering needs a real recreate instead).
+  const ramHeader = document.createElement('div');
+  ramHeader.className = 'resources-edit-header';
+  ramHeader.textContent = t('instances.resources.ramHeader');
+  panel.appendChild(ramHeader);
+
+  const ramInput = document.createElement('input');
+  ramInput.type = 'number';
+  ramInput.min = '128';
+  ramInput.max = '65536';
+  ramInput.placeholder = 'MB';
+  ramInput.value = inst.memoryMb || '';
+  panel.appendChild(ramInput);
+
+  const ramWarn = document.createElement('div');
+  panel.appendChild(ramWarn);
+
+  const ramApplyBtn = document.createElement('button');
+  ramApplyBtn.type = 'button';
+  ramApplyBtn.className = 'secondary';
+  ramApplyBtn.textContent = t('instances.resources.apply');
+
+  function refreshRamState() {
+    const v = Number(ramInput.value);
+    const tooLow = !!inst.memoryMb && v > 0 && v <= inst.memoryMb;
+    ramWarn.innerHTML = tooLow ? `<div class="resources-warn">${t('instances.resources.ramLowerNotLive')}</div>` : '';
+    ramApplyBtn.disabled = !v || tooLow;
+  }
+  ramInput.addEventListener('input', refreshRamState);
+  refreshRamState();
+
+  ramApplyBtn.addEventListener('click', async () => {
+    ramApplyBtn.disabled = true;
+    try {
+      await applyResources(inst.id, { memoryMb: Number(ramInput.value) });
+      openResourcesId = null;
+    } catch (e) {
+      alert(e.message);
+    } finally {
+      await loadInstances({ silent: true });
+    }
+  });
+  panel.appendChild(ramApplyBtn);
+
+  const cancelBtn = document.createElement('button');
+  cancelBtn.type = 'button';
+  cancelBtn.textContent = t('common.cancel');
+  cancelBtn.addEventListener('click', () => {
+    openResourcesId = null;
+    loadInstances({ silent: true });
+  });
+  panel.appendChild(cancelBtn);
+
+  td.appendChild(panel);
+  tr.appendChild(td);
+  return tr;
 }
 
 // The backend only allows applying a profile while the instance is running (it needs the overlay
@@ -284,6 +443,7 @@ async function loadInstances({ silent = false } = {}) {
         }
       }
       rows.appendChild(tr);
+      if (openResourcesId === inst.id) rows.appendChild(buildResourcesEditRow(inst, instances));
     }
     tbody.replaceChildren(rows);
   } catch (e) {
@@ -612,6 +772,7 @@ document.addEventListener('langchange', () => {
 I18n.apply();
 syncLangButton();
 
+loadHostCoreCount();
 loadInstances();
 
 // The state of an instance changes by itself (it boots, it crashes, someone uses adb/docker): refresh

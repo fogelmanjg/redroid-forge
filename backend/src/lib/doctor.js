@@ -1,4 +1,5 @@
 const fs = require('fs');
+const os = require('os');
 const binder = require('./binder');
 const { execFile } = require('child_process');
 const { promisify } = require('util');
@@ -22,6 +23,15 @@ async function checkDockerSocket() {
       fix: 'Confirm that /var/run/docker.sock is mounted in the redroid-forge container (see docker-compose.yml) and that the Docker daemon is running on the host.',
     };
   }
+}
+
+// Purely informational -- the frontend reads this to build the per-core checkbox grid for
+// cpusetCpus (same pattern jg-dashboard's redroid UI already uses) instead of a free-text
+// field nobody wants to type "0,1,8,9" into by hand. `pid: host` in docker-compose.yml means
+// os.cpus() here already sees the real host core count, not a container-limited view.
+function checkCpuCount() {
+  const n = os.cpus().length;
+  return { status: 'ok', detail: `${n} logical cores (pid: host).`, cores: n };
 }
 
 function checkBinderfs() {
@@ -366,6 +376,7 @@ async function runAll() {
 
   const checks = [
     { id: 'docker-socket', label: 'Docker socket', ...dockerSocket },
+    { id: 'cpu-count', label: 'Host CPU cores', ...checkCpuCount() },
     { id: 'binderfs', label: 'binderfs mounted', ...checkBinderfs() },
     { id: 'loop-devices', label: 'Loop devices', ...checkLoopDevices() },
     { id: 'ext4-module', label: 'ext4 module (APEX mounting through loop)', ...checkExt4Module() },
