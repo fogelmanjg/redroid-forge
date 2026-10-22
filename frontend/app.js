@@ -347,6 +347,32 @@ async function refreshHwencOption() {
 }
 $('#image-select').addEventListener('change', refreshHwencOption);
 
+// User modules (stage 7, see moduleRunner.js/moduleScheduler.js) are a separate category from the
+// generic per-instance capabilities above (hwenc/gapps/arm) -- they automate ONE specific
+// game/situation (CIFI today), not a capability any instance might want, so they get their own
+// fieldset instead of being flat-listed next to the others (explicit feedback from the user,
+// 22/10/2026). Discovered dynamically from the real module catalog (filtered by etapa including 7)
+// instead of hardcoding "cifi" by name, so a future second one shows up here with no frontend change.
+async function loadUserModules() {
+  const box = $('#user-modules-list');
+  box.textContent = t('common.loading');
+  try {
+    const modules = (await api('/modules')).filter((m) => Array.isArray(m.etapa) && m.etapa.includes(7));
+    if (modules.length === 0) {
+      box.innerHTML = `<span class="muted">${t('new.noUserModules')}</span>`;
+      return;
+    }
+    box.innerHTML = modules.map((m) => `
+      <label class="contract-checkbox">
+        <input type="checkbox" class="user-module-chk" data-id="${m.id}" />
+        <span>${loc(m, 'nombre')}</span>
+      </label>
+    `).join('');
+  } catch (e) {
+    box.innerHTML = `<span class="fail-text">${t('common.error', { msg: e.message })}</span>`;
+  }
+}
+
 $('#btn-new-instance').addEventListener('click', async () => {
   const select = $('#image-select');
   select.innerHTML = `<option>${t('common.loading')}</option>`;
@@ -365,10 +391,10 @@ $('#btn-new-instance').addEventListener('click', async () => {
   }
   $('#chk-gapps').checked = false;
   $('#chk-arm').checked = false;
-  $('#chk-cifi').checked = false;
   resetGappsStatus();
   dialog.showModal();
   refreshHwencOption();
+  loadUserModules();
 });
 $('#btn-cancel-new-instance').addEventListener('click', () => dialog.close());
 
@@ -410,7 +436,7 @@ $('#new-instance-form').addEventListener('submit', async (e) => {
   if (form.hwenc.checked) modules.push('hwenc');
   if (form.gapps.checked) modules.push('gapps');
   if (form.arm.checked) modules.push('arm-translation');
-  if (form.cifi.checked) modules.push('cifi');
+  for (const chk of $$('.user-module-chk')) if (chk.checked) modules.push(chk.dataset.id);
   const display = {
     width: Number(form.width.value), height: Number(form.height.value), dpi: Number(form.dpi.value), fps: Number(form.fps.value),
   };

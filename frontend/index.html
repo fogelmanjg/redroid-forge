@@ -94,8 +94,10 @@ gunzip -c image.tar.gz | docker load</pre>
       <label class="contract-checkbox"><input type="checkbox" name="arm" id="chk-arm" />
         <span data-i18n="new.arm">ARM translation (arm64 apps and games)</span></label>
       <p id="arm-status" class="muted" hidden></p>
-      <label class="contract-checkbox"><input type="checkbox" name="cifi" id="chk-cifi" />
-        <span data-i18n="new.cifi">CIFI auto-reopen watchdog</span></label>
+      <fieldset class="user-modules-fields">
+        <legend data-i18n="new.userModules">User modules (per-game/situation automations)</legend>
+        <div id="user-modules-list" class="muted" data-i18n="common.loading">Loading...</div>
+      </fieldset>
       <div class="dialog-actions">
         <button type="button" id="btn-cancel-new-instance" data-i18n="common.cancel">Cancel</button>
         <button type="submit" data-i18n="new.create">Create</button>
