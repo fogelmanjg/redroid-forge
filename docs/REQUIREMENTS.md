@@ -242,9 +242,18 @@ kind of thing that should be declared as a module instead of living as ad hoc in
 - Being the user's own code (not the project's), it still goes through the consent contract — it runs
   under their responsibility.
 
-**[PENDING]** exact convention: which environment variables/arguments the script receives, how the
-scheduling is registered, whether it runs inside the instance's container or outside, in the backend
-process. The CIFI watchdog is the pilot case to validate this in practice when porting it.
+**Designed and implemented (22/10/2026), CIFI ported as the pilot case — see
+[`ARCHITECTURE.md`](ARCHITECTURE.md)'s "Phase 5: stage 7, the periodic watchdog" for the full
+convention.** In short: a manifest declaring `"etapa": [7]` plus a `schedule.intervalMs` gets its
+`entry`'s `runTick(instanceId, containerId)` called on that interval by `moduleScheduler.js`, for as
+long as the instance is running — driven from inside the backend process via `dockerRuntime.exec()`
+(dockerode), never a real `adb`/cron process outside it (sidesteps the exact class of bug the original
+script's own top comment documents: an `adb` daemon inheriting a lock file descriptor and never letting
+go). Pause/resume/status are real API endpoints (`GET`/`POST /api/instances/:id/watchdogs`), with the
+pause flag persisted on the instance record — it survives a backend restart, unlike the original's
+touch-files. **Validated with unit tests only (mocked timers/exec), not yet against a real Docker
+host running the actual CIFI game** — same caveat the Phase 5 lifecycle runner (stages 3-6) already
+had and was accepted with; do that validation before fully trusting this in production.
 
 **References from other projects, for when this is picked up again (no decision taken yet):** Home
 Assistant Add-ons (manifest + typed options schema + explicit declaration of capabilities/permissions,

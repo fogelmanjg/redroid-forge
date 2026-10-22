@@ -41,13 +41,14 @@ const imgHwEncCapable = {
   id: 'fixture-15-hwenc', androidVersion: 15, gpuMode: 'host', hasGapps: false, hasMagisk: false, needsHwsimWifi: false, hwEncCapable: true,
 };
 
-test('moduleManifests: the catalog has the 6 modules of section 5 of REQUIREMENTS.md + hwenc + arm-translation', () => {
-  // hwenc (Phase 5) lives in its own folder (backend/src/modules/hwenc/
-  // manifest.json), not in backend/src/modules/manifests/ like the other
-  // six -- this test also covers that moduleManifests.loadAll() discovers
-  // both sources (see the comment there).
+test('moduleManifests: the catalog has the 6 modules of section 5 of REQUIREMENTS.md + hwenc + arm-translation + cifi', () => {
+  // hwenc/arm-translation/cifi (Phase 5) each live in their own folder
+  // (backend/src/modules/<id>/manifest.json), not in
+  // backend/src/modules/manifests/ like the other six -- this test also
+  // covers that moduleManifests.loadAll() discovers both sources (see the
+  // comment there).
   const ids = manifests.list().map((m) => m.id).sort();
-  assert.deepEqual(ids, ['arm-translation', 'cpu-ram', 'device-profile', 'gapps', 'gpu-mode', 'hwenc', 'magisk', 'redroid-gralloc-fix', 'wifi-falso']);
+  assert.deepEqual(ids, ['arm-translation', 'cifi', 'cpu-ram', 'device-profile', 'gapps', 'gpu-mode', 'hwenc', 'magisk', 'redroid-gralloc-fix', 'wifi-falso']);
 });
 
 test('moduleManifests: hwenc is discovered from its own folder, with etapa/entry', () => {
@@ -212,3 +213,23 @@ test('moduleGate.check: an image without modules with hostGpuVendor never calls 
   await moduleGate.check(imgWithoutModules);
   assert.equal(spy.mock.calls.length, 0);
 }));
+
+test('moduleManifests.validateManifest: stage 7 requires a valid "schedule.intervalMs"', () => {
+  const base = {
+    id: 'fx', nombre: 'Fixture', descripcion: 'd', esTerceroNoLibre: false,
+    queToca: ['x'], compatibleCon: { androidVersion: [15], gpuMode: ['host'] }, version: 1,
+  };
+  assert.throws(
+    () => manifests.validateManifest({ ...base, etapa: [7] }, 'fixture'),
+    /schedule/,
+  );
+  assert.throws(
+    () => manifests.validateManifest({ ...base, etapa: [7], schedule: { intervalMs: 0 } }, 'fixture'),
+    /intervalMs/,
+  );
+  assert.doesNotThrow(
+    () => manifests.validateManifest({ ...base, etapa: [7], schedule: { intervalMs: 900_000 } }, 'fixture'),
+  );
+  // Stage 3-6 modules are unaffected -- no schedule required when 7 isn't declared.
+  assert.doesNotThrow(() => manifests.validateManifest({ ...base, etapa: [4] }, 'fixture'));
+});

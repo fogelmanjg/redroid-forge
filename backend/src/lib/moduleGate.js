@@ -29,7 +29,7 @@ function defaultModuleIdsForImage(img) {
 // {"modules": ["gapps", "hwenc", "arm-translation"]}). Anything else in that list is rejected: the request body must
 // not be able to switch on modules that are not meant to be optional (fake WiFi depends on the
 // image, device-profile has its own flow).
-const OPTIONAL_PER_INSTANCE = ['gapps', 'hwenc', 'arm-translation'];
+const OPTIONAL_PER_INSTANCE = ['gapps', 'hwenc', 'arm-translation', 'cifi'];
 
 // The modules of an instance: what the image is bound to, plus the optional ones.
 //  - `requested` omitted (undefined/null): the image's defaults (hwenc if it supports it).

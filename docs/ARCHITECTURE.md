@@ -159,10 +159,63 @@ there is a trace of why):**
 
 **[PENDING]** none of this runner has been validated yet against a real host with Docker/redroid
 running — there is only unit-test coverage with fixtures and mocks (`backend/test/moduleRunner.test.js`).
-The user-defined module pilots (CIFI, fake-WiFi watchdog — section 5 of `REQUIREMENTS.md`,
-"Extensibility: user-defined modules") are a *different* mechanism (periodic scheduling +
-pause/resume/status) and are still undesigned — this runner solves a module's creation/startup
-lifecycle, not continuous scheduling.
+
+## Phase 5: stage 7, the periodic watchdog (22/10/2026)
+
+Stages 3-6 above cover a module's creation/startup lifecycle — each hook runs once, at a specific
+point, for a specific transition. The user-defined module pilots (section 5 of `REQUIREMENTS.md`,
+"Extensibility: user-defined modules") needed something structurally different: code that keeps
+running on its own schedule for as long as the instance is alive, with pause/resume/status — the
+real reference case being the CIFI watchdog, previously a cron job + `flock` on the host, hardcoded
+to 2 production instances, completely outside the app.
+
+**Convention:** a manifest declaring `"etapa": [7]` also declares `"schedule": { "intervalMs": N }`
+(enforced by `moduleManifests.validateManifest` — stage 7 is the only stage that needs this, since
+it has no sensible lifecycle point to default to) and its `entry` exports `runTick(instanceId,
+containerId)`, the same `(instanceId, containerId)` shape as stage 6's `ensureRuntimeReady`.
+
+**Where the scheduling itself lives:** `backend/src/lib/moduleScheduler.js`, a thin layer ON TOP of
+`moduleRunner.js` (which only knows "how to call one module's one stage once" — `moduleRunner.watchdogModules()`/`runTick()`) — the scheduler owns *when*: one `setInterval` per
+`(instanceId, moduleId)` pair, in a module-level `Map`, started right after
+`scheduleRuntimeFixups` (stage 6) on create/start/restart, and cleared on stop/delete (same
+reasoning as `releaseHwsimPhys` in `jg-dashboard` — nothing should still be touching a container
+that is about to go away). `start()` is idempotent: calling it again for an instance+module that
+already has a timer is a no-op, not a second timer — matters because create/start/restart can all
+call it, sometimes in quick succession.
+
+**Pause/resume, and why it is NOT a touch-file like `cifi-watchdogctl.sh`:** the pause flag is
+persisted on the instance record itself (`store.js`, a new `watchdogPaused: { [moduleId]: boolean }`
+field) instead of files on disk — it needs to survive a backend restart the same way
+`deviceProfile`/`requiredModuleIds` already do, and a paused instance's watchdog must stay paused
+across a redeploy, not just across the scheduler's own in-memory lifetime. A paused tick still
+*fires* (the `setInterval` keeps running) but is skipped before calling the module's `runTick` —
+simpler than tearing down and recreating the timer on every pause/resume, and the module never has
+to know it was skipped.
+
+**Why talk to the container via `dockerRuntime.exec()` and not real `adb`:** the original
+`cifi-watchdog.sh`'s entire first comment block documents a real incident (`adb start-server`
+forking a daemon that inherited the script's own `flock` file descriptor and never released it,
+after a 2026-08-18 reboot) caused by spawning a real `adb` process from a cron job. Going through
+dockerode's exec API instead (the same one every other module already uses) means there is no adb
+server to manage, and that whole bug class cannot recur.
+
+**CIFI ported as the pilot (`backend/src/modules/cifi/`):** the original script's exact logic
+(percent-of-screen tap positions, retry counts, sleep durations) ported as-is — `watchdog.js`
+exports `runTick` as a thin wrapper over an injectable `runTickWith(instanceId, containerId, {
+exec, sleep })`, the same "injectable dependency" pattern `androidExec.js` already used, so the
+multi-minute recovery path (faithful to the original's timing) can be tested instantly instead of
+making the test suite actually wait on it.
+
+**[PENDING]** validated with unit tests only (`backend/test/moduleScheduler.test.js`,
+`backend/test/cifiWatchdog.test.js` — mocked timers and `exec`, no real Docker/redroid, no real
+CIFI game) — the same caveat stages 3-6 already carried above, now also true for stage 7. Not yet
+wired to a real catalog image (CIFI would need to be requested via `modules: ["cifi"]` the same way
+`gapps`/`hwenc`/`arm-translation` are — it was added to `moduleGate.js`'s `OPTIONAL_PER_INSTANCE`,
+but no end-to-end run against a live instance with the real game installed has happened). The
+*second* pilot mentioned in `ROADMAP.md` (the persistent fake-WiFi reconnection watchdog, today
+hardcoded in `jg-dashboard`'s `wifiWatchdogs`/`startWifiWatchdog`) has not been ported yet either —
+it is a good next real exercise of this same convention, since it already exists and is already
+proven in production, just in the old per-project way.
 
 ## Found on 28/09: the AOSP tree itself had GApps mixed in
 

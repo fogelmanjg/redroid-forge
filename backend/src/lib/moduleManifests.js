@@ -42,6 +42,18 @@ function validateManifest(m, sourceLabel) {
     errors.push('"version" must be an integer >= 1');
   }
 
+  // Stage 7 (see moduleRunner.js) is the periodic-watchdog hook, the only stage
+  // that keeps running for the whole life of the instance instead of once at a
+  // lifecycle point -- it needs its own interval, there is nothing sensible to
+  // default it to.
+  if (Array.isArray(m.etapa) && m.etapa.includes(7)) {
+    if (!m.schedule || typeof m.schedule !== 'object') {
+      errors.push('modules declaring stage 7 require a "schedule" object');
+    } else if (!Number.isInteger(m.schedule.intervalMs) || m.schedule.intervalMs < 1000) {
+      errors.push('"schedule.intervalMs" must be an integer >= 1000');
+    }
+  }
+
   if (errors.length > 0) {
     throw new Error(`Invalid module manifest (${sourceLabel}): ${errors.join('; ')}`);
   }

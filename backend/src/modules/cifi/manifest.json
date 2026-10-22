@@ -1,0 +1,32 @@
+{
+  "id": "cifi",
+  "nombre": "CIFI auto-reopen watchdog",
+  "esTerceroNoLibre": false,
+  "descripcion": "Reopens the CIFI game if its process is gone (a known, unfixed native Unity crash) and taps through its post-launch screens so the instance keeps earning idle progress unattended. The pilot case for the periodic-watchdog convention (stage 7).",
+  "queToca": [
+    "runs `pidof` against the instance every `schedule.intervalMs` (15 min by default) to check the game is alive",
+    "if it is not, runs `am start` to relaunch it and `input tap` at a few fixed, screen-relative positions to click through its launch/resume screens",
+    "reads the instance's own screen size (`wm size`) each time -- taps are percentages of it, not fixed pixels, so they survive a resolution change",
+    "can be paused/resumed per instance without uninstalling it (GET/POST /api/instances/:id/watchdogs)"
+  ],
+  "compatibleCon": {
+    "androidVersion": [15],
+    "gpuMode": ["host", "guest"]
+  },
+  "etapa": [7],
+  "entry": "./watchdog.js",
+  "schedule": { "intervalMs": 900000 },
+  "version": 1,
+  "i18n": {
+    "es": {
+      "nombre": "Watchdog de reapertura de CIFI",
+      "descripcion": "Reabre el juego CIFI si su proceso desaparecio (un crash nativo de Unity conocido y sin arreglo) y toca las pantallas posteriores al lanzamiento para que la instancia siga generando progreso idle sin supervision. El caso piloto de la convencion de watchdog periodico (etapa 7).",
+      "queToca": [
+        "corre `pidof` contra la instancia cada `schedule.intervalMs` (15 min por defecto) para chequear que el juego este vivo",
+        "si no lo esta, corre `am start` para reabrirlo y `input tap` en unas pocas posiciones fijas relativas a la pantalla para pasar sus pantallas de lanzamiento/reanudacion",
+        "lee el tamano de pantalla de la instancia (`wm size`) cada vez -- los toques son porcentajes de eso, no pixeles fijos, asi sobreviven a un cambio de resolucion",
+        "se puede pausar/reanudar por instancia sin desinstalarlo (GET/POST /api/instances/:id/watchdogs)"
+      ]
+    }
+  }
+}

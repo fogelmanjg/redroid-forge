@@ -25,6 +25,9 @@ function baseManifestFields(id, etapa) {
     version: 1,
     etapa,
     entry: './entry.js',
+    // Required by moduleManifests.validateManifest for any stage-7 fixture --
+    // harmless to include on fixtures that don't declare stage 7.
+    ...(etapa.includes(7) ? { schedule: { intervalMs: 60_000 } } : {}),
   };
 }
 
@@ -220,4 +223,39 @@ test('moduleRunner.prepareCreate: real hwenc module, stage 3 (the only hook with
   const { REQUIRED_BOOT_FLAGS } = require('../src/modules/hwenc/integrate');
   const result = await moduleRunner.prepareCreate(['hwenc']);
   assert.deepEqual(result, { binds: [hwAccel.daemonBind()], cmd: REQUIRED_BOOT_FLAGS });
+}));
+
+test('moduleRunner.watchdogModules: returns only the stage-7 modules among the given ids', () => withFixtureModules([
+  { id: 'fx-tick', etapa: [7], entryBody: 'module.exports.runTick = async () => {};' },
+  { id: 'fx-nontick', etapa: [4], entryBody: 'module.exports.integrate = async () => {};' },
+], (root) => {
+  const found = moduleRunner.watchdogModules(['fx-tick', 'fx-nontick']);
+  assert.deepEqual(found.map((m) => m.id), ['fx-tick']);
+}));
+
+test('moduleRunner.runTick: calls the module\'s runTick with (instanceId, containerId) and reports ok', () => withFixtureModules([
+  {
+    id: 'fx-tick',
+    etapa: [7],
+    entryBody: `
+      module.exports.calls = [];
+      module.exports.runTick = async (instanceId, containerId) => {
+        module.exports.calls.push({ instanceId, containerId });
+      };
+    `,
+  },
+], async (root) => {
+  const [manifest] = moduleRunner.watchdogModules(['fx-tick']);
+  const result = await moduleRunner.runTick(manifest, 'inst-1', 'container-1');
+  assert.deepEqual(result, { ok: true });
+  assert.deepEqual(requireFixtureEntry(root, 'fx-tick').calls, [{ instanceId: 'inst-1', containerId: 'container-1' }]);
+}));
+
+test('moduleRunner.runTick: a module that throws is reported as {ok:false, error}, never rejects', () => withFixtureModules([
+  { id: 'fx-broken', etapa: [7], entryBody: "module.exports.runTick = async () => { throw new Error('boom'); };" },
+], async () => {
+  const [manifest] = moduleRunner.watchdogModules(['fx-broken']);
+  const result = await moduleRunner.runTick(manifest, 'inst-1', 'container-1');
+  assert.equal(result.ok, false);
+  assert.match(result.error, /boom/);
 }));

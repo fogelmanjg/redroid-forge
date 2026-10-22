@@ -435,19 +435,33 @@ scratch, although with external references), and the pilot case (CIFI) is a scri
    still undesigned. What was solved is the most urgent and already real case of the project: `hwenc`
    (Phase 2) had integration logic written but wired by hand in `instances.js`, without any generic hook
    point.
-2. ✅ **Done for the lifecycle mechanism, open for persistent scheduling** —
+2. ✅ **Done, including persistent scheduling (22/10/2026)** —
    `backend/src/lib/moduleRunner.js` orchestrates stages 3-6 from `instances.js` (create/start/restart),
-   replacing the special-casing of `hwenc`/`hwAccel` that existed there. What remains unimplemented: the
-   **periodic scheduling** mechanism (run every N minutes, persistent pause/resume/status) that this step
-   asks for CIFI-style watchdogs — this phase's runner solves "what runs at the moment of creating/starting
-   an instance", not "what runs in a loop while the instance lives".
-3. ⬜ Open — Port the CIFI watchdog on Redroid 15 using the scheduling convention (still undesigned, see
-   step 2), replacing the current cron script + `flock`. **Not** touched in this iteration.
-4. ⬜ Open — Validate live for several days with no reappearance of the inherited-lock bug. It requires real
-   hardware and days of observation; not attempted here.
+   replacing the special-casing of `hwenc`/`hwAccel` that existed there. The **periodic scheduling**
+   mechanism this step asked for (run every N minutes, persistent pause/resume/status, for CIFI-style
+   watchdogs) is now designed and implemented too: stage 7 (`etapa: [7]`, a manifest `schedule.intervalMs`,
+   an entry exporting `runTick(instanceId, containerId)`) plus `backend/src/lib/moduleScheduler.js` (one
+   `setInterval` per instance+module, pause flag persisted on the instance record, `GET`/`POST
+   /api/instances/:id/watchdogs(/:moduleId/pause|resume)`) — full design rationale in `docs/ARCHITECTURE.md`
+   section "Phase 5: stage 7, the periodic watchdog". This phase's runner now covers both "what runs at the
+   moment of creating/starting an instance" (3-6) and "what runs in a loop while the instance lives" (7).
+3. ✅ **Done (22/10/2026)** — Ported the CIFI watchdog (`backend/src/modules/cifi/`) onto the stage-7
+   convention, replacing the cron script + `flock` conceptually (the script itself,
+   `~/scripts/cifi-watchdog.sh`, was not touched/removed — this is the redroid-forge side, a separate
+   project per the Phase 7 clarification above). The original's exact tap positions/retries/timing were
+   kept; what changed is talking to the instance via `dockerRuntime.exec()` instead of spawning real `adb`
+   — which also means the **inherited-lock bug from step 4 cannot recur here**: there is no `adb` daemon
+   for a watchdog tick to spawn or inherit a file descriptor from, dockerode's exec API never shells out.
+4. **Superseded by step 3's design, not separately validated.** The inherited-lock bug was specific to
+   spawning real `adb` from a cron job (see the original script's own top comment) — moving the watchdog
+   to `dockerRuntime.exec()` removes the mechanism that bug depended on, so there is nothing of that
+   specific kind left to validate live for days. What IS still open: a real multi-day run of the CIFI
+   module itself against a live instance with the actual game, to catch anything else unrelated to the
+   adb-lock bug (see the `[PENDING]` note below).
 5. ⬜ Open — A second pilot, the same mechanism: the persistent fake-WiFi reconnection watchdog (today
    hardcoded in `jg-dashboard`, see `claimHwsimPhyPair`/`wifiWatchdogs` in `redroid.service.ts`) migrates
-   to a script-module instead of being ported as is.
+   to a script-module instead of being ported as is. Good next exercise of the now-implemented stage 7,
+   since the logic to port already exists and is already proven in production.
 
 **In addition to what was originally asked in steps 1-2** (a positive side effect of leaving the lifecycle
 runner properly generic, not ad hoc for hwenc): `hwenc` went through the same contract gate as
@@ -464,10 +478,15 @@ validated on the server (`lib/instanceParams.js`: they end up in the kernel comm
 — there is only unit-test coverage with fixtures/mocks (`backend/test/moduleRunner.test.js`,
 `backend/test/moduleContract.test.js`). Before using this with real hardware, run the complete flow
 (create → inject into `/vendor` → start → post-boot fixup) against the official redroid image on an
-AMD/Intel host.
+AMD/Intel host. The same caveat applies to stage 7/step 2-3 (22/10/2026 addition): unit-tested only
+(`backend/test/moduleScheduler.test.js`, `backend/test/cifiWatchdog.test.js`), not run yet against a
+real host.
 
 **Gate:** CIFI runs as a module inside `redroid-forge` (pause/resume/status from the app, no manual cron
-editing), validated live without the known bug reappearing. **Not met yet** — steps 3-5 are still open.
+editing), validated live without the known bug reappearing. **Partial** — CIFI runs as a module with
+real pause/resume/status via the API (steps 1-3 done), and the specific bug the gate names (the adb-lock
+inheritance) cannot reappear by construction (step 4). **Not met yet**: no live validation against a real
+host with the actual game (steps 3-4's remaining half), and step 5 (the second pilot) is still open.
 
 ## Phase 6 — Optional authentication (Keycloak)
 

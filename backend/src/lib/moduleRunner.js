@@ -33,6 +33,11 @@ const STAGE_EXPORT_NAME = {
   5: 'ensureHostInfraReady',
   // Stage 6: against an instance that has already started. It receives the live containerId.
   6: 'ensureRuntimeReady',
+  // Stage 7: periodic watchdog, called on its own schedule (manifest's
+  // `schedule.intervalMs`, see moduleScheduler.js) for as long as the instance
+  // is running -- not a one-off lifecycle hook like 3-6. Receives
+  // `(instanceId, containerId)`, the same as stage 6.
+  7: 'runTick',
 };
 
 // `require()` cache per module id -- the same criterion as moduleManifests (the
@@ -140,9 +145,33 @@ function scheduleRuntimeFixups(requiredModuleIds, containerId) {
   }
 }
 
+// Modules declaring stage 7 (periodic watchdog) among the ones required/requested
+// by an instance -- moduleScheduler.js uses this to know what to put on a timer,
+// instead of duplicating the etapa/entry/schedule reading logic itself.
+function watchdogModules(requiredModuleIds) {
+  return modulesForStage(requiredModuleIds, 7);
+}
+
+// Stage 7 -- one tick of one watchdog module against one already-running
+// instance. Unlike stage 6 (fire-and-forget, never awaited by the caller),
+// this IS awaited by moduleScheduler so it can record success/failure for
+// status reporting -- but a failure here must not throw past this function:
+// the scheduler keeps ticking on its own interval regardless of one bad run.
+async function runTick(manifest, instanceId, containerId) {
+  try {
+    const fn = requireStageFn(manifest, 7);
+    await fn(instanceId, containerId);
+    return { ok: true };
+  } catch (e) {
+    warn(`stage 7 ("${manifest.id}") failed for ${instanceId}: ${e.message}`);
+    return { ok: false, error: e.message };
+  }
+}
+
 // Only for tests.
 function _resetForTests() { entryCache.clear(); }
 
 module.exports = {
-  prepareCreate, integrate, ensureHostInfraReady, scheduleRuntimeFixups, _resetForTests,
+  prepareCreate, integrate, ensureHostInfraReady, scheduleRuntimeFixups,
+  watchdogModules, runTick, _resetForTests,
 };

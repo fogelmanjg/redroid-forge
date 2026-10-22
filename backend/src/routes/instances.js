@@ -10,6 +10,7 @@ const moduleGate = require('../lib/moduleGate');
 const moduleManifests = require('../lib/moduleManifests');
 const moduleAcceptance = require('../lib/moduleAcceptance');
 const moduleRunner = require('../lib/moduleRunner');
+const moduleScheduler = require('../lib/moduleScheduler');
 const instanceParams = require('../lib/instanceParams');
 const catalog = require('../../images.json');
 
@@ -231,6 +232,9 @@ router.post('/', async (req, res) => {
     // Stage 6: fire-and-forget post-boot fixups (the same pattern as
     // scheduleWifiFixes), they do not block the response.
     moduleRunner.scheduleRuntimeFixups(requiredModuleIds, containerId);
+    // Stage 7: periodic watchdogs (CIFI and the like) -- started here, not just
+    // on /start, since a freshly created instance is also freshly running.
+    moduleScheduler.start(instance.id, containerId, requiredModuleIds);
     if (instance.hasGapps) androidIdentity.scheduleFetch(instance.id);
 
     res.status(201).json(await withRuntimeStatus(instance));
@@ -252,6 +256,7 @@ router.post('/:id/start', async (req, res) => {
     await runtime.start(instance.containerId);
     scheduleWifiFixes(instance);
     moduleRunner.scheduleRuntimeFixups(requiredModuleIds, instance.containerId);
+    moduleScheduler.start(instance.id, instance.containerId, requiredModuleIds);
     res.json(await withRuntimeStatus(instance));
   } catch (e) {
     sendError(res, e);
@@ -262,6 +267,7 @@ router.post('/:id/stop', async (req, res) => {
   const instance = store.get(req.params.id);
   if (!instance) return res.status(404).json({ error: 'Instancia no encontrada' });
   try {
+    moduleScheduler.stop(instance.id);
     await runtime.stop(instance.containerId);
     res.json(await withRuntimeStatus(instance));
   } catch (e) {
@@ -276,9 +282,11 @@ router.post('/:id/restart', async (req, res) => {
     await revalidateModulesIfImageKnown(instance);
     const requiredModuleIds = requiredModuleIdsFor(instance);
     await moduleRunner.ensureHostInfraReady(requiredModuleIds);
+    moduleScheduler.stop(instance.id); // cleared and rescheduled below -- never double-ticking across a restart
     await runtime.restart(instance.containerId);
     scheduleWifiFixes(instance);
     moduleRunner.scheduleRuntimeFixups(requiredModuleIds, instance.containerId);
+    moduleScheduler.start(instance.id, instance.containerId, requiredModuleIds);
     res.json(await withRuntimeStatus(instance));
   } catch (e) {
     sendError(res, e);
@@ -367,10 +375,32 @@ router.post('/:id/android-id/registered', (req, res) => {
   res.json({ androidId: updated.androidId, androidIdRegisteredAt: updated.androidIdRegisteredAt });
 });
 
+router.get('/:id/watchdogs', (req, res) => {
+  const instance = store.get(req.params.id);
+  if (!instance) return res.status(404).json({ error: 'Instancia no encontrada' });
+  res.json(moduleScheduler.status(instance.id, requiredModuleIdsFor(instance)));
+});
+
+function watchdogPauseRoute(paused) {
+  return (req, res) => {
+    const instance = store.get(req.params.id);
+    if (!instance) return res.status(404).json({ error: 'Instancia no encontrada' });
+    const ids = requiredModuleIdsFor(instance);
+    if (!moduleRunner.watchdogModules(ids).some((m) => m.id === req.params.moduleId)) {
+      return res.status(404).json({ error: `This instance has no watchdog module "${req.params.moduleId}"` });
+    }
+    (paused ? moduleScheduler.pause : moduleScheduler.resume)(instance.id, req.params.moduleId);
+    res.json(moduleScheduler.status(instance.id, ids).find((w) => w.moduleId === req.params.moduleId));
+  };
+}
+router.post('/:id/watchdogs/:moduleId/pause', watchdogPauseRoute(true));
+router.post('/:id/watchdogs/:moduleId/resume', watchdogPauseRoute(false));
+
 router.delete('/:id', async (req, res) => {
   const instance = store.get(req.params.id);
   if (!instance) return res.status(404).json({ error: 'Instancia no encontrada' });
   try {
+    moduleScheduler.stop(instance.id);
     await runtime.remove(instance.containerId, { force: true });
     if (instance.volumeName) await runtime.removeVolume(instance.volumeName);
     store.remove(instance.id);
