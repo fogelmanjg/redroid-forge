@@ -257,8 +257,9 @@ function buildResourcesEditRow(inst, allInstances) {
 
   const ramInput = document.createElement('input');
   ramInput.type = 'number';
-  ramInput.min = '128';
+  ramInput.min = '256'; // matches jg-dashboard's rd-input-sm (min/step 256)
   ramInput.max = '65536';
+  ramInput.step = '256';
   ramInput.placeholder = 'MB';
   ramInput.value = inst.memoryMb || '';
   panel.appendChild(ramInput);

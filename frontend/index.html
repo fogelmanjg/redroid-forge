@@ -96,7 +96,7 @@ gunzip -c image.tar.gz | docker load</pre>
       </fieldset>
       <fieldset class="display-fields">
         <legend data-i18n="new.resources">CPU / RAM (optional -- empty = no limit)</legend>
-        <label><span data-i18n="new.memoryMb">Memory (MB)</span> <input type="number" name="memoryMb" placeholder="4096" min="128" max="65536" step="1" /></label>
+        <label><span data-i18n="new.memoryMb">Memory (MB)</span> <input type="number" name="memoryMb" placeholder="4096" min="256" max="65536" step="256" /></label>
         <label><span data-i18n="new.cpusetCpus">Cpuset</span> <input type="text" name="cpusetCpus" placeholder="0,1,8,9" pattern="[0-9,-]*" /></label>
       </fieldset>
       <label class="contract-checkbox"><input type="checkbox" name="hwenc" id="chk-hwenc" />
