@@ -263,6 +263,19 @@ context via flags/env); Docker labels in the Traefik/Watchtower style (a module 
 labels of the container itself). A community "app store" in the HACS style is left for when there is a
 community, not for v1.
 
+**Idea, not designed, not for now (22/10/2026): "engine" user-modules.** CIFI's `exec()`-based approach
+(write JS, call Docker exec directly, hardcode tap positions) is one way to build a stage-7 module, but
+a generic image-matching engine (SikuliX/OpenCV/whatever) sitting underneath it would let other, much
+simpler scripts be written on top (take a screenshot, find this image, tap there) instead of each one
+reimplementing exec calls and retry loops from scratch. Per the user: neither approach excludes the
+other (someone can keep writing raw `exec()` modules); and the catalog of engines itself should be
+user-extensible too — SikuliX would just be the first one someone builds, not the only one that can
+ever exist. **Open question, deliberately left unresolved:** when a leaf module depends on an engine,
+does that dependency have to be declared in the leaf's own manifest (so the engine enters the same
+consent contract the user already sees — "this module also pulls in SikuliX, which does X") or is a
+plain code-level `require()` of the engine's module folder enough, with the engine staying invisible to
+the contract? Revisit when there is a second real case to design against, not in the abstract.
+
 ## 6. License policy and third-party content
 
 - **No third-party software inside the code or the images**, unless it is 100% free (a real FOSS
