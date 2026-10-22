@@ -5,7 +5,7 @@ const net = require('net');
 const os = require('os');
 const path = require('path');
 const hwAccel = require('../src/lib/hwAccel');
-const { addCodecsToXml } = require('../src/modules/hwenc/integrate');
+const { addCodecsToXml } = require('../src/lib/codec2Service');
 
 // The daemon's response (HwDecCapsResponse of protocol.h, 176 bytes).
 function capsResponse({ status = 0, mask = 0, mask10 = 0, driver = 'Mesa test' } = {}) {
@@ -119,4 +119,29 @@ test('addCodecsToXml: the official image has no <Decoders>: it is created at the
 test('addCodecsToXml: an unexpected format fails loudly', () => {
   assert.throws(() => addCodecsToXml('<MediaCodecs></MediaCodecs>', []), /Encoders/);
   assert.throws(() => addCodecsToXml('<otra><Encoders></Encoders></otra>', DEC), /MediaCodecs/);
+});
+
+// Core of the encode/decode split (22/10/2026, see hwenc/hwdec modules): each module only
+// ever touches its own half -- hwenc never adds decoders, hwdec never adds the encoder, even
+// if both happen to run against the same instance (one after the other, same file).
+test('addCodecsToXml: addEncoder:false, addDecoders:true (hwdec) never touches the encoder', () => {
+  const out = addCodecsToXml(XML, DEC, null, { addEncoder: false, addDecoders: true });
+  assert.doesNotMatch(out, /c2\.hardware\.encoder\.h264/);
+  assert.match(out, /c2\.hardware\.decoder\.h264/);
+  assert.match(out, /c2\.hardware\.decoder\.hevc/);
+});
+
+test('addCodecsToXml: addEncoder:true, addDecoders:false (hwenc) never touches the decoders', () => {
+  const out = addCodecsToXml(XML, DEC, null, { addEncoder: true, addDecoders: false });
+  assert.match(out, /c2\.hardware\.encoder\.h264/);
+  assert.doesNotMatch(out, /c2\.hardware\.decoder/);
+});
+
+test('addCodecsToXml: hwenc then hwdec on the same file ends up the same as doing both at once', () => {
+  const sequential = addCodecsToXml(
+    addCodecsToXml(XML, [], null, { addEncoder: true, addDecoders: false }),
+    DEC, null, { addEncoder: false, addDecoders: true },
+  );
+  const atOnce = addCodecsToXml(XML, DEC);
+  assert.strictEqual(sequential, atOnce);
 });

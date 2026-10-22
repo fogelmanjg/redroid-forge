@@ -1,7 +1,7 @@
 // Resolution limit that the hardware decoders advertise according to the instance's screen.
 const test = require('node:test');
 const assert = require('node:assert');
-const { decodeSizeLimit, addCodecsToXml } = require('../src/modules/hwenc/integrate');
+const { decodeSizeLimit, addCodecsToXml } = require('../src/lib/codec2Service');
 
 const label = (w, h) => decodeSizeLimit({ width: w, height: h }).label;
 

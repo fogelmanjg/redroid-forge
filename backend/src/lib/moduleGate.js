@@ -6,8 +6,9 @@ const hwAccel = require('./hwAccel');
 // backend/images.json already has (hasGapps/needsHwsimWifi/needsGrallocFix) plus hasMagisk. There is no
 // separate "modules per image" list: it is derived from the metadata the catalog declares.
 //
-// hwenc is NOT here since the per-instance options: `hwEncCapable` now says "this image
-// supports the hwenc module" and hwenc is an optional module of the instance, on by default
+// hwenc/hwdec are NOT here, they are per-instance options: `hwEncCapable` says "this image has
+// the Codec2 VA-API integration available at all" (the same underlying service backs both --
+// see codec2Service.js), each is still its own opt-in module with its own contract/acceptance
 // (see defaultModuleIdsForImage and requiredModuleIds).
 function requiredModuleIdsForImage(img) {
   const ids = [];
@@ -38,7 +39,7 @@ function defaultModuleIdsForImage(img) {
 // {"modules": ["gapps", "hwenc", "arm-translation"]}). Anything else in that list is rejected: the request body must
 // not be able to switch on modules that are not meant to be optional (fake WiFi depends on the
 // image, device-profile has its own flow).
-const OPTIONAL_PER_INSTANCE = ['gapps', 'hwenc', 'arm-translation', 'cifi'];
+const OPTIONAL_PER_INSTANCE = ['gapps', 'hwenc', 'hwdec', 'arm-translation', 'cifi'];
 
 // The modules of an instance: what the image is bound to, plus the optional ones.
 //  - `requested` omitted (undefined/null): the image's defaults (hwenc if it supports it).
@@ -60,8 +61,8 @@ function requiredModuleIds(img, requested) {
         { httpStatus: 400 },
       );
     }
-    if (id === 'hwenc' && !img.hwEncCapable) {
-      throw Object.assign(new Error(`image "${img.id}" does not support hardware video acceleration (hwenc)`), { httpStatus: 400 });
+    if ((id === 'hwenc' || id === 'hwdec') && !img.hwEncCapable) {
+      throw Object.assign(new Error(`image "${img.id}" does not support hardware video acceleration (${id})`), { httpStatus: 400 });
     }
     if (!ids.includes(id)) ids.push(id);
   }

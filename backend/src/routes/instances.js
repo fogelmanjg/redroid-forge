@@ -499,25 +499,36 @@ router.post('/:id/display', async (req, res) => {
     const img = effectiveGpuMode === catalogImg.gpuMode ? catalogImg : { ...catalogImg, gpuMode: effectiveGpuMode };
 
     // Every module's compatibility is re-checked against what the instance will boot with
-    // next (hwenc/redroid-gralloc-fix among them) -- same gate as creation, not skipped just
-    // because the instance already exists. The optional modules already chosen stay exactly
-    // those: this route only ever changes display/gpuMode, never adds or drops a module.
-    const extras = instance.requiredModuleIds
-      ? instance.requiredModuleIds.filter((id) => moduleGate.OPTIONAL_PER_INSTANCE.includes(id))
-      : undefined;
+    // next (hwenc/hwdec/redroid-gralloc-fix among them) -- same gate as creation, not skipped
+    // just because the instance already exists. `req.body.modules`, if given, REPLACES the
+    // optional list (same semantics as POST / at creation) -- this is what lets the codec
+    // chip toggle hwenc/hwdec through this same route. Omitted (the display-only panel never
+    // sends it): the optional modules already chosen stay exactly those.
+    const extras = req.body.modules !== undefined
+      ? req.body.modules
+      : (instance.requiredModuleIds
+        ? instance.requiredModuleIds.filter((id) => moduleGate.OPTIONAL_PER_INSTANCE.includes(id))
+        : undefined);
     await assertModulesReady(img, extras);
     const requiredModuleIds = moduleGate.requiredModuleIds(img, extras);
 
-    const info = await runtime.inspect(instance.containerId).catch(() => null);
+    const info = instance.containerId ? await runtime.inspect(instance.containerId).catch(() => null) : null;
     const wasRunning = info?.State?.Status === 'running';
 
-    await runtime.remove(instance.containerId, { force: true });
-    // Persisted right away, before create() is even attempted: if create() itself fails below
-    // (a real possibility -- missing image, no free binder slot, ...), the stored record still
-    // correctly says "no container" rather than pointing at the one just deleted. The volume
-    // (the actual data) was never touched either way.
-    instance.containerId = null;
-    store.upsert({ ...instance });
+    // `containerId` can already be null here -- a PREVIOUS call to this route may have
+    // removed the old container and then failed before create() finished (found for real:
+    // two modules sharing the same bind, see moduleRunner.prepareCreate's dedup). Nothing to
+    // remove in that case; runtime.remove() itself has no "already gone" tolerance like
+    // start()/stop() do, it would throw "No such container: null".
+    if (instance.containerId) {
+      await runtime.remove(instance.containerId, { force: true });
+      // Persisted right away, before create() is even attempted: if create() itself fails
+      // below (a real possibility -- missing image, no free binder slot, ...), the stored
+      // record still correctly says "no container" rather than pointing at the one just
+      // deleted. The volume (the actual data) was never touched either way.
+      instance.containerId = null;
+      store.upsert({ ...instance });
+    }
 
     const binds = [...binder.binderBinds(instance.binderSlot), `${instance.volumeName}:/data`];
     const cmd = [

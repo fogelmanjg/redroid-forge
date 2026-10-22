@@ -1,0 +1,45 @@
+{
+  "id": "hwdec",
+  "nombre": "Hardware video decode (VA-API / NVDEC)",
+  "esTerceroNoLibre": false,
+  "descripcion": "Registers hardware video decode (H.264, and HEVC/VP9 depending on the host's GPU) so players use it instead of Android's software decoder. Same underlying Codec2 VA-API HAL service as the separate \"hwenc\" (encode) module, but a different real risk per vendor: on AMD/Intel it goes through the same driver as encode; on NVIDIA it goes through NVIDIA's own nvidia-vaapi-driver (NVDEC) instead -- and there is a known, currently unfixed bug there (seen on an RTX 4060: decode can misbehave; the safe fallback is leaving this off and letting Android decode in software). Running this together with \"hwenc\" (encode) on the SAME instance has also caused a real, reproducible hang on at least one AMD GPU (Polaris) -- documented, cause not yet identified. If you hit it, turn one of the two off.",
+  "queToca": [
+    "adds entries to /vendor/etc/media_codecs.xml so the framework lists the decoders the host's hardware really decodes (the backend asks the daemon when the instance is created)",
+    "shares the same host daemon and container-side service as the \"hwenc\" module -- enabling either one for the first time on an instance installs the same files",
+    "on NVIDIA: known bug, currently unfixed (seen on RTX 4060) -- leaving this off is the safe default there",
+    "on AMD: a real, reproducible hang has been seen when this is combined with \"hwenc\" (encode) on the same instance (at least on Polaris), cause not yet identified"
+  ],
+  "compatibleCon": {
+    "androidVersion": [
+      15
+    ],
+    "gpuMode": [
+      "host"
+    ],
+    "hostGpuVendor": [
+      "amd",
+      "intel",
+      "nvidia"
+    ]
+  },
+  "etapa": [
+    3,
+    4,
+    5,
+    6
+  ],
+  "entry": "./integrate.js",
+  "version": 1,
+  "i18n": {
+    "es": {
+      "nombre": "Decode de video por hardware (VA-API / NVDEC)",
+      "descripcion": "Registra el decode de video por hardware (H.264, y HEVC/VP9 segun la GPU del host) para que los players lo usen en vez del decoder por software de Android. Usa el mismo servicio Codec2 VA-API HAL que el modulo separado \"hwenc\" (encode), pero el riesgo real difiere por fabricante: en AMD/Intel pasa por el mismo driver que el encode; en NVIDIA pasa por el driver propio de NVIDIA (nvidia-vaapi-driver / NVDEC) -- y ahi hay un bug conocido, todavia sin arreglar (visto en una RTX 4060: el decode puede comportarse mal; lo seguro es dejar esto apagado y que Android decodifique por software). Activar esto junto con \"hwenc\" (encode) en la MISMA instancia tambien provoco un cuelgue real y reproducible en al menos una GPU AMD (Polaris) -- documentado, causa todavia no identificada. Si te pasa, apaga uno de los dos.",
+      "queToca": [
+        "agrega entradas a /vendor/etc/media_codecs.xml para que el framework liste los decoders que el hardware del host decodifica de verdad (el backend se lo pregunta al daemon al crear la instancia)",
+        "comparte el mismo daemon del host y el mismo servicio del lado del contenedor que el modulo \"hwenc\" -- activar cualquiera de los dos por primera vez en una instancia instala los mismos archivos",
+        "en NVIDIA: bug conocido, todavia sin arreglar (visto en RTX 4060) -- dejar esto apagado es lo seguro ahi",
+        "en AMD: se vio un cuelgue real y reproducible al combinar esto con \"hwenc\" (encode) en la misma instancia (al menos en Polaris), causa todavia no identificada"
+      ]
+    }
+  }
+}

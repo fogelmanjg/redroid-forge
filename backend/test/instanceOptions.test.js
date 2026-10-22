@@ -36,6 +36,16 @@ test('the modules bound to the image stay on whatever is requested', () => {
   assert.deepStrictEqual(moduleGate.requiredModuleIds(img, ['gapps', 'hwenc']), ['gapps', 'wifi-falso', 'hwenc']);
 });
 
+test('hwdec (decode) is independent of hwenc (encode) -- either, neither, or both', () => {
+  assert.deepStrictEqual(moduleGate.requiredModuleIds(imgHw, ['hwdec']), ['hwdec']);
+  assert.deepStrictEqual(moduleGate.requiredModuleIds(imgHw, ['hwenc', 'hwdec']), ['hwenc', 'hwdec']);
+  assert.deepStrictEqual(moduleGate.requiredModuleIds(imgHw, []), [], 'neither is a default, same as hwenc');
+});
+
+test('hwdec cannot be requested on an image that does not support it either', () => {
+  assert.throws(() => moduleGate.requiredModuleIds(imgNoHw, ['hwdec']), (e) => e.httpStatus === 400 && /does not support hardware video acceleration/.test(e.message));
+});
+
 test('only the optional modules can be requested', () => {
   for (const bad of [['magisk'], ['wifi-falso'], ['device-profile'], ['nope']]) {
     assert.throws(() => moduleGate.requiredModuleIds(imgHw, bad), (e) => e.httpStatus === 400, bad.join());

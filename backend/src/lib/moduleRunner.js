@@ -87,6 +87,11 @@ function requireStageFn(manifest, stage) {
 // order in which several modules add binds/cmd can matter (e.g. boot flags that
 // override each other), and there are too few modules for the cost of
 // parallelizing to be worth it.
+// Deduped (Set, order preserved): found for real combining hwenc+hwdec, which share the same
+// underlying infra (codec2Service.prepareCreate()) and therefore the same daemon bind --
+// Docker rejects a container create with the same bind path mounted twice ("bad parameter -
+// Duplicate mount point"). A module should never need the exact same bind/cmd entry declared
+// twice regardless of cause, so this is the general fix, not a hwenc/hwdec special case.
 async function prepareCreate(requiredModuleIds) {
   const binds = [];
   const cmd = [];
@@ -97,7 +102,7 @@ async function prepareCreate(requiredModuleIds) {
     if (Array.isArray(result.binds)) binds.push(...result.binds);
     if (Array.isArray(result.cmd)) cmd.push(...result.cmd);
   }
-  return { binds, cmd };
+  return { binds: [...new Set(binds)], cmd: [...new Set(cmd)] };
 }
 
 // Stage 4 -- called AFTER runtime.create() and BEFORE runtime.start(). It is

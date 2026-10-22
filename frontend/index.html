@@ -28,7 +28,7 @@
       <table id="instances-table">
         <thead>
           <tr>
-            <th data-i18n="instances.col.name">Name</th><th data-i18n="instances.col.image">Image</th><th data-i18n="instances.col.status">Status</th><th data-i18n="instances.col.adb">ADB</th><th data-i18n="instances.col.androidId">Android ID (GApps)</th><th data-i18n="instances.col.deviceProfile">Device profile</th><th data-i18n="instances.col.resources">CPU / RAM</th><th data-i18n="instances.col.actions">Actions</th>
+            <th data-i18n="instances.col.name">Name</th><th data-i18n="instances.col.image">Image</th><th data-i18n="instances.col.status">Status</th><th data-i18n="instances.col.adb">ADB</th><th data-i18n="instances.col.androidId">Android ID (GApps)</th><th data-i18n="instances.col.deviceProfile">Device profile</th><th data-i18n="instances.col.resources">CPU / RAM</th><th data-i18n="instances.col.codec">Encode / Decode</th><th data-i18n="instances.col.actions">Actions</th>
           </tr>
         </thead>
         <tbody></tbody>
@@ -110,8 +110,11 @@ gunzip -c image.tar.gz | docker load</pre>
         </label>
       </fieldset>
       <label class="contract-checkbox"><input type="checkbox" name="hwenc" id="chk-hwenc" />
-        <span data-i18n="new.hwenc">Hardware video acceleration (VA-API)</span></label>
+        <span data-i18n="new.hwenc">Hardware encode (VA-API)</span></label>
       <p id="hwenc-status" class="muted" hidden></p>
+      <label class="contract-checkbox"><input type="checkbox" name="hwdec" id="chk-hwdec" />
+        <span data-i18n="new.hwdec">Hardware decode (VA-API / NVDEC)</span></label>
+      <p id="hwdec-status" class="muted" hidden></p>
       <label class="contract-checkbox"><input type="checkbox" name="gapps" id="chk-gapps" />
         <span data-i18n="new.gapps">Google Apps (Play Store)</span></label>
       <p id="gapps-status" class="muted" hidden></p>

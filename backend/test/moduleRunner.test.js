@@ -93,6 +93,25 @@ test('moduleRunner.prepareCreate: calls prepareCreate() of every stage-3 module 
   assert.deepEqual(requireFixtureEntry(root, 'fx-no-stage3').calls, []);
 }));
 
+// Found for real combining hwenc+hwdec, which share the same underlying infra and therefore
+// the same daemon bind -- Docker rejects a container create with the same bind mounted
+// twice ("bad parameter - Duplicate mount point").
+test('moduleRunner.prepareCreate: two modules declaring the exact same bind/cmd are deduped', () => withFixtureModules([
+  {
+    id: 'fx-shared-a',
+    etapa: [3],
+    entryBody: "module.exports.prepareCreate = () => ({ binds: ['/dev/shared:/dev/shared'], cmd: ['androidboot.shared=1'] });",
+  },
+  {
+    id: 'fx-shared-b',
+    etapa: [3],
+    entryBody: "module.exports.prepareCreate = () => ({ binds: ['/dev/shared:/dev/shared'], cmd: ['androidboot.shared=1'] });",
+  },
+], async () => {
+  const result = await moduleRunner.prepareCreate(['fx-shared-a', 'fx-shared-b']);
+  assert.deepEqual(result, { binds: ['/dev/shared:/dev/shared'], cmd: ['androidboot.shared=1'] });
+}));
+
 test('moduleRunner.prepareCreate: a module that requires nothing at create breaks nothing', () => withFixtureModules([], async () => {
   const result = await moduleRunner.prepareCreate([]);
   assert.deepEqual(result, { binds: [], cmd: [] });
@@ -222,6 +241,16 @@ test('moduleRunner.prepareCreate: real hwenc module, stage 3 (the only hook with
   const hwAccel = require('../src/lib/hwAccel');
   const { REQUIRED_BOOT_FLAGS } = require('../src/modules/hwenc/integrate');
   const result = await moduleRunner.prepareCreate(['hwenc']);
+  assert.deepEqual(result, { binds: [hwAccel.daemonBind()], cmd: REQUIRED_BOOT_FLAGS });
+}));
+
+// Same, for the sibling hwdec module (decode) -- covers that its own manifest/entry is
+// discovered too, and that it shares the exact same stage 3 result as hwenc (same underlying
+// codec2Service.prepareCreate(), see both modules' integrate.js).
+test('moduleRunner.prepareCreate: real hwdec module, stage 3 (same shared prepareCreate as hwenc)', () => withRealManifests(async () => {
+  const hwAccel = require('../src/lib/hwAccel');
+  const { REQUIRED_BOOT_FLAGS } = require('../src/lib/codec2Service');
+  const result = await moduleRunner.prepareCreate(['hwdec']);
   assert.deepEqual(result, { binds: [hwAccel.daemonBind()], cmd: REQUIRED_BOOT_FLAGS });
 }));
 

@@ -166,7 +166,7 @@ function buildResourcesEditRow(inst, allInstances) {
   const tr = document.createElement('tr');
   tr.className = 'edit-row';
   const td = document.createElement('td');
-  td.colSpan = 8;
+  td.colSpan = 9;
   const panel = document.createElement('div');
   panel.className = 'resources-edit-panel';
 
@@ -354,7 +354,7 @@ function buildDisplayEditRow(inst) {
   const tr = document.createElement('tr');
   tr.className = 'edit-row';
   const td = document.createElement('td');
-  td.colSpan = 8;
+  td.colSpan = 9;
   const panel = document.createElement('div');
   panel.className = 'resources-edit-panel';
 
@@ -445,6 +445,126 @@ function buildDisplayEditRow(inst) {
   return tr;
 }
 
+// Mirrors moduleGate.OPTIONAL_PER_INSTANCE on the backend -- keep in sync. Needed here because
+// POST /:id/display's `modules` REPLACES the whole optional list (see routes/instances.js),
+// not just the codec ones: toggling encode/decode must not silently drop gapps/arm/cifi/any
+// future user module the instance already has.
+const OPTIONAL_PER_INSTANCE = ['gapps', 'hwenc', 'hwdec', 'arm-translation', 'cifi'];
+
+// Same 428 + pending manifests -> modal -> retry gate as applyDisplay/applyDeviceProfile.
+async function applyCodec(instanceId, modules) {
+  try {
+    await api(`/instances/${instanceId}/display`, { method: 'POST', body: JSON.stringify({ modules }) });
+  } catch (err) {
+    if (err.status === 428 && err.modules) {
+      const allAccepted = await Contracts.ensureAccepted(err.modules);
+      if (allAccepted) return applyCodec(instanceId, modules);
+      return;
+    }
+    throw err;
+  }
+}
+
+let openCodecId = null;
+
+function buildCodecCell(inst) {
+  const wrap = document.createElement('div');
+  const ids = inst.requiredModuleIds || [];
+  const mk = (label, active) => {
+    const chip = document.createElement('span');
+    chip.className = 'resource-chip';
+    chip.textContent = `${label}: ${active ? 'hw' : 'off'}`;
+    chip.title = t('instances.codec.changeHint');
+    chip.addEventListener('click', () => {
+      openCodecId = openCodecId === inst.id ? null : inst.id;
+      loadInstances({ silent: true });
+    });
+    return chip;
+  };
+  wrap.appendChild(mk('encode', ids.includes('hwenc')));
+  wrap.appendChild(document.createElement('br'));
+  wrap.appendChild(mk('decode', ids.includes('hwdec')));
+  return wrap;
+}
+
+// Same recreate mechanism as buildDisplayEditRow -- integrate() for hwenc/hwdec can only
+// touch the container BEFORE its first boot (/vendor is read-only right after), so toggling
+// either one always means stop + remove the container + recreate, same as resolution/dpi/gpu.
+// Needs gpuMode="host" (see both modules' compatibleCon) -- disabled with an explanation if
+// the instance is not currently in that mode, same reasoning as the create form's checkboxes.
+function buildCodecEditRow(inst) {
+  const tr = document.createElement('tr');
+  tr.className = 'edit-row';
+  const td = document.createElement('td');
+  td.colSpan = 9;
+  const panel = document.createElement('div');
+  panel.className = 'resources-edit-panel';
+
+  const header = document.createElement('div');
+  header.className = 'resources-edit-header';
+  header.textContent = t('instances.codec.header');
+  panel.appendChild(header);
+
+  const needsHost = inst.gpuMode !== 'host';
+  if (needsHost) {
+    const warn = document.createElement('div');
+    warn.className = 'resources-warn';
+    warn.textContent = t('instances.codec.needsHost');
+    panel.appendChild(warn);
+  }
+
+  const ids = inst.requiredModuleIds || [];
+  const checks = {};
+  for (const [key, label] of [['hwenc', t('new.hwenc')], ['hwdec', t('new.hwdec')]]) {
+    const wrap = document.createElement('label');
+    wrap.className = 'display-edit-field';
+    wrap.style.flexDirection = 'row';
+    const chk = document.createElement('input');
+    chk.type = 'checkbox';
+    chk.checked = ids.includes(key);
+    chk.disabled = needsHost;
+    checks[key] = chk;
+    wrap.appendChild(chk);
+    wrap.appendChild(document.createTextNode(label));
+    panel.appendChild(wrap);
+  }
+
+  const applyBtn = document.createElement('button');
+  applyBtn.type = 'button';
+  applyBtn.className = 'secondary';
+  applyBtn.textContent = t('instances.resources.apply');
+  applyBtn.addEventListener('click', async () => {
+    if (inst.status === 'running' && !confirm(t('instances.display.confirmRunning'))) return;
+    applyBtn.disabled = true;
+    try {
+      const modules = ids.filter((id) => OPTIONAL_PER_INSTANCE.includes(id) && id !== 'hwenc' && id !== 'hwdec');
+      if (checks.hwenc.checked) modules.push('hwenc');
+      if (checks.hwdec.checked) modules.push('hwdec');
+      await applyCodec(inst.id, modules);
+      openCodecId = null;
+    } catch (e) {
+      alert(e.message);
+    } finally {
+      applyBtn.disabled = false;
+      await loadInstances({ silent: true });
+    }
+  });
+  panel.appendChild(applyBtn);
+
+  const cancelBtn = document.createElement('button');
+  cancelBtn.type = 'button';
+  cancelBtn.textContent = t('common.cancel');
+  cancelBtn.addEventListener('click', () => {
+    openCodecId = null;
+    loadInstances({ silent: true });
+  });
+  panel.appendChild(cancelBtn);
+
+  td.appendChild(panel);
+  tr.appendChild(td);
+  return tr;
+}
+
 // The backend only allows applying a profile while the instance is running (it needs the overlay
 // writable, see deviceProfile.js) -- the select+button only render in that state, matching how the
 // Actions column already hides start/stop/restart/delete that do not apply to the current status.
@@ -494,11 +614,11 @@ function buildDeviceProfileCell(inst) {
 // `silent`: the periodic refresh does not flash "Loading..." over the table.
 async function loadInstances({ silent = false } = {}) {
   const tbody = $('#instances-table tbody');
-  if (!silent) tbody.innerHTML = `<tr><td colspan="8">${t('common.loading')}</td></tr>`;
+  if (!silent) tbody.innerHTML = `<tr><td colspan="9">${t('common.loading')}</td></tr>`;
   try {
     const instances = await api('/instances');
     if (instances.length === 0) {
-      tbody.innerHTML = `<tr><td colspan="8">${t('instances.none')}</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="9">${t('instances.none')}</td></tr>`;
       return;
     }
     // Built off-screen and swapped in one go, so a refresh never leaves the table half drawn.
@@ -513,6 +633,7 @@ async function loadInstances({ silent = false } = {}) {
         <td class="android-id-cell">${androidIdCellHtml(inst)}</td>
         <td class="device-profile-cell"></td>
         <td class="resources-cell"></td>
+        <td class="codec-cell"></td>
         <td class="actions"></td>
       `;
       const state = InstanceState.describe(inst.status);
@@ -528,6 +649,7 @@ async function loadInstances({ silent = false } = {}) {
       }
       tr.querySelector('.device-profile-cell').appendChild(buildDeviceProfileCell(inst));
       tr.querySelector('.resources-cell').appendChild(buildResourcesCell(inst));
+      tr.querySelector('.codec-cell').appendChild(buildCodecCell(inst));
       const actions = tr.querySelector('.actions');
       if (inst.hasGapps && inst.androidId && !inst.androidIdRegisteredAt) {
         const link = document.createElement('a');
@@ -598,10 +720,11 @@ async function loadInstances({ silent = false } = {}) {
       rows.appendChild(tr);
       if (openResourcesId === inst.id) rows.appendChild(buildResourcesEditRow(inst, instances));
       if (openDisplayId === inst.id) rows.appendChild(buildDisplayEditRow(inst));
+      if (openCodecId === inst.id) rows.appendChild(buildCodecEditRow(inst));
     }
     tbody.replaceChildren(rows);
   } catch (e) {
-    tbody.innerHTML = `<tr><td colspan="8">${t('common.error', { msg: e.message })}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="9">${t('common.error', { msg: e.message })}</td></tr>`;
   }
 }
 
@@ -719,40 +842,60 @@ $('#btn-refresh-user-modules').addEventListener('click', loadUserModulesTab);
 $('#btn-run-doctor').addEventListener('click', loadDoctor);
 
 const dialog = $('#new-instance-dialog');
-// Hardware acceleration (hwenc) is an option of the instance, on by default. It is offered only
-// when the chosen image includes it AND this host's GPU can run it; otherwise the checkbox is
-// disabled and says why, instead of letting the create fail afterwards.
+// Hardware encode (hwenc) and decode (hwdec) are two independent options of the instance (see
+// the real asymmetry in hwAccel.js: encode is AMD/Intel-only, decode also works on NVIDIA via
+// a different driver, and the two have caused a real reproducible hang together on at least
+// one AMD GPU -- see both modules' manifests). Neither defaults to checked: this is a public,
+// installable project, and a fresh install should just work out of the box without the user
+// having to accept anything (same reasoning as gpuMode defaulting to guest) -- turning either
+// of these on is an explicit, informed choice, never a silent default. Offered only when the
+// chosen image includes the underlying infra AND the CURRENTLY SELECTED gpuMode is "host" (the
+// gpu-mode select lives in the same form, see new.gpuMode) AND this host's GPU vendor supports
+// that specific capability; otherwise the checkbox is disabled and says why, instead of
+// letting the create fail afterwards.
 let imagesById = {};
-const hwencChk = $('#chk-hwenc');
-const hwencStatus = $('#hwenc-status');
-function setHwenc({ enabled, checked, text, tone }) {
-  hwencChk.disabled = !enabled;
-  hwencChk.checked = checked;
-  hwencStatus.hidden = !text;
-  hwencStatus.className = tone || 'muted';
-  hwencStatus.textContent = text || '';
+function hwAccelElements(id) {
+  return { chk: $(`#chk-${id}`), status: $(`#${id}-status`) };
 }
-async function refreshHwencOption() {
+function setHwAccel(id, { enabled, text, tone }) {
+  const { chk, status } = hwAccelElements(id);
+  chk.disabled = !enabled;
+  if (!enabled) chk.checked = false;
+  status.hidden = !text;
+  status.className = tone || 'muted';
+  status.textContent = text || '';
+}
+async function refreshHwAccelOption(id) {
   const img = imagesById[$('#image-select').value];
-  if (!img) { setHwenc({ enabled: false, checked: false }); return; }
+  if (!img) { setHwAccel(id, { enabled: false }); return; }
   if (!img.hwEncCapable) {
-    setHwenc({ enabled: false, checked: false, text: t('new.hwencNoImage'), tone: 'muted' });
+    setHwAccel(id, { enabled: false, text: t(`new.${id}NoImage`), tone: 'muted' });
     return;
   }
-  setHwenc({ enabled: false, checked: false, text: t('new.hwencChecking'), tone: 'muted' });
+  const effectiveGpuMode = $('#new-instance-form').gpuMode.value || img.gpuMode;
+  if (effectiveGpuMode !== 'host') {
+    setHwAccel(id, { enabled: false, text: t(`new.${id}NeedsHost`), tone: 'muted' });
+    return;
+  }
+  setHwAccel(id, { enabled: false, text: t(`new.${id}Checking`), tone: 'muted' });
   try {
-    const m = await api(`/modules/hwenc?imageId=${encodeURIComponent(img.id)}`);
+    const m = await api(`/modules/${id}?imageId=${encodeURIComponent(img.id)}`);
     if (imagesById[$('#image-select').value] !== img) return; // another image was chosen meanwhile
     if (m.hostCompatible === false) {
-      setHwenc({ enabled: false, checked: false, text: t('new.hwencNoHost', { reason: m.hostIncompatibilityReason }), tone: 'warn-text' });
+      setHwAccel(id, { enabled: false, text: t(`new.${id}NoHost`, { reason: m.hostIncompatibilityReason }), tone: 'warn-text' });
     } else {
-      setHwenc({ enabled: true, checked: true, text: t('new.hwencOk', { vendor: m.hostGpuVendor || '?' }), tone: 'ok-text' });
+      setHwAccel(id, { enabled: true, text: t(`new.${id}Ok`, { vendor: m.hostGpuVendor || '?' }), tone: 'ok-text' });
     }
   } catch (e) {
-    setHwenc({ enabled: false, checked: false, text: t('common.error', { msg: e.message }), tone: 'fail-text' });
+    setHwAccel(id, { enabled: false, text: t('common.error', { msg: e.message }), tone: 'fail-text' });
   }
 }
+function refreshHwencOption() {
+  refreshHwAccelOption('hwenc');
+  refreshHwAccelOption('hwdec');
+}
 $('#image-select').addEventListener('change', refreshHwencOption);
+$('#new-instance-form').gpuMode.addEventListener('change', refreshHwencOption);
 
 // Checked ids survive a re-render of #user-modules-list (see loadUserModules below) -- cleared
 // only when a creation actually succeeds (createInstance's success path), not on every dialog
@@ -815,6 +958,8 @@ $('#btn-new-instance').addEventListener('click', async () => {
   }
   $('#chk-gapps').checked = false;
   $('#chk-arm').checked = false;
+  $('#chk-hwenc').checked = false;
+  $('#chk-hwdec').checked = false;
   resetGappsStatus();
   dialog.showModal();
   refreshHwencOption();
@@ -859,6 +1004,7 @@ $('#new-instance-form').addEventListener('submit', async (e) => {
   // The list is explicit: what is not ticked is not installed (that is how hwenc is opted out of).
   const modules = [];
   if (form.hwenc.checked) modules.push('hwenc');
+  if (form.hwdec.checked) modules.push('hwdec');
   if (form.gapps.checked) modules.push('gapps');
   if (form.arm.checked) modules.push('arm-translation');
   for (const chk of $$('.user-module-chk')) if (chk.checked) modules.push(chk.dataset.id);
@@ -940,5 +1086,5 @@ loadInstances();
 setInterval(() => {
   const onInstances = $('.tab-btn.active')?.dataset.tab === 'instances';
   const dialogOpen = $$('dialog').some((d) => d.open);
-  if (onInstances && !dialogOpen && openResourcesId === null && openDisplayId === null && !document.hidden) loadInstances({ silent: true });
+  if (onInstances && !dialogOpen && openResourcesId === null && openDisplayId === null && openCodecId === null && !document.hidden) loadInstances({ silent: true });
 }, 4000);
