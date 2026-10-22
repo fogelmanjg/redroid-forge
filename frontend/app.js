@@ -252,8 +252,7 @@ async function loadModules() {
       `;
       // Accepting from here is the same contract flow the reactive 428 path already uses
       // (Contracts.ensureAccepted) -- this just lets it be done ahead of time instead of only
-      // at the moment something needs it. Revoking an acceptance is NOT offered here yet
-      // (open question, not a decided "no") -- see docs/REQUIREMENTS.md.
+      // at the moment something needs it.
       if (!m.accepted) {
         const btn = document.createElement('button');
         btn.textContent = t('contract.accept');
@@ -267,6 +266,17 @@ async function loadModules() {
             await loadModules();
           }
         });
+        li.appendChild(btn);
+      } else {
+        // Deliberate stub, not a real feature yet (22/10/2026): whether revoking should even be
+        // possible is an open question (an instance already using the module keeps running on
+        // what it has -- does revoking block its NEXT start/restart? does it force-stop it?),
+        // not decided. This button exists on purpose so the gap stays visible in the UI instead
+        // of silently missing, until that design question gets resolved.
+        const btn = document.createElement('button');
+        btn.className = 'secondary';
+        btn.textContent = t('modules.revoke');
+        btn.addEventListener('click', () => alert(t('modules.revokeNotImplemented')));
         li.appendChild(btn);
       }
       list.appendChild(li);
