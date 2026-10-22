@@ -14,15 +14,24 @@ function requiredModuleIdsForImage(img) {
   if (img.hasGapps) ids.push('gapps');
   if (img.hasMagisk) ids.push('magisk');
   if (img.needsHwsimWifi) ids.push('wifi-falso');
-  if (img.needsGrallocFix) ids.push('redroid-gralloc-fix');
+  // The gralloc crash this patches only happens in host GPU mode (its own manifest: "host GPU
+  // mode on AMD... Intel", compatibleCon.gpuMode: ["host"]) -- guest mode never hits that code
+  // path at all, so it is not merely "incompatible" there, it is simply not needed. `img.gpuMode`
+  // here is already the EFFECTIVE one (see resolveImageAndGate/revalidateModulesIfImageKnown in
+  // routes/instances.js), not necessarily the catalog's own declared default.
+  if (img.needsGrallocFix && img.gpuMode === 'host') ids.push('redroid-gralloc-fix');
   return ids;
 }
 
 // Optional modules an instance gets when the request does not choose (`modules` omitted):
-// the hardware acceleration if the image supports it. Same behavior as before the options
-// existed, which is also what instances created back then get when they are revalidated.
+// the hardware acceleration if the image supports it. hwenc needs real GPU access (its own
+// manifest: compatibleCon.gpuMode: ["host"], there is no such thing as software-rendered
+// hardware video encode) -- now that images default to gpuMode=guest (see images.json), it
+// can only be a sensible DEFAULT when the effective mode is already host; requesting it
+// explicitly against a guest instance still goes through moduleGate.check like any other
+// explicit choice, and still gets correctly rejected there.
 function defaultModuleIdsForImage(img) {
-  return img.hwEncCapable ? ['hwenc'] : [];
+  return img.hwEncCapable && img.gpuMode === 'host' ? ['hwenc'] : [];
 }
 
 // Modules that the user can choose PER INSTANCE when creating it (POST /api/instances

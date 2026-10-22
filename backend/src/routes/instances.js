@@ -41,21 +41,24 @@ async function assertModulesReady(img, requested) {
   }
 }
 
-// Strict use (create): the image has to exist in the catalog. `gpuModeOverride`, if given and
-// different from the image's own default, replaces `img.gpuMode` BEFORE gating -- so every
-// compatibility check that follows (hwenc's compatibleCon.gpuMode among them) is evaluated
-// against what the instance will actually boot with, not the catalog's default it is
-// overriding. Gated itself (cpu-ram/gpu-mode are not in moduleGate.requiredModuleIdsForImage,
-// so moduleGate.check never sees them) via assertStandaloneModuleReady against the ORIGINAL
-// image (the override itself is what is being consented to, so it has to be checked before
-// being applied).
+// Strict use (create): the image has to exist in the catalog. `gpuModeOverride`, if given,
+// replaces `img.gpuMode` BEFORE gating -- so every compatibility check that follows (hwenc's
+// compatibleCon.gpuMode among them) is evaluated against what the instance will actually boot
+// with, not the catalog's own default it may be overriding.
+//
+// gpu-mode's contract is gated on the EFFECTIVE mode being "host", never on "guest" and never
+// on "does it differ from the image's default" -- guest is pure software rendering inside the
+// container, nothing to disclose; host shares the host's real GPU hardware with the container
+// and redroid itself has known, not-all-fixed bugs specific to that mode on some images/GPUs
+// (see redroid-gralloc-fix). That holds even when host is the image's OWN declared default:
+// catalog images default to guest exactly so a fresh install works out of the box on any
+// machine -- an image whose own default happens to be host still has to surface the same
+// disclosure, not skip it for being "just the default".
 async function resolveImageAndGate(imageId, requested, gpuModeOverride) {
   const rawImg = findImage(imageId);
-  let img = rawImg;
-  if (gpuModeOverride && gpuModeOverride !== rawImg.gpuMode) {
-    assertStandaloneModuleReady('gpu-mode', rawImg);
-    img = { ...rawImg, gpuMode: gpuModeOverride };
-  }
+  const effectiveGpuMode = gpuModeOverride || rawImg.gpuMode;
+  if (effectiveGpuMode === 'host') assertStandaloneModuleReady('gpu-mode', rawImg);
+  const img = effectiveGpuMode === rawImg.gpuMode ? rawImg : { ...rawImg, gpuMode: effectiveGpuMode };
   await assertModulesReady(img, requested);
   return img;
 }
@@ -233,13 +236,6 @@ router.post('/', async (req, res) => {
     if (store.readAll().some((i) => i.name === name)) {
       throw httpError(`An instance named "${name}" already exists`, 409);
     }
-    // cpu-ram is opt-in per request too (like device-profile/gpu-mode), checked before create()
-    // even touches Docker -- an instance without a limit never has to accept anything, matching
-    // every other standalone module here.
-    if (resources.memoryMb !== undefined || resources.cpusetCpus !== undefined) {
-      assertStandaloneModuleReady('cpu-ram', findImage(imageId));
-    }
-
     const img = await resolveImageAndGate(imageId, modules, gpuModeChoice.gpuMode);
     // Which modules this image requires (moduleGate.js) -- it is persisted on the
     // instance (see requiredModuleIdsFor()) so that start/restart do not depend on
@@ -463,10 +459,6 @@ router.post('/:id/resources', async (req, res) => {
   if (!instance) return res.status(404).json({ error: 'Instancia no encontrada' });
   try {
     const resources = instanceParams.parseResources(req.body);
-    if (resources.memoryMb !== undefined || resources.cpusetCpus !== undefined) {
-      const img = catalog.find((i) => i.id === instance.imageId);
-      assertStandaloneModuleReady('cpu-ram', img);
-    }
     await runtime.updateResources(instance.containerId, resources);
     const updated = store.upsert({
       ...instance,

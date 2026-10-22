@@ -4,18 +4,18 @@
     "label": "Android 15 · Official Redroid",
     "dockerImage": "redroid/redroid:15.0.0-latest",
     "androidVersion": 15,
-    "gpuMode": "host",
+    "gpuMode": "guest",
     "needsHwsimWifi": false,
     "hasGapps": false,
     "hasMagisk": false,
     "hwEncCapable": true,
     "needsGrallocFix": true,
     "soporte": "oficial",
-    "notaSoporte": "Unmodified official image: it is the only base planned for redroid-forge. The extras (GApps, Magisk, hwenc, fake WiFi) are integrated per instance when it is created, as modules. hwenc validated against this image (29-30/09).",
+    "notaSoporte": "Unmodified official image: it is the only base planned for redroid-forge. The extras (GApps, Magisk, hwenc, fake WiFi) are integrated per instance when it is created, as modules. hwenc validated against this image (29-30/09). Defaults to gpuMode=guest (software rendering, works out of the box on any host) -- host mode is faster but opt-in, it shares the host's real GPU and redroid has known bugs on some GPUs in that mode (see the gpu-mode module).",
     "i18n": {
       "es": {
         "label": "Android 15 · Redroid oficial",
-        "notaSoporte": "Imagen oficial sin modificar: es la unica base prevista para redroid-forge. Los extras (GApps, Magisk, hwenc, wifi falso) se integran por instancia al crearla, como modulos. hwenc validado contra esta imagen (29-30/09)."
+        "notaSoporte": "Imagen oficial sin modificar: es la unica base prevista para redroid-forge. Los extras (GApps, Magisk, hwenc, wifi falso) se integran por instancia al crearla, como modulos. hwenc validado contra esta imagen (29-30/09). Por defecto gpuMode=guest (renderizado por software, funciona de entrada en cualquier host) -- el modo host es mas rapido pero opcional, comparte la GPU real del host y redroid tiene bugs conocidos en ese modo en algunas GPUs (ver el modulo gpu-mode)."
       }
     }
   }

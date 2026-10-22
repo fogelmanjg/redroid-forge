@@ -90,23 +90,15 @@ async function applyDeviceProfile(instanceId, profileValue) {
 
 // Unlike device profile (which needs the overlay writable, so only while running), Docker's own
 // Update API accepts Memory/CpusetCpus changes regardless of the container's state -- no
-// running-only gate here. Same 428 + pending manifests -> modal -> retry gate as
-// applyDeviceProfile/createInstance (the backend requires accepting the "cpu-ram" module's
-// contract the first time a limit is actually set, not on every call).
+// running-only gate here. No module contract gate either: cpu/RAM limits are plain Docker
+// resource limits (HostConfig.Memory/CpusetCpus), the same thing any container orchestrator
+// does -- nothing third-party, nothing touching the host beyond what Docker itself already
+// does for every container, nothing worth a "read and accept" step.
 async function applyResources(instanceId, { memoryMb, cpusetCpus }) {
   const body = {};
   if (memoryMb !== undefined) body.memoryMb = memoryMb;
   if (cpusetCpus !== undefined) body.cpusetCpus = cpusetCpus;
-  try {
-    await api(`/instances/${instanceId}/resources`, { method: 'POST', body: JSON.stringify(body) });
-  } catch (err) {
-    if (err.status === 428 && err.modules) {
-      const allAccepted = await Contracts.ensureAccepted(err.modules);
-      if (allAccepted) return applyResources(instanceId, { memoryMb, cpusetCpus });
-      return;
-    }
-    throw err;
-  }
+  await api(`/instances/${instanceId}/resources`, { method: 'POST', body: JSON.stringify(body) });
 }
 
 // Host core count, for the per-core checkbox grid (see buildResourcesEditRow) -- fetched once

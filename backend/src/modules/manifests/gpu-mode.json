@@ -1,10 +1,12 @@
 {
   "id": "gpu-mode",
-  "nombre": "GPU mode (host / guest)",
+  "nombre": "GPU mode: host (real hardware acceleration)",
   "esTerceroNoLibre": false,
-  "descripcion": "Chooses whether the instance uses the host's real 3D acceleration (host, requires compatible GPU drivers and exposes /dev/dri to the container) or software rendering inside the container (guest, more compatible but slower).",
+  "descripcion": "Turns on the host's real 3D acceleration for this instance (host) instead of the default software rendering inside the container (guest). guest always works and never needs this -- it is the default of every image for exactly that reason. host is faster, but shares the host's real GPU devices with the container and depends on its driver; redroid itself has known bugs specific to host mode on some images/GPUs (not all of them fixed -- see e.g. the redroid-gralloc-fix module).",
   "queToca": [
-    "in host mode, gives the container access to the host's GPU devices (Privileged:true)",
+    "gives the container access to the host's GPU devices (Privileged:true)",
+    "behavior depends on the host's installed GPU driver -- it is not guaranteed to work on every GPU",
+    "redroid has known bugs specific to this mode on some images/GPUs, only some of them patched (see redroid-gralloc-fix)",
     "the chosen mode is fixed for the instance — changing it requires recreating it"
   ],
   "compatibleCon": {
@@ -18,13 +20,15 @@
       "guest"
     ]
   },
-  "version": 1,
+  "version": 2,
   "i18n": {
     "es": {
-      "nombre": "Modo GPU (host / guest)",
-      "descripcion": "Elige si la instancia usa aceleracion 3D real del host (host, requiere drivers de GPU compatibles y expone /dev/dri al contenedor) o renderizado por software dentro del contenedor (guest, mas compatible pero mas lento).",
+      "nombre": "Modo GPU: host (aceleracion real por hardware)",
+      "descripcion": "Activa la aceleracion 3D real del host para esta instancia (host) en vez del renderizado por software dentro del contenedor (guest), que es el default. guest siempre funciona y nunca necesita esto -- es el default de todas las imagenes justamente por eso. host es mas rapido, pero comparte los dispositivos de GPU reales del host con el contenedor y depende de su driver; redroid tiene bugs conocidos especificos del modo host en algunas imagenes/GPUs (no todos arreglados -- ver por ejemplo el modulo redroid-gralloc-fix).",
       "queToca": [
-        "en modo host, da acceso a los dispositivos de GPU del host al contenedor (Privileged:true)",
+        "da acceso a los dispositivos de GPU del host al contenedor (Privileged:true)",
+        "el comportamiento depende del driver de GPU instalado en el host -- no esta garantizado que funcione en cualquier GPU",
+        "redroid tiene bugs conocidos especificos de este modo en algunas imagenes/GPUs, solo algunos arreglados (ver redroid-gralloc-fix)",
         "el modo elegido queda fijo para la instancia — cambiarlo requiere recrearla"
       ]
     }

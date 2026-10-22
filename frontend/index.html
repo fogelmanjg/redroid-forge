@@ -104,8 +104,8 @@ gunzip -c image.tar.gz | docker load</pre>
         <label><span data-i18n="new.gpuMode">Mode</span>
           <select name="gpuMode">
             <option value="" data-i18n="new.gpuModeImageDefault">Image default</option>
-            <option value="host">host</option>
-            <option value="guest">guest</option>
+            <option value="host" data-i18n="new.gpuModeHost">host (faster, requires accepting a contract)</option>
+            <option value="guest" data-i18n="new.gpuModeGuest">guest (always works, slower)</option>
           </select>
         </label>
       </fieldset>

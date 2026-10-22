@@ -75,11 +75,20 @@ test('integrate does not copy anything back when the file is unknown or already 
   }
 });
 
-test('the official image is bound to the module', () => {
+test('the official image is bound to the module, but only when it actually runs in host GPU mode', () => {
+  // The crash this patches only happens in host GPU mode (its own manifest: "host GPU mode on
+  // AMD... Intel") -- the catalog defaults this image to guest (so a fresh install works out of
+  // the box on any host without needing to accept gpu-mode's contract first), where the bug
+  // never triggers at all, so the fix is correctly not required there.
   const official = images.find((i) => i.id === 'android-15-official');
   assert.strictEqual(official.needsGrallocFix, true);
-  assert.ok(moduleGate.requiredModuleIds(official, []).includes('redroid-gralloc-fix'));
-  assert.ok(!moduleGate.OPTIONAL_PER_INSTANCE.includes('redroid-gralloc-fix'), 'it is not an option: the image always gets it');
+  assert.strictEqual(official.gpuMode, 'guest');
+  assert.ok(!moduleGate.requiredModuleIds(official, []).includes('redroid-gralloc-fix'), 'not required at the image\'s own (guest) default');
+  assert.ok(
+    moduleGate.requiredModuleIds({ ...official, gpuMode: 'host' }, []).includes('redroid-gralloc-fix'),
+    'required once the effective mode is host (see resolveImageAndGate in routes/instances.js)',
+  );
+  assert.ok(!moduleGate.OPTIONAL_PER_INSTANCE.includes('redroid-gralloc-fix'), 'it is not an option: host mode always gets it');
 });
 
 test('on a host that is neither AMD nor Intel it does not even look at the file', async () => {
