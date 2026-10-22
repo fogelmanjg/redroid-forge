@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "serial": 6,
-  "generatedAt": "2026-10-10T12:41:20Z",
+  "serial": 7,
+  "generatedAt": "2026-10-22T13:30:56Z",
   "minForgeVersion": "0.1.0",
   "bases": [
     {
@@ -101,6 +101,516 @@
           "path": "system_ext/etc/permissions/privapp-permissions-google-se.xml",
           "sha256": "39568f70e2db94359b45f2269e973f17c1fe16f986b8355de758bf46e8359b8b",
           "tamano": 14362
+        }
+      ]
+    },
+    {
+      "id": "arm-translation-sdk35-ext15-r01-x86_64",
+      "tipo": "arm-translation",
+      "nombre": "ARM64 translation, ndk_translation (from the Android SDK system image)",
+      "version": "Android 15 ext15 (API 35) Google Play x86_64, r01",
+      "androidVersion": [
+        15
+      ],
+      "arch": "x86_64",
+      "origen": "https://dl.google.com/android/repository/sys-img/google_apis_playstore/x86_64-35-ext15_r01.zip",
+      "origenSha1": "47bd387a6865762f7ae051365a70a3dc1eea2fdb",
+      "tamano": 1766710562,
+      "licencia": "Proprietary (Google)",
+      "integracion": "sdk-system-image",
+      "sha256": "850e957efd099390a56997d756fd9ec9c7794ee65c85842dd0827d15f37e3530",
+      "archivos": [
+        {
+          "path": "system/lib64/libndk_translation.so",
+          "sha256": "504b0c8a763f450522f07a1c180116cd500bf46fe59c8785c18349399a264a5d",
+          "tamano": 3893208,
+          "modo": 420
+        },
+        {
+          "path": "system/lib64/libberberis_exec_region.so",
+          "sha256": "3d8eec7630197453c1f7a5865359812fa31d30fc6581e2542d50968052b78bd9",
+          "tamano": 575320,
+          "modo": 420
+        },
+        {
+          "path": "system/bin/arm64/app_process64",
+          "sha256": "17a50b02d36825e949f887be126b87c8854e393657e54b64d816af195f03bcc3",
+          "tamano": 51208,
+          "modo": 493
+        },
+        {
+          "path": "system/bin/arm64/linker64",
+          "sha256": "cba200f63c657b782c1070b5fee6a92ed9b8a1cd0fee39a423145f2c3d5c3166",
+          "tamano": 883784,
+          "modo": 493
+        },
+        {
+          "path": "system/etc/cpuinfo.arm64.txt",
+          "sha256": "0a6dee4422284928541a4d573f977b78f321182bb012755182f38a79769d080a",
+          "tamano": 325,
+          "modo": 420
+        },
+        {
+          "path": "system/etc/ld.config.arm64.txt",
+          "sha256": "581d312d1b2ce6cd205aa539309865710fcc3fc15918012aa751edee7819d83a",
+          "tamano": 4268,
+          "modo": 420
+        },
+        {
+          "path": "system/lib64/libndk_translation_proxy_libaaudio.so",
+          "sha256": "0dff2dee127a35b25a0c69c2f26d59ebbe1e0cb8ed79a50d8b6eb9ef85d9205c",
+          "tamano": 51800,
+          "modo": 420
+        },
+        {
+          "path": "system/lib64/libndk_translation_proxy_libamidi.so",
+          "sha256": "3066791a2a5ce89f1d52c74dfdce8fed8efa63577e9a9b26fa959d639f8194f0",
+          "tamano": 51712,
+          "modo": 420
+        },
+        {
+          "path": "system/lib64/libndk_translation_proxy_libandroid.so",
+          "sha256": "e2ec03eb1ee5bc17bf34c36c672ae4118c20e261d4c61b2781f1181d198cfef2",
+          "tamano": 69016,
+          "modo": 420
+        },
+        {
+          "path": "system/lib64/libndk_translation_proxy_libandroid_runtime.so",
+          "sha256": "cb024e9e6fe97a9ddf5c84628205fcf3fb352abcee6cb29a44b200699b932876",
+          "tamano": 133568,
+          "modo": 420
+        },
+        {
+          "path": "system/lib64/libndk_translation_proxy_libbinder_ndk.so",
+          "sha256": "3d9f27510a033412cf2bde9d2e295c71dd8734acb3ae868c8a202457051ff42b",
+          "tamano": 52184,
+          "modo": 420
+        },
+        {
+          "path": "system/lib64/libndk_translation_proxy_libc.so",
+          "sha256": "c49d1c45b9e111ca44f9645ae2d88a9b955e7cf5c8fe7ef17c34f61604848984",
+          "tamano": 68760,
+          "modo": 420
+        },
+        {
+          "path": "system/lib64/libndk_translation_proxy_libcamera2ndk.so",
+          "sha256": "19e3cdb7e61bdd00a8fb938571437a1688003bc0d49fd2c967fac23f4fc669e1",
+          "tamano": 52280,
+          "modo": 420
+        },
+        {
+          "path": "system/lib64/libndk_translation_proxy_libEGL.so",
+          "sha256": "c3a57d573c61afcaaf4a6486438a67a8086e12253e49990c920c3a8fcc800b0f",
+          "tamano": 475984,
+          "modo": 420
+        },
+        {
+          "path": "system/lib64/libndk_translation_proxy_libGLESv1_CM.so",
+          "sha256": "47b014e70781ad484ce49caf0776d2b27fd6fbbb4dd0988d637d8a74f3ef9279",
+          "tamano": 52152,
+          "modo": 420
+        },
+        {
+          "path": "system/lib64/libndk_translation_proxy_libGLESv2.so",
+          "sha256": "618f5de57b69d702f4576444106052b26bbd2532914e165febcb7ef1b1b62c2a",
+          "tamano": 86208,
+          "modo": 420
+        },
+        {
+          "path": "system/lib64/libndk_translation_proxy_libGLESv3.so",
+          "sha256": "770290dedaa6789511b317659a4550ccf57d4aebc58d546e8947360bebc8e0f8",
+          "tamano": 86208,
+          "modo": 420
+        },
+        {
+          "path": "system/lib64/libndk_translation_proxy_libjnigraphics.so",
+          "sha256": "fedc207f4287118ef6be35224436146b8355b366341a0455fc02cc16cf2cce45",
+          "tamano": 51880,
+          "modo": 420
+        },
+        {
+          "path": "system/lib64/libndk_translation_proxy_libmediandk.so",
+          "sha256": "32ae2e99c251e4eaed2657e48968c1804fe80e51a472476e7bda4d5ea1559950",
+          "tamano": 68752,
+          "modo": 420
+        },
+        {
+          "path": "system/lib64/libndk_translation_proxy_libnativehelper.so",
+          "sha256": "fa479f0960ba248ce9bfb475185bdcebb06ca4169da0146ad1056282fbd7d605",
+          "tamano": 51824,
+          "modo": 420
+        },
+        {
+          "path": "system/lib64/libndk_translation_proxy_libnativewindow.so",
+          "sha256": "09f4e0f315f92abbc0493e2548562b570aaa50c34c831fb0d84501a6e5371ebd",
+          "tamano": 51896,
+          "modo": 420
+        },
+        {
+          "path": "system/lib64/libndk_translation_proxy_libneuralnetworks.so",
+          "sha256": "8732303dc4b42ea72e0b99302df448d21b6acb087ca89cc00ac9a2e1043a163b",
+          "tamano": 51840,
+          "modo": 420
+        },
+        {
+          "path": "system/lib64/libndk_translation_proxy_libOpenMAXAL.so",
+          "sha256": "38f51c297e4ddfc8354a0d0b71aaa5b64391086810d9dbd2dd64ca546c191a8c",
+          "tamano": 52384,
+          "modo": 420
+        },
+        {
+          "path": "system/lib64/libndk_translation_proxy_libOpenSLES.so",
+          "sha256": "8007637a17be40a6b8b56b5e6567c5e1c929b6be45e945c16966179cf23e09f3",
+          "tamano": 87888,
+          "modo": 420
+        },
+        {
+          "path": "system/lib64/libndk_translation_proxy_libvulkan.so",
+          "sha256": "686d3481b43d323590eaebb396b2ee247a5be2ead71a83e26fda4cd39e855058",
+          "tamano": 829976,
+          "modo": 420
+        },
+        {
+          "path": "system/lib64/libndk_translation_proxy_libwebviewchromium_plat_support.so",
+          "sha256": "5f2cd584dba17f4a01f08f676392f38417c7a2e9893396724f561a473b5b992a",
+          "tamano": 51520,
+          "modo": 420
+        },
+        {
+          "path": "system/lib64/arm64/android.hardware.renderscript@1.0.so",
+          "sha256": "7eb22952b92654973c03e925b97aa5f391b1ed7729400e4fd8545d67290aa445",
+          "tamano": 337016,
+          "modo": 420
+        },
+        {
+          "path": "system/lib64/arm64/ld-android.so",
+          "sha256": "232dba1b234724e169baba4eda3e275b8151679de8e73f1877e1217a04ea72bf",
+          "tamano": 34144,
+          "modo": 420
+        },
+        {
+          "path": "system/lib64/arm64/libEGL.so",
+          "sha256": "351afcd44817c0940ab7a0973e2c26d849ad2a125e9299360c298a3240c756a6",
+          "tamano": 52952,
+          "modo": 420
+        },
+        {
+          "path": "system/lib64/arm64/libGLESv1_CM.so",
+          "sha256": "388eaafd813cb28f6b9764b854e659df0ebf75b768cf5fe964755e81239722a6",
+          "tamano": 70608,
+          "modo": 420
+        },
+        {
+          "path": "system/lib64/arm64/libGLESv2.so",
+          "sha256": "babbcf63e7ebc00fa68a1f0be5774a76860b491aef5915ab2bb10cd41967722a",
+          "tamano": 173456,
+          "modo": 420
+        },
+        {
+          "path": "system/lib64/arm64/libGLESv3.so",
+          "sha256": "5dbe1504d95726fab6aba511319b515067b2ea0def978d14b0efc46b9fcb5945",
+          "tamano": 173456,
+          "modo": 420
+        },
+        {
+          "path": "system/lib64/arm64/libOpenMAXAL.so",
+          "sha256": "e772af333ffef41829da4e2e96738048b1b10bd25ce4216ef585c85e19fc4211",
+          "tamano": 51464,
+          "modo": 420
+        },
+        {
+          "path": "system/lib64/arm64/libOpenSLES.so",
+          "sha256": "ad50fd66eda54aa30dd5512e30d96e22d318ff3dc5de855bbf2f52ddffa63fd0",
+          "tamano": 51464,
+          "modo": 420
+        },
+        {
+          "path": "system/lib64/arm64/libRS.so",
+          "sha256": "9346d7770b9d4b2fc055c1526b63ae931c57863d632dde37c7d3b588493d13be",
+          "tamano": 87040,
+          "modo": 420
+        },
+        {
+          "path": "system/lib64/arm64/libRSCpuRef.so",
+          "sha256": "2187aa678ba39189314d324cca4a8e207049febbfc5e9b739ae20205093bfb3a",
+          "tamano": 448720,
+          "modo": 420
+        },
+        {
+          "path": "system/lib64/arm64/libRSDriver.so",
+          "sha256": "4a00f2c6086d20be2d51a9bd33f78eec51ed2bef4c21680e7fb067f96cdf2f5c",
+          "tamano": 248640,
+          "modo": 420
+        },
+        {
+          "path": "system/lib64/arm64/libRSSupport.so",
+          "sha256": "08dc0dd2c864fb46b8001a1a8b10660723071500db43446b98540534f2f1c9ff",
+          "tamano": 965936,
+          "modo": 420
+        },
+        {
+          "path": "system/lib64/arm64/libRS_internal.so",
+          "sha256": "d476e344466e75c11a85b6a50347a979a776be211d3404a139e33a91e2198c90",
+          "tamano": 332152,
+          "modo": 420
+        },
+        {
+          "path": "system/lib64/arm64/libaaudio.so",
+          "sha256": "05d692ff05056606be4b92df868a4de6e8b760c9e46869a5bac0cdcbb570f585",
+          "tamano": 36176,
+          "modo": 420
+        },
+        {
+          "path": "system/lib64/arm64/libamidi.so",
+          "sha256": "d41884fddd5eb0d680e8123f75139dfb2989c21689ecf68baf4b416558085231",
+          "tamano": 35744,
+          "modo": 420
+        },
+        {
+          "path": "system/lib64/arm64/libandroid.so",
+          "sha256": "ce4ecb4b49157e5178e32a08adaa93c141c477647605d7505f0396e307e4990e",
+          "tamano": 87704,
+          "modo": 420
+        },
+        {
+          "path": "system/lib64/arm64/libandroid_runtime.so",
+          "sha256": "1f0e1f707e1d67ca18a5e869f22123e067850f3e7f81809e0b73261939be8d78",
+          "tamano": 306880,
+          "modo": 420
+        },
+        {
+          "path": "system/lib64/arm64/libandroidicu.so",
+          "sha256": "23c832d86b6a94b439bef7fcccbafdc0ef69f8c6d0ec57734d9d9f0f23c13f5a",
+          "tamano": 52712,
+          "modo": 420
+        },
+        {
+          "path": "system/lib64/arm64/libbase.so",
+          "sha256": "7e390ac59fc4db81b3f4319b41cac9fc5a59ef748a1e01dc2f9e19c6d27ff9a2",
+          "tamano": 218928,
+          "modo": 420
+        },
+        {
+          "path": "system/lib64/arm64/libbcinfo.so",
+          "sha256": "acb731f6774361e93efb2cee5b2f3193a184a7fad6437172819044673eeb1b00",
+          "tamano": 1012712,
+          "modo": 420
+        },
+        {
+          "path": "system/lib64/arm64/libbinder_ndk.so",
+          "sha256": "728d15a49773fae4a3b0691373dc607dbd458dceb4f110fc5cb0ed2e602f99e3",
+          "tamano": 53512,
+          "modo": 420
+        },
+        {
+          "path": "system/lib64/arm64/libblas.so",
+          "sha256": "6cf0d09069b5fae3a763955deef1882b4d7f432614edd7d31bac0a2f2b1b1ecd",
+          "tamano": 1303528,
+          "modo": 420
+        },
+        {
+          "path": "system/lib64/arm64/libc++.so",
+          "sha256": "794eb8fafd7be35da3725e9ec0b15189c6f4f2544f5b78afd8a647dde5b69195",
+          "tamano": 1083168,
+          "modo": 420
+        },
+        {
+          "path": "system/lib64/arm64/libc.so",
+          "sha256": "b9781af08f7b1fe41c48ad40d49b60cb57038bdbe8a550c2c036b37eebfa4052",
+          "tamano": 1043696,
+          "modo": 420
+        },
+        {
+          "path": "system/lib64/arm64/libcamera2ndk.so",
+          "sha256": "95cbfa7efdb1a95f0f7b3cab3aba6f7125359c784332b18475536b144597b101",
+          "tamano": 36240,
+          "modo": 420
+        },
+        {
+          "path": "system/lib64/arm64/libcompiler_rt.so",
+          "sha256": "b4ba2c917fde2c6ebf7ab080d622115458926410ccc56f603bf5498c91506a40",
+          "tamano": 68464,
+          "modo": 420
+        },
+        {
+          "path": "system/lib64/arm64/libcrypto.so",
+          "sha256": "a0d302e96f33687dc9275e6e9e8aefdf45f16ce1b3b2588ff79687f977e3d9fa",
+          "tamano": 1394600,
+          "modo": 420
+        },
+        {
+          "path": "system/lib64/arm64/libcutils.so",
+          "sha256": "ccd02e23cd08b837d8d79c389e267f9da62acea0b71acde0ca5524466c1facee",
+          "tamano": 118272,
+          "modo": 420
+        },
+        {
+          "path": "system/lib64/arm64/libdl.so",
+          "sha256": "4841d2c7d1959019ccbdb252a9b844bd874f7c9c53003189353b18cd69bef747",
+          "tamano": 50760,
+          "modo": 420
+        },
+        {
+          "path": "system/lib64/arm64/libdl_android.so",
+          "sha256": "c007614917439e9e4f6a357d7990367ae797f8c6a50a026467a43248efdb1cdd",
+          "tamano": 34664,
+          "modo": 420
+        },
+        {
+          "path": "system/lib64/arm64/libft2.so",
+          "sha256": "c28d00aa4d7a258b4508921083e1359ff4bf3f1289116345a35948f268b025af",
+          "tamano": 637672,
+          "modo": 420
+        },
+        {
+          "path": "system/lib64/arm64/libhidlbase.so",
+          "sha256": "0e1266df15a27ef136711321188a8517f5615c070540b7f1a35d2b56bedc931c",
+          "tamano": 653360,
+          "modo": 420
+        },
+        {
+          "path": "system/lib64/arm64/libicu.so",
+          "sha256": "3635d431b94b607884b5aaddd31e1da658e7724a912cdd6f24b63d6e52cd01bf",
+          "tamano": 70520,
+          "modo": 420
+        },
+        {
+          "path": "system/lib64/arm64/libicui18n.so",
+          "sha256": "b5c5bf33577350a337a6f907984d49b577140f429ebd2e19486096e2e8af28e1",
+          "tamano": 2799504,
+          "modo": 420
+        },
+        {
+          "path": "system/lib64/arm64/libicuuc.so",
+          "sha256": "80b125292dc797e147999ecc415f8f3f4893efc4aa9f55089e3cbd00da82e24a",
+          "tamano": 1986920,
+          "modo": 420
+        },
+        {
+          "path": "system/lib64/arm64/libjnigraphics.so",
+          "sha256": "3b2bfddff05b12f6f298ff126f1b0c8e9f97f9e24cb82bb5d2df190cdc7ecd20",
+          "tamano": 35896,
+          "modo": 420
+        },
+        {
+          "path": "system/lib64/arm64/liblog.so",
+          "sha256": "800cfd6ecd1a6c7125274e266b40833e2851d3c1d1640af6d5f8abc80f5ce422",
+          "tamano": 102680,
+          "modo": 420
+        },
+        {
+          "path": "system/lib64/arm64/liblzma.so",
+          "sha256": "41a7941fa47c3343b330d92cf307f90090a7403094867262b95425f2df85d383",
+          "tamano": 200168,
+          "modo": 420
+        },
+        {
+          "path": "system/lib64/arm64/libm.so",
+          "sha256": "9cc799be57e74ba89f62cc264389d88db99f14f2444ff600fb2ea3804f1747c0",
+          "tamano": 249208,
+          "modo": 420
+        },
+        {
+          "path": "system/lib64/arm64/libmediandk.so",
+          "sha256": "c42fb1e1d71a2f8c5244024891f2cc31383c04c2c8c025fe1f52cbcca8812049",
+          "tamano": 84232,
+          "modo": 420
+        },
+        {
+          "path": "system/lib64/arm64/libnative_bridge_vdso.so",
+          "sha256": "5f76f915ef7e4038b40ccfa35ca8b5d1b95e3439894a5cb8af7e0211c0efc95e",
+          "tamano": 34400,
+          "modo": 420
+        },
+        {
+          "path": "system/lib64/arm64/libnativehelper.so",
+          "sha256": "9f71b135ea795664c3ab0ea16f291324e5b3aaecb206cfc23a49dbb0a1c432db",
+          "tamano": 35960,
+          "modo": 420
+        },
+        {
+          "path": "system/lib64/arm64/libnativewindow.so",
+          "sha256": "a7389234d12a3a104588ce7201e11af3ac14c533ebad86ab1afdba6d36b97218",
+          "tamano": 36184,
+          "modo": 420
+        },
+        {
+          "path": "system/lib64/arm64/libneuralnetworks.so",
+          "sha256": "020e5deb973c1fa716495afe14c6bb9b1f56e570949099bddcb3c0f1d065935c",
+          "tamano": 36232,
+          "modo": 420
+        },
+        {
+          "path": "system/lib64/arm64/libpng.so",
+          "sha256": "782631b3369e23b6ecdea58e9f207b11099070d08076db702f8098b30b1e4002",
+          "tamano": 251208,
+          "modo": 420
+        },
+        {
+          "path": "system/lib64/arm64/libsqlite.so",
+          "sha256": "126f97fd7ed9faef973dc44c6196595c371e01f880e2878d6fed92b6bea9aa77",
+          "tamano": 1930416,
+          "modo": 420
+        },
+        {
+          "path": "system/lib64/arm64/libssl.so",
+          "sha256": "d8a2b5e2a39235ed5fc2c72268d2f9cc065ad14ccbe7dabe5b0ffa9087cf28e9",
+          "tamano": 455880,
+          "modo": 420
+        },
+        {
+          "path": "system/lib64/arm64/libstdc++.so",
+          "sha256": "312feedfd2ed254eac0c18df94a14029c95c41ba9635ce8050cd560e10460b6f",
+          "tamano": 51608,
+          "modo": 420
+        },
+        {
+          "path": "system/lib64/arm64/libsync.so",
+          "sha256": "a75486a04f30331d32c16fe49d4493c51476e8a7be0cd390de9213e07d794186",
+          "tamano": 51232,
+          "modo": 420
+        },
+        {
+          "path": "system/lib64/arm64/libunwindstack.so",
+          "sha256": "116d633016d41115654a833d58ccfb3e7e11364864a8e588fedd1af8fc61cf57",
+          "tamano": 722848,
+          "modo": 420
+        },
+        {
+          "path": "system/lib64/arm64/libutils.so",
+          "sha256": "f231ef8701b9ae7e2571be5d95568228aaf58934fa778f3811b70f204c08e1e5",
+          "tamano": 151792,
+          "modo": 420
+        },
+        {
+          "path": "system/lib64/arm64/libutilscallstack.so",
+          "sha256": "f2f2b32546cf75b8b4149a7e33c24e9575f7db497bbf4a84031d43df13d05a3a",
+          "tamano": 52032,
+          "modo": 420
+        },
+        {
+          "path": "system/lib64/arm64/libvndksupport.so",
+          "sha256": "7b843c18ccaeca1304dd14df0d3a8c637925a9fc768e4c0422f934b42910c574",
+          "tamano": 51352,
+          "modo": 420
+        },
+        {
+          "path": "system/lib64/arm64/libvulkan.so",
+          "sha256": "8ac89084771ba67cd1a578ba4a70ca7670ad66a34e0cd13b253075ea46f0ec85",
+          "tamano": 70272,
+          "modo": 420
+        },
+        {
+          "path": "system/lib64/arm64/libwebviewchromium_plat_support.so",
+          "sha256": "deda453c71da9829c1dbd9967ef7f83bc28fd9f1f8828b11829845578faf21c8",
+          "tamano": 35712,
+          "modo": 420
+        },
+        {
+          "path": "system/lib64/arm64/libz.so",
+          "sha256": "a34363d3751750ca0f3fcac4461881f55db99a6bd6866a3f01a2eaaa9f55f001",
+          "tamano": 117480,
+          "modo": 420
         }
       ]
     }

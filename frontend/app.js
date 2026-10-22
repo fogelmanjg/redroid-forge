@@ -250,6 +250,25 @@ async function loadModules() {
         <p class="detail muted">${t('modules.compatible', { android: m.compatibleCon.androidVersion.join('/'), gpu: m.compatibleCon.gpuMode.join('/') })}</p>
         <ul>${loc(m, 'queToca').map((item) => `<li>${item}</li>`).join('')}</ul>
       `;
+      // Accepting from here is the same contract flow the reactive 428 path already uses
+      // (Contracts.ensureAccepted) -- this just lets it be done ahead of time instead of only
+      // at the moment something needs it. Revoking an acceptance is NOT offered here yet
+      // (open question, not a decided "no") -- see docs/REQUIREMENTS.md.
+      if (!m.accepted) {
+        const btn = document.createElement('button');
+        btn.textContent = t('contract.accept');
+        btn.addEventListener('click', async () => {
+          btn.disabled = true;
+          try {
+            await Contracts.ensureAccepted([m]);
+          } catch (e) {
+            alert(e.message);
+          } finally {
+            await loadModules();
+          }
+        });
+        li.appendChild(btn);
+      }
       list.appendChild(li);
     }
   } catch (e) {
@@ -336,6 +355,7 @@ $('#btn-new-instance').addEventListener('click', async () => {
   }
   $('#chk-gapps').checked = false;
   $('#chk-arm').checked = false;
+  $('#chk-cifi').checked = false;
   resetGappsStatus();
   dialog.showModal();
   refreshHwencOption();
@@ -380,6 +400,7 @@ $('#new-instance-form').addEventListener('submit', async (e) => {
   if (form.hwenc.checked) modules.push('hwenc');
   if (form.gapps.checked) modules.push('gapps');
   if (form.arm.checked) modules.push('arm-translation');
+  if (form.cifi.checked) modules.push('cifi');
   const display = {
     width: Number(form.width.value), height: Number(form.height.value), dpi: Number(form.dpi.value), fps: Number(form.fps.value),
   };
@@ -426,7 +447,11 @@ function resetGappsStatus() { resetGapps(); resetArm(); }
 
 // Language: static texts are applied from the I18n table; dynamic views are re-rendered on change.
 const langBtn = $('#btn-lang');
-function syncLangButton() { langBtn.textContent = I18n.lang === 'es' ? 'EN' : 'ES'; }
+// Shows the CURRENT language, not the one clicking it switches to -- the
+// opposite convention (showing the destination) read as confusing in
+// practice: a user sees Spanish content + a button labeled "EN" and reads it
+// as "currently in English", not "click to switch to English".
+function syncLangButton() { langBtn.textContent = I18n.lang.toUpperCase(); }
 langBtn.addEventListener('click', () => I18n.setLang(I18n.lang === 'es' ? 'en' : 'es'));
 document.addEventListener('langchange', () => {
   syncLangButton();

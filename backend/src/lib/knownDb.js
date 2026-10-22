@@ -49,13 +49,23 @@ function validateDatabase(db) {
     }
   }
   for (const p of db.paquetes) {
-    if (!['gapps', 'magisk'].includes(p.tipo)) errors.push(`package "${p.id}": invalid "tipo"`);
+    // 'arm-translation' was missing here since that module's own matching logic
+    // (bundle.choosePackage, fileBundle.js's RULES) was built generic/parameterized
+    // by tipo from the start -- this one list was just never updated to match,
+    // silently forcing every arm-translation setup into "local, unsupported"
+    // regardless of whether the database actually vouches for it.
+    if (!['gapps', 'magisk', 'arm-translation'].includes(p.tipo)) errors.push(`package "${p.id}": invalid "tipo"`);
     if (!SHA256_RE.test(p.sha256 || '')) errors.push(`package "${p.id}": "sha256" is mandatory (64 hex)`);
     if (!isStr(p.origen)) errors.push(`package "${p.id}": missing "origen"`);
     // A package defined by FILES (GApps from the Android SDK image): "sha256" is the digest of
     // the whole set (fileBundle.bundleDigest), so it cannot disagree with the listed files.
     if (p.archivos !== undefined) {
-      const problems = fileBundle.validateFiles(p.archivos);
+      // Second bug found alongside the missing 'tipo' above: this never looked up the rules
+      // for THIS package's own tipo -- every package, regardless of tipo, was validated
+      // against RULES.gapps (fileBundle.validateFiles's default parameter), which silently
+      // rejected any arm-translation package's files (they live under system/, gapps' rules
+      // only allow product/system_ext) before "invalid tipo" was even the only problem.
+      const problems = fileBundle.validateFiles(p.archivos, fileBundle.RULES[p.tipo]);
       for (const pr of problems) errors.push(`package "${p.id}": archivos: ${pr}`);
       if (problems.length === 0 && fileBundle.bundleDigest(p.archivos) !== p.sha256) {
         errors.push(`package "${p.id}": "sha256" is not the digest of its "archivos"`);

@@ -106,3 +106,39 @@ test('verifySignature: valid signature, tampered, another key, list for rotating
   assert.strictEqual(k.verifySignature(data, sig, [pem(k2), pem(k1)]), true);
   assert.strictEqual(k.verifySignature(data, 'not-valid-base64!!', [pem(k1)]), false);
 });
+
+test('validate: "arm-translation" is an accepted package tipo (found 22/10/2026: only gapps/magisk were allowed, silently forcing every real arm-translation package into "invalid tipo")', () => {
+  const db = clone(snapshot);
+  const archivos = [{ path: 'system/lib64/libndk_translation.so', sha256: 'a'.repeat(64), tamano: 1 }];
+  db.paquetes.push({
+    id: 'fx-arm', tipo: 'arm-translation', origen: 'https://x',
+    sha256: require('../src/lib/fileBundle').bundleDigest(archivos),
+    archivos,
+  });
+  assert.doesNotThrow(() => k.validateDatabase(db));
+});
+
+test('validate: a package\'s "archivos" are checked against ITS OWN tipo\'s rules, not always gapps\' (found 22/10/2026 alongside the bug above: validateFiles was never given a rules argument, so it silently defaulted to RULES.gapps for every tipo)', () => {
+  const db = clone(snapshot);
+  // arm-translation's files legitimately live under system/lib64 -- gapps' rules only allow
+  // product/system_ext, so this would be wrongly rejected as "outside of..." if the lookup
+  // bug were still there.
+  const archivos = [{ path: 'system/lib64/libndk_translation.so', sha256: 'a'.repeat(64), tamano: 1 }];
+  db.paquetes.push({
+    id: 'fx-arm', tipo: 'arm-translation', origen: 'https://x',
+    sha256: require('../src/lib/fileBundle').bundleDigest(archivos),
+    archivos,
+  });
+  assert.doesNotThrow(() => k.validateDatabase(db));
+
+  // And the inverse must still hold: a gapps-tipo package with an arm-translation-shaped path
+  // (under system/, not product/system_ext) is correctly rejected -- the fix must not have
+  // just disabled the check.
+  const dbBroken = clone(snapshot);
+  dbBroken.paquetes.push({
+    id: 'fx-gapps-wrong-path', tipo: 'gapps', origen: 'https://x',
+    sha256: require('../src/lib/fileBundle').bundleDigest(archivos),
+    archivos,
+  });
+  assert.throws(() => k.validateDatabase(dbBroken), /outside of/);
+});
