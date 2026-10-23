@@ -171,6 +171,9 @@ header nav { flex: 1; }
   margin: 0.1rem 0;
 }
 .resource-chip:hover { border-color: var(--accent); }
+.modules-cell-chips { display: flex; flex-wrap: wrap; gap: 0.2rem; max-width: 16rem; }
+.modules-cell-chips .resource-chip { cursor: default; margin: 0; }
+.modules-cell-chips .resource-chip:hover { border-color: var(--border); }
 tr.edit-row > td { background: rgba(58, 109, 240, 0.06); padding: 0.8rem 1rem; }
 .resources-edit-panel { display: flex; flex-direction: column; gap: 0.4rem; max-width: 40rem; }
 .resources-edit-header { font-weight: 600; font-size: 0.85rem; opacity: 0.85; margin-top: 0.4rem; }

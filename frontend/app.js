@@ -565,6 +565,29 @@ function buildCodecEditRow(inst) {
   return tr;
 }
 
+// Raw module ids are already short and self-explanatory (same ids used in OPTIONAL_PER_INSTANCE
+// above and in the "new instance" form) -- a separate display-name map would be one more place to
+// forget to update whenever a module is added (see the "wifi: off" bug this replaced). Shows
+// everything in requiredModuleIds, including modules the image implied rather than the user
+// picked (e.g. redroid-gralloc-fix) -- the point of this column is "what's actually loaded".
+function buildModulesCell(inst) {
+  const wrap = document.createElement('div');
+  wrap.className = 'modules-cell-chips';
+  const ids = inst.requiredModuleIds || [];
+  if (ids.length === 0) {
+    wrap.textContent = t('instances.modules.none');
+    wrap.classList.add('muted');
+    return wrap;
+  }
+  for (const id of ids) {
+    const chip = document.createElement('span');
+    chip.className = 'resource-chip';
+    chip.textContent = id;
+    wrap.appendChild(chip);
+  }
+  return wrap;
+}
+
 let openWifiInternoId = null;
 
 function buildWifiInternoCell(inst) {
@@ -695,11 +718,11 @@ function buildDeviceProfileCell(inst) {
 // `silent`: the periodic refresh does not flash "Loading..." over the table.
 async function loadInstances({ silent = false } = {}) {
   const tbody = $('#instances-table tbody');
-  if (!silent) tbody.innerHTML = `<tr><td colspan="10">${t('common.loading')}</td></tr>`;
+  if (!silent) tbody.innerHTML = `<tr><td colspan="11">${t('common.loading')}</td></tr>`;
   try {
     const instances = await api('/instances');
     if (instances.length === 0) {
-      tbody.innerHTML = `<tr><td colspan="10">${t('instances.none')}</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="11">${t('instances.none')}</td></tr>`;
       return;
     }
     // Built off-screen and swapped in one go, so a refresh never leaves the table half drawn.
@@ -716,6 +739,7 @@ async function loadInstances({ silent = false } = {}) {
         <td class="resources-cell"></td>
         <td class="codec-cell"></td>
         <td class="wifi-interno-cell"></td>
+        <td class="modules-cell"></td>
         <td class="actions"></td>
       `;
       const state = InstanceState.describe(inst.status);
@@ -733,6 +757,7 @@ async function loadInstances({ silent = false } = {}) {
       tr.querySelector('.resources-cell').appendChild(buildResourcesCell(inst));
       tr.querySelector('.codec-cell').appendChild(buildCodecCell(inst));
       tr.querySelector('.wifi-interno-cell').appendChild(buildWifiInternoCell(inst));
+      tr.querySelector('.modules-cell').appendChild(buildModulesCell(inst));
       const actions = tr.querySelector('.actions');
       if (inst.hasGapps && inst.androidId && !inst.androidIdRegisteredAt) {
         const link = document.createElement('a');
@@ -808,7 +833,7 @@ async function loadInstances({ silent = false } = {}) {
     }
     tbody.replaceChildren(rows);
   } catch (e) {
-    tbody.innerHTML = `<tr><td colspan="10">${t('common.error', { msg: e.message })}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="11">${t('common.error', { msg: e.message })}</td></tr>`;
   }
 }
 
