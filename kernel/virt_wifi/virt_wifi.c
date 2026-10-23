@@ -474,11 +474,13 @@ static netdev_tx_t virt_wifi_start_xmit(struct sk_buff *skb,
 	struct virt_wifi_netdev_priv *priv = netdev_priv(dev);
 
 	priv->tx_packets++;
-	if (!priv->is_connected) {
-		priv->tx_failed++;
-		return NET_XMIT_DROP;
-	}
 
+	/* jg-redroid: no gatear en is_connected -- esa maquina de estados fake
+	 * del propio driver nunca se usa (el HAL falso de Android fabrica la
+	 * conexion enteramente a nivel framework, sin pasar por cfg80211
+	 * connect), asi que is_connected nunca se pone en true y esto
+	 * descartaba todo el trafico real. wlan0 es solo un wrapper de
+	 * transporte sobre eth0, reenviar siempre. */
 	skb->dev = priv->lowerdev;
 	return dev_queue_xmit(skb);
 }
@@ -578,7 +580,10 @@ static rx_handler_result_t virt_wifi_rx_handler(struct sk_buff **pskb)
 	struct virt_wifi_netdev_priv *priv =
 		rcu_dereference(skb->dev->rx_handler_data);
 
-	if (!priv->is_connected)
+	/* jg-redroid: idem xmit arriba -- sin esto, el trafico entrante nunca
+	 * se redirige a wlan0 (queda pasando por eth0 como si wlan0 no
+	 * existiera). */
+	if (!priv->is_up)
 		return RX_HANDLER_PASS;
 
 	/* GFP_ATOMIC because this is a packet interrupt handler. */
