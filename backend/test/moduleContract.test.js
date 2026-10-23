@@ -41,14 +41,14 @@ const imgHwEncCapable = {
   id: 'fixture-15-hwenc', androidVersion: 15, gpuMode: 'host', hasGapps: false, hasMagisk: false, needsHwsimWifi: false, hwEncCapable: true,
 };
 
-test('moduleManifests: the catalog has the 6 modules of section 5 of REQUIREMENTS.md + hwenc + hwdec + arm-translation + cifi', () => {
-  // hwenc/hwdec/arm-translation/cifi (Phase 5) each live in their own folder
-  // (backend/src/modules/<id>/manifest.json), not in
+test('moduleManifests: the catalog has the 6 modules of section 5 of REQUIREMENTS.md + hwenc + hwdec + arm-translation + cifi + wifi-interno-virtwifi', () => {
+  // hwenc/hwdec/arm-translation/cifi/wifi-interno-virtwifi (Phase 5+) each live in
+  // their own folder (backend/src/modules/<id>/manifest.json), not in
   // backend/src/modules/manifests/ like the other six -- this test also
   // covers that moduleManifests.loadAll() discovers both sources (see the
   // comment there).
   const ids = manifests.list().map((m) => m.id).sort();
-  assert.deepEqual(ids, ['arm-translation', 'cifi', 'device-profile', 'gapps', 'gpu-mode', 'hwdec', 'hwenc', 'magisk', 'redroid-gralloc-fix', 'wifi-interno']);
+  assert.deepEqual(ids, ['arm-translation', 'cifi', 'device-profile', 'gapps', 'gpu-mode', 'hwdec', 'hwenc', 'magisk', 'redroid-gralloc-fix', 'wifi-interno', 'wifi-interno-virtwifi']);
 });
 
 test('moduleManifests: hwenc is discovered from its own folder, with etapa/entry', () => {
