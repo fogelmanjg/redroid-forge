@@ -166,7 +166,7 @@ function buildResourcesEditRow(inst, allInstances) {
   const tr = document.createElement('tr');
   tr.className = 'edit-row';
   const td = document.createElement('td');
-  td.colSpan = 9;
+  td.colSpan = 10;
   const panel = document.createElement('div');
   panel.className = 'resources-edit-panel';
 
@@ -354,7 +354,7 @@ function buildDisplayEditRow(inst) {
   const tr = document.createElement('tr');
   tr.className = 'edit-row';
   const td = document.createElement('td');
-  td.colSpan = 9;
+  td.colSpan = 10;
   const panel = document.createElement('div');
   panel.className = 'resources-edit-panel';
 
@@ -449,7 +449,7 @@ function buildDisplayEditRow(inst) {
 // POST /:id/display's `modules` REPLACES the whole optional list (see routes/instances.js),
 // not just the codec ones: toggling encode/decode must not silently drop gapps/arm/cifi/any
 // future user module the instance already has.
-const OPTIONAL_PER_INSTANCE = ['gapps', 'hwenc', 'hwdec', 'arm-translation', 'cifi'];
+const OPTIONAL_PER_INSTANCE = ['gapps', 'hwenc', 'hwdec', 'arm-translation', 'cifi', 'wifi-interno'];
 
 // Same 428 + pending manifests -> modal -> retry gate as applyDisplay/applyDeviceProfile.
 async function applyCodec(instanceId, modules) {
@@ -496,7 +496,7 @@ function buildCodecEditRow(inst) {
   const tr = document.createElement('tr');
   tr.className = 'edit-row';
   const td = document.createElement('td');
-  td.colSpan = 9;
+  td.colSpan = 10;
   const panel = document.createElement('div');
   panel.className = 'resources-edit-panel';
 
@@ -565,6 +565,86 @@ function buildCodecEditRow(inst) {
   return tr;
 }
 
+let openWifiInternoId = null;
+
+function buildWifiInternoCell(inst) {
+  const ids = inst.requiredModuleIds || [];
+  const active = ids.includes('wifi-interno');
+  const chip = document.createElement('span');
+  chip.className = 'resource-chip';
+  chip.textContent = t(active ? 'instances.wifiInterno.on' : 'instances.wifiInterno.off');
+  chip.title = t('instances.wifiInterno.changeHint');
+  chip.addEventListener('click', () => {
+    openWifiInternoId = openWifiInternoId === inst.id ? null : inst.id;
+    loadInstances({ silent: true });
+  });
+  return chip;
+}
+
+// Same recreate mechanism as buildCodecEditRow -- reuses applyCodec (a generic name: it just
+// POSTs whatever "modules" array it is given to /:id/display), since toggling wifi-interno goes
+// through the exact same route/semantics as hwenc/hwdec. Unlike those, it is not gated on
+// gpuMode="host" (its manifest declares compatibleCon.gpuMode: ["host","guest"] -- networking,
+// not GPU).
+function buildWifiInternoEditRow(inst) {
+  const tr = document.createElement('tr');
+  tr.className = 'edit-row';
+  const td = document.createElement('td');
+  td.colSpan = 10;
+  const panel = document.createElement('div');
+  panel.className = 'resources-edit-panel';
+
+  const header = document.createElement('div');
+  header.className = 'resources-edit-header';
+  header.textContent = t('instances.wifiInterno.header');
+  panel.appendChild(header);
+
+  const ids = inst.requiredModuleIds || [];
+  const wrap = document.createElement('label');
+  wrap.className = 'display-edit-field';
+  wrap.style.flexDirection = 'row';
+  const chk = document.createElement('input');
+  chk.type = 'checkbox';
+  chk.checked = ids.includes('wifi-interno');
+  wrap.appendChild(chk);
+  wrap.appendChild(document.createTextNode(t('instances.wifiInterno.label')));
+  panel.appendChild(wrap);
+
+  const applyBtn = document.createElement('button');
+  applyBtn.type = 'button';
+  applyBtn.className = 'secondary';
+  applyBtn.textContent = t('instances.resources.apply');
+  applyBtn.addEventListener('click', async () => {
+    if (inst.status === 'running' && !confirm(t('instances.display.confirmRunning'))) return;
+    applyBtn.disabled = true;
+    try {
+      const modules = ids.filter((id) => OPTIONAL_PER_INSTANCE.includes(id) && id !== 'wifi-interno');
+      if (chk.checked) modules.push('wifi-interno');
+      await applyCodec(inst.id, modules);
+      openWifiInternoId = null;
+    } catch (e) {
+      alert(e.message);
+    } finally {
+      applyBtn.disabled = false;
+      await loadInstances({ silent: true });
+    }
+  });
+  panel.appendChild(applyBtn);
+
+  const cancelBtn = document.createElement('button');
+  cancelBtn.type = 'button';
+  cancelBtn.textContent = t('common.cancel');
+  cancelBtn.addEventListener('click', () => {
+    openWifiInternoId = null;
+    loadInstances({ silent: true });
+  });
+  panel.appendChild(cancelBtn);
+
+  td.appendChild(panel);
+  tr.appendChild(td);
+  return tr;
+}
+
 // The backend only allows applying a profile while the instance is running (it needs the overlay
 // writable, see deviceProfile.js) -- the select+button only render in that state, matching how the
 // Actions column already hides start/stop/restart/delete that do not apply to the current status.
@@ -614,11 +694,11 @@ function buildDeviceProfileCell(inst) {
 // `silent`: the periodic refresh does not flash "Loading..." over the table.
 async function loadInstances({ silent = false } = {}) {
   const tbody = $('#instances-table tbody');
-  if (!silent) tbody.innerHTML = `<tr><td colspan="9">${t('common.loading')}</td></tr>`;
+  if (!silent) tbody.innerHTML = `<tr><td colspan="10">${t('common.loading')}</td></tr>`;
   try {
     const instances = await api('/instances');
     if (instances.length === 0) {
-      tbody.innerHTML = `<tr><td colspan="9">${t('instances.none')}</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="10">${t('instances.none')}</td></tr>`;
       return;
     }
     // Built off-screen and swapped in one go, so a refresh never leaves the table half drawn.
@@ -634,6 +714,7 @@ async function loadInstances({ silent = false } = {}) {
         <td class="device-profile-cell"></td>
         <td class="resources-cell"></td>
         <td class="codec-cell"></td>
+        <td class="wifi-interno-cell"></td>
         <td class="actions"></td>
       `;
       const state = InstanceState.describe(inst.status);
@@ -650,6 +731,7 @@ async function loadInstances({ silent = false } = {}) {
       tr.querySelector('.device-profile-cell').appendChild(buildDeviceProfileCell(inst));
       tr.querySelector('.resources-cell').appendChild(buildResourcesCell(inst));
       tr.querySelector('.codec-cell').appendChild(buildCodecCell(inst));
+      tr.querySelector('.wifi-interno-cell').appendChild(buildWifiInternoCell(inst));
       const actions = tr.querySelector('.actions');
       if (inst.hasGapps && inst.androidId && !inst.androidIdRegisteredAt) {
         const link = document.createElement('a');
@@ -721,10 +803,11 @@ async function loadInstances({ silent = false } = {}) {
       if (openResourcesId === inst.id) rows.appendChild(buildResourcesEditRow(inst, instances));
       if (openDisplayId === inst.id) rows.appendChild(buildDisplayEditRow(inst));
       if (openCodecId === inst.id) rows.appendChild(buildCodecEditRow(inst));
+      if (openWifiInternoId === inst.id) rows.appendChild(buildWifiInternoEditRow(inst));
     }
     tbody.replaceChildren(rows);
   } catch (e) {
-    tbody.innerHTML = `<tr><td colspan="9">${t('common.error', { msg: e.message })}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="10">${t('common.error', { msg: e.message })}</td></tr>`;
   }
 }
 
@@ -960,6 +1043,7 @@ $('#btn-new-instance').addEventListener('click', async () => {
   $('#chk-arm').checked = false;
   $('#chk-hwenc').checked = false;
   $('#chk-hwdec').checked = false;
+  $('#chk-wifi-interno').checked = false;
   resetGappsStatus();
   dialog.showModal();
   refreshHwencOption();
@@ -1007,6 +1091,7 @@ $('#new-instance-form').addEventListener('submit', async (e) => {
   if (form.hwdec.checked) modules.push('hwdec');
   if (form.gapps.checked) modules.push('gapps');
   if (form.arm.checked) modules.push('arm-translation');
+  if (form.wifiInterno.checked) modules.push('wifi-interno');
   for (const chk of $$('.user-module-chk')) if (chk.checked) modules.push(chk.dataset.id);
   const display = {
     width: Number(form.width.value), height: Number(form.height.value), dpi: Number(form.dpi.value), fps: Number(form.fps.value),

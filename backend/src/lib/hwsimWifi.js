@@ -119,7 +119,7 @@ const instancesHoldingHwsim = new Set();
 // wrongly conclude "someone else is using hwsim" and skip a reload that could
 // have freed radios for both (a real code-review finding, PR #3).
 async function anyOtherInstanceUsingHwsim(excludeContainerId) {
-  const others = store.readAll().filter((i) => i.needsHwsimWifi && i.containerId && i.containerId !== excludeContainerId);
+  const others = store.readAll().filter((i) => (i.requiredModuleIds || []).includes('wifi-interno') && i.containerId && i.containerId !== excludeContainerId);
   for (const other of others) {
     if (!instancesHoldingHwsim.has(other.containerId)) continue;
     try {
@@ -218,8 +218,56 @@ async function claimAndAssignHwsimPair(instanceId, containerId, pid) {
   }
 }
 
-// Runs on every start (Docker recreates the netns each time). An instance's phys
-// return on their own to the host's netns when its container dies.
+// Attempts to release this instance's claimed phys back to the host's default netns BEFORE Docker
+// tears the container's netns down (stop/restart/remove/recreate) -- jg-dashboard's documented fix
+// for "phys do not return on their own" (docs/ROADMAP.md Phase 3 step 5, confirmed for real there
+// 22/10/2026: a phy still inside a netns when the netns itself is torn down was observed to be
+// FREED by the kernel instead of migrated back, on that host/kernel).
+//
+// **Ported here 23/10/2026, but the move itself (`iw phy <phy> set netns <target>`, nsentered into
+// the instance's netns so the phy is actually visible to the caller) reproducibly fails with
+// "No such file or directory (-2)" on this host (confirmed: same failure with the plain
+// non-nsentered form, with a valid non-"1" target pid, and with `iw dev` succeeding in the exact
+// same nsenter call right before it -- root cause not found; likely some nl80211 netns-ownership
+// check on the SET_WIPHY_NETNS path that the claim direction never exercises).** Despite that,
+// phys were empirically observed to correctly return to the host's default netns after both a
+// plain stop() and a display-triggered recreate on THIS host (`iw dev` count back to the full
+// pool both times) -- i.e. whatever bug jg-dashboard hit may not reproduce on this kernel, or only
+// under conditions not exercised by these two tests. Kept anyway as a cheap, harmless best-effort
+// attempt (every failure is only logged, never thrown) for whichever host this does matter on --
+// NOT yet a trusted safety net. If phys do go missing on some host, `claimAndAssignHwsimPair`'s
+// own "0 free phys -> reload mac80211_hwsim" fallback is the actual safety net today.
+async function releaseHwsimPhys(instanceId, containerId) {
+  let pid;
+  try {
+    pid = await runtime.getPid(containerId);
+  } catch (e) {
+    log(`releaseHwsimPhys: could not get the PID of ${instanceId} (container likely already gone): ${e}`);
+    return;
+  }
+  let pairs = [];
+  try {
+    const { stdout } = await execFileAsync('nsenter', ['-t', String(pid), '-n', 'iw', 'dev']);
+    pairs = parsePhyIfacePairs(stdout);
+  } catch (e) {
+    log(`releaseHwsimPhys: 'nsenter -n iw dev' failed for ${instanceId}: ${e}`);
+    return;
+  }
+  for (const { phy } of pairs) {
+    try {
+      await execFileAsync('nsenter', ['-t', String(pid), '-n', 'iw', 'phy', phy, 'set', 'netns', '1']);
+      log(`${phy} released from ${instanceId}'s netns back to the host`);
+    } catch (e) {
+      // Downgraded to log() (not warn()): this is currently EXPECTED to fail on this host/kernel
+      // (see the function comment) -- warn() would cry wolf on every single stop of a wifi-interno
+      // instance, drowning out real warnings.
+      log(`releaseHwsimPhys: could not release ${phy} for ${instanceId} (known gap, see comment): ${e.message || e}`);
+    }
+  }
+  instancesHoldingHwsim.delete(containerId);
+}
+
+// Runs on every start (Docker recreates the netns each time).
 async function ensureHwsimWifi(instanceId, containerId) {
   try {
     await execFileAsync('modprobe', ['mac80211_hwsim', `radios=${HWSIM_RADIO_COUNT}`]);
@@ -327,5 +375,6 @@ module.exports = {
   ensureHwsimWifi, scheduleHwsimWifiFix,
   ensureWifiConnected, scheduleWifiConnectedFix,
   ensureEth0Routing, scheduleEth0RoutingFix,
+  releaseHwsimPhys,
   _resetHwsimClaimTailForTests,
 };

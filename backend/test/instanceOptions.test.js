@@ -23,6 +23,9 @@ test('modules given: EXACTLY those -- an instance can opt out of hwenc by not li
   assert.deepStrictEqual(moduleGate.requiredModuleIds(imgHw, []), []);
   assert.deepStrictEqual(moduleGate.requiredModuleIds(imgHw, ['gapps']), ['gapps']);
   assert.deepStrictEqual(moduleGate.requiredModuleIds(imgHw, ['gapps', 'hwenc']), ['gapps', 'hwenc']);
+  // wifi-interno can now be opted into per instance even on an image that does not force it
+  // (needsHwsimWifi: false/unset) -- not only bound by the image like before.
+  assert.deepStrictEqual(moduleGate.requiredModuleIds(imgHw, ['wifi-interno']), ['wifi-interno']);
   assert.deepStrictEqual(moduleGate.requiredModuleIds(imgHw, ['hwenc', 'hwenc']), ['hwenc'], 'no duplicates');
 });
 
@@ -32,8 +35,8 @@ test('hwenc cannot be requested on an image that does not support it', () => {
 
 test('the modules bound to the image stay on whatever is requested', () => {
   const img = { ...imgHw, hasGapps: true, needsHwsimWifi: true };
-  assert.deepStrictEqual(moduleGate.requiredModuleIds(img, []), ['gapps', 'wifi-falso']);
-  assert.deepStrictEqual(moduleGate.requiredModuleIds(img, ['gapps', 'hwenc']), ['gapps', 'wifi-falso', 'hwenc']);
+  assert.deepStrictEqual(moduleGate.requiredModuleIds(img, []), ['gapps', 'wifi-interno']);
+  assert.deepStrictEqual(moduleGate.requiredModuleIds(img, ['gapps', 'hwenc']), ['gapps', 'wifi-interno', 'hwenc']);
 });
 
 test('hwdec (decode) is independent of hwenc (encode) -- either, neither, or both', () => {
@@ -47,7 +50,7 @@ test('hwdec cannot be requested on an image that does not support it either', ()
 });
 
 test('only the optional modules can be requested', () => {
-  for (const bad of [['magisk'], ['wifi-falso'], ['device-profile'], ['nope']]) {
+  for (const bad of [['magisk'], ['device-profile'], ['nope']]) {
     assert.throws(() => moduleGate.requiredModuleIds(imgHw, bad), (e) => e.httpStatus === 400, bad.join());
   }
 });

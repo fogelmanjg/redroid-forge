@@ -360,15 +360,50 @@ and adapting the `build.prop` paths that are already known to vary per image.
    that DOES accept `-c`) and it does not reproduce there; don't assume it's fine on every image without
    checking its `su` the same way.
 
+7. **Renamed to "wifi-interno" and wired as a real per-instance optional module, 23/10/2026** (the
+   catalog's own `needsHwsimWifi` flag/field keeps its name -- only the user-facing module id
+   changed, matching `kernel/virt_wifi/README.md`'s naming note: "wifi-interno" over "fake-wifi"/
+   "wifi-falso", same idea, no negative framing). `wifi-falso.json` → `wifi-interno.json`; added to
+   `moduleGate.OPTIONAL_PER_INSTANCE` (an image can still FORCE it via `needsHwsimWifi`, same dual
+   pattern as gapps/`hasGapps`, but any image can now also have it opted into per instance). Exposed
+   in the frontend both at creation (a checkbox next to gapps/arm-translation) and on an existing
+   instance (its own column + edit row, reusing the exact `/:id/display` recreate route and 428
+   contract-gate flow already used by the hwenc/hwdec codec toggle). `scheduleWifiFixes` (the trigger
+   that actually runs `hwsimWifi`'s claim) now reads `requiredModuleIds` directly instead of a
+   separately-cached `needsHwsimWifi` boolean that was never recomputed on an edit -- the previous
+   field would have gone stale the moment someone toggled this through the new edit UI.
+   **Validated for real** against this host's real Docker: created an instance with `wifi-interno`
+   (428 contract gate fired correctly, accepted, created, 2 phys claimed into its netns, confirmed via
+   `iw dev`), toggled it off through the edit route (recreated, no new claim), stopped/deleted it
+   (host phy count back to the full pool of 6 both times).
+   **Attempted but not actually working: porting jg-dashboard's `releaseHwsimPhys` (phy-release-
+   before-teardown) fix**, flagged as needed in step 5 above "once an instance actually uses this
+   module for real" -- which, as of this step, it now does. Wired into stop/restart/delete/the
+   display-recreate path (`hwsimWifi.releaseHwsimPhys`, same `nsenter -t <pid> -n iw dev` discovery
+   as jg-dashboard). The move itself (`iw phy <phy> set netns <target>`, also nsentered into the
+   instance's netns so the phy is visible to the caller) **reproducibly fails** on this host with
+   "No such file or directory (-2)" -- tried the plain non-nsentered form, a valid non-"1" target
+   pid, and confirmed `iw dev` succeeds in the exact same nsenter call right before it; root cause
+   not found (likely some nl80211 netns-ownership check on the SET_WIPHY_NETNS path that the claim
+   direction, which always moves FROM the caller's own current netns, never exercises). Despite that,
+   phys were empirically observed to correctly return to the host's default netns on their own after
+   both a plain stop() and a display-triggered recreate on **this** host/kernel -- so whatever bug
+   jg-dashboard hit there may simply not reproduce here, or only under conditions these two tests
+   didn't exercise. Left in place as a harmless best-effort (logs at `log()`, not `warn()`, so it
+   does not cry wolf on every stop -- see the function's own comment in `hwsimWifi.js`), **not** as a
+   trusted safety net -- re-investigate (strace/kernel source, or just re-test on whichever host ends
+   up running this in anger) before relying on it. The actual safety net today is still
+   `claimAndAssignHwsimPair`'s own "0 free phys → reload mac80211_hwsim" fallback.
+
 **Gate:** the profile spoof can be applied/reverted from the new UI, with the correct `build.prop` files
 according to the image, and restarting two or more instances with fake WiFi at the same time leaves none
 without radios. **Partial:** the concurrency fix, the profile spoof (via API, now verified against real
-Docker, not just a mock), the exec PATH/su-syntax bugs, and the phy-leak-on-stop root cause are all done;
-missing to close the gate completely: the UI (step 3, device-profile selector — the instances table/API
-wiring for it was actually built this same session, see `frontend/app.js`'s device-profile column, but
-double-check it's current before assuming step 3 is done too), wiring `needsHwsimWifi` to a real catalog
-image so this module can be exercised end-to-end as redroid-forge itself (not just via `jg-dashboard`), and
-re-validating the concurrency fix on real hardware under a safe (non-production) setup.
+Docker, not just a mock), the exec PATH/su-syntax bugs, the phy-leak-on-stop root cause, and wiring
+`wifi-interno` as a real per-instance module (step 7) are all done; missing to close the gate completely:
+re-validating the concurrency fix (two instances claiming at once) on real hardware under a safe
+(non-production) setup, and resolving the phy-release-on-stop gap above for good (it may simply not be a
+real problem on this host, but that has not been confirmed either way under the exact conditions
+jg-dashboard's incident happened under).
 
 ## Phase 4 — Generic module contract system
 

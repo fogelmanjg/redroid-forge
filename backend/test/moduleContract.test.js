@@ -48,7 +48,7 @@ test('moduleManifests: the catalog has the 6 modules of section 5 of REQUIREMENT
   // covers that moduleManifests.loadAll() discovers both sources (see the
   // comment there).
   const ids = manifests.list().map((m) => m.id).sort();
-  assert.deepEqual(ids, ['arm-translation', 'cifi', 'device-profile', 'gapps', 'gpu-mode', 'hwdec', 'hwenc', 'magisk', 'redroid-gralloc-fix', 'wifi-falso']);
+  assert.deepEqual(ids, ['arm-translation', 'cifi', 'device-profile', 'gapps', 'gpu-mode', 'hwdec', 'hwenc', 'magisk', 'redroid-gralloc-fix', 'wifi-interno']);
 });
 
 test('moduleManifests: hwenc is discovered from its own folder, with etapa/entry', () => {
@@ -163,7 +163,7 @@ test('Phase 4 gate: GApps stays blocked until its manifest is accepted, then it 
   assert.equal(afterAccepting.ok, true);
 }));
 
-// Phase 5: hwenc becomes required just like gapps/magisk/wifi-falso when the
+// Phase 5: hwenc becomes required just like gapps/magisk/wifi-interno when the
 // image declares hwEncCapable=true (see moduleGate.requiredModuleIdsForImage)
 // -- the same generic consent flow, even though hwenc is an own module
 // (esTerceroNoLibre=false) and not a third-party one.

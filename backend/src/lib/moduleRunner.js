@@ -61,7 +61,7 @@ function loadEntry(manifest) {
 
 // Modules, from the list of ids required by the image (see
 // moduleGate.requiredModuleIdsForImage), that also declare "etapa"/"entry" --
-// the "pure contract" modules (gapps/magisk/wifi-falso today, with no execution
+// the "pure contract" modules (gapps/magisk/wifi-interno today, with no execution
 // logic of their own yet) have no "entry", and it breaks nothing that they do
 // not: they simply do not take part in any stage of this runner.
 function modulesForStage(requiredModuleIds, stage) {

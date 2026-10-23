@@ -28,7 +28,7 @@
       <table id="instances-table">
         <thead>
           <tr>
-            <th data-i18n="instances.col.name">Name</th><th data-i18n="instances.col.image">Image</th><th data-i18n="instances.col.status">Status</th><th data-i18n="instances.col.adb">ADB</th><th data-i18n="instances.col.androidId">Android ID (GApps)</th><th data-i18n="instances.col.deviceProfile">Device profile</th><th data-i18n="instances.col.resources">CPU / RAM</th><th data-i18n="instances.col.codec">Encode / Decode</th><th data-i18n="instances.col.actions">Actions</th>
+            <th data-i18n="instances.col.name">Name</th><th data-i18n="instances.col.image">Image</th><th data-i18n="instances.col.status">Status</th><th data-i18n="instances.col.adb">ADB</th><th data-i18n="instances.col.androidId">Android ID (GApps)</th><th data-i18n="instances.col.deviceProfile">Device profile</th><th data-i18n="instances.col.resources">CPU / RAM</th><th data-i18n="instances.col.codec">Encode / Decode</th><th data-i18n="instances.col.wifiInterno">Internal WiFi</th><th data-i18n="instances.col.actions">Actions</th>
           </tr>
         </thead>
         <tbody></tbody>
@@ -121,6 +121,8 @@ gunzip -c image.tar.gz | docker load</pre>
       <label class="contract-checkbox"><input type="checkbox" name="arm" id="chk-arm" />
         <span data-i18n="new.arm">ARM translation (arm64 apps and games)</span></label>
       <p id="arm-status" class="muted" hidden></p>
+      <label class="contract-checkbox"><input type="checkbox" name="wifiInterno" id="chk-wifi-interno" />
+        <span data-i18n="new.wifiInterno">Internal WiFi (simulated WiFi)</span></label>
       <fieldset class="user-modules-fields">
         <legend data-i18n="new.userModules">User modules (per-game/situation automations)</legend>
         <div id="user-modules-list" class="muted" data-i18n="common.loading">Loading...</div>

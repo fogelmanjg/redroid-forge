@@ -201,11 +201,26 @@ async function reconcileDeviceProfile(instance) {
   return instance;
 }
 
+// Reads requiredModuleIds directly (not a separately-cached boolean) so this stays correct across
+// an edit too: wifi-interno can now be toggled per instance (see moduleGate.OPTIONAL_PER_INSTANCE),
+// not only bound by the image, and requiredModuleIds is the one place that is always kept current
+// on every write (create AND the /:id/display recreate).
 function scheduleWifiFixes(instance) {
-  if (!instance.needsHwsimWifi) return;
+  const ids = instance.requiredModuleIds || [];
+  if (!ids.includes('wifi-interno')) return;
   hwsimWifi.scheduleHwsimWifiFix(instance.id, instance.containerId);
   hwsimWifi.scheduleWifiConnectedFix(instance.id, instance.containerId);
   hwsimWifi.scheduleEth0RoutingFix(instance.id, instance.containerId);
+}
+
+// Phys claimed into this instance's netns have to be moved back to the host's BEFORE Docker tears
+// that netns down -- see hwsimWifi.releaseHwsimPhys's own comment for why. No-op for an instance
+// that never had wifi-interno, and best-effort (never throws) for one that did but whose container
+// is already gone.
+async function releaseWifiFixes(instance) {
+  const ids = instance.requiredModuleIds || [];
+  if (!ids.includes('wifi-interno') || !instance.containerId) return;
+  await hwsimWifi.releaseHwsimPhys(instance.id, instance.containerId);
 }
 
 async function withRuntimeStatus(instance) {
@@ -299,7 +314,7 @@ router.post('/', async (req, res) => {
       adbPort,
       binderSlot: slot,
       volumeName,
-      needsHwsimWifi: !!img.needsHwsimWifi,
+      needsHwsimWifi: !!img.needsHwsimWifi || requiredModuleIds.includes('wifi-interno'),
       hasGapps: !!img.hasGapps || requiredModuleIds.includes('gapps'),
       hwEncCapable: !!img.hwEncCapable,
       requiredModuleIds,
@@ -358,6 +373,7 @@ router.post('/:id/stop', async (req, res) => {
   if (!instance) return res.status(404).json({ error: 'Instancia no encontrada' });
   try {
     moduleScheduler.stop(instance.id);
+    await releaseWifiFixes(instance);
     await runtime.stop(instance.containerId);
     res.json(await withRuntimeStatus(instance));
   } catch (e) {
@@ -373,6 +389,9 @@ router.post('/:id/restart', async (req, res) => {
     const requiredModuleIds = requiredModuleIdsFor(instance);
     await moduleRunner.ensureHostInfraReady(requiredModuleIds);
     moduleScheduler.stop(instance.id); // cleared and rescheduled below -- never double-ticking across a restart
+    // Docker's own restart = stop + start under the hood -- the same netns teardown a plain
+    // stop() does, so the phys have to be released here too (before, not after).
+    await releaseWifiFixes(instance);
     await runtime.restart(instance.containerId);
     const reconciled = await reconcileDeviceProfile(instance);
     scheduleWifiFixes(reconciled);
@@ -521,6 +540,7 @@ router.post('/:id/display', async (req, res) => {
     // remove in that case; runtime.remove() itself has no "already gone" tolerance like
     // start()/stop() do, it would throw "No such container: null".
     if (instance.containerId) {
+      await releaseWifiFixes(instance);
       await runtime.remove(instance.containerId, { force: true });
       // Persisted right away, before create() is even attempted: if create() itself fails
       // below (a real possibility -- missing image, no free binder slot, ...), the stored
@@ -567,7 +587,13 @@ router.post('/:id/display', async (req, res) => {
     // re-apply the still-desired `deviceProfile` on the next boot, exactly like a change made
     // while the instance was stopped already does.
     let updated = store.upsert({
-      ...instance, containerId, display, gpuMode: img.gpuMode, requiredModuleIds, deviceProfileApplied: null,
+      ...instance,
+      containerId,
+      display,
+      gpuMode: img.gpuMode,
+      requiredModuleIds,
+      needsHwsimWifi: !!img.needsHwsimWifi || requiredModuleIds.includes('wifi-interno'),
+      deviceProfileApplied: null,
     });
 
     if (wasRunning) {
@@ -611,6 +637,7 @@ router.delete('/:id', async (req, res) => {
   if (!instance) return res.status(404).json({ error: 'Instancia no encontrada' });
   try {
     moduleScheduler.stop(instance.id);
+    await releaseWifiFixes(instance);
     await runtime.remove(instance.containerId, { force: true });
     if (instance.volumeName) await runtime.removeVolume(instance.volumeName);
     store.remove(instance.id);

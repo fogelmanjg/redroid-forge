@@ -222,7 +222,7 @@ function withRealManifests(fn) {
 }
 
 test('moduleRunner: a required module without an "entry" (the pure contract modules of Phase 4) takes part in no stage', () => withRealManifests(async () => {
-  // magisk/wifi-falso (the existing flat manifests) declare no etapa/entry --
+  // magisk/wifi-interno (the existing flat manifests) declare no etapa/entry --
   // asking the runner to run their stages must not fail, it must simply do
   // nothing. (gapps stopped being one of them: it has its own folder and stages 4 and 6.)
   const createReq = await moduleRunner.prepareCreate(['magisk']);

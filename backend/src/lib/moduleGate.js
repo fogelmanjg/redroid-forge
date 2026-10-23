@@ -14,7 +14,7 @@ function requiredModuleIdsForImage(img) {
   const ids = [];
   if (img.hasGapps) ids.push('gapps');
   if (img.hasMagisk) ids.push('magisk');
-  if (img.needsHwsimWifi) ids.push('wifi-falso');
+  if (img.needsHwsimWifi) ids.push('wifi-interno');
   // The gralloc crash this patches only happens in host GPU mode (its own manifest: "host GPU
   // mode on AMD... Intel", compatibleCon.gpuMode: ["host"]) -- guest mode never hits that code
   // path at all, so it is not merely "incompatible" there, it is simply not needed. `img.gpuMode`
@@ -37,9 +37,12 @@ function defaultModuleIdsForImage(img) {
 
 // Modules that the user can choose PER INSTANCE when creating it (POST /api/instances
 // {"modules": ["gapps", "hwenc", "arm-translation"]}). Anything else in that list is rejected: the request body must
-// not be able to switch on modules that are not meant to be optional (fake WiFi depends on the
-// image, device-profile has its own flow).
-const OPTIONAL_PER_INSTANCE = ['gapps', 'hwenc', 'hwdec', 'arm-translation', 'cifi'];
+// not be able to switch on modules that are not meant to be optional (device-profile has its own
+// flow). wifi-interno is both: an image can still force it (needsHwsimWifi, see
+// requiredModuleIdsForImage above) for apps that do not work at all without it, but any OTHER
+// image can also have it opted into per instance (e.g. to test a WiFi-dependent app on an image
+// that does not declare it by default) -- same dual pattern as gapps/hasGapps.
+const OPTIONAL_PER_INSTANCE = ['gapps', 'hwenc', 'hwdec', 'arm-translation', 'cifi', 'wifi-interno'];
 
 // The modules of an instance: what the image is bound to, plus the optional ones.
 //  - `requested` omitted (undefined/null): the image's defaults (hwenc if it supports it).
