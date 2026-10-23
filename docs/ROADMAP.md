@@ -647,3 +647,18 @@ mechanism is picked up again (section 8 of `REQUIREMENTS.md`), not before.
   driver-specific (AMD, Intel, NVIDIA). **First step, a ~1-day spike:** see whether gralloc allocates NV12
   without breaking anything and whether the daemon can import that fd and write into it, before committing
   to the design.
+- **"Is this build genuine?" check (idea, 23/10/2026).** Apache-2.0 means anyone can fork this and add
+  something the project itself never will (e.g. a Play Integrity spoofing module, once Magisk is already a
+  supported module) -- expected if the project ever gets popular, and not something a license can prevent.
+  The goal is NOT to block forks (impossible, and not the point: whoever forks already knows they forked) --
+  it is to give a good-faith user an easy, voluntary way to confirm whether the specific build they are
+  running came from this repo unmodified. **Self-reporting inside redroid-forge proves nothing on its own**
+  (a modified fork can just hardcode "yes I'm official"): the real anchor has to be something a fork cannot
+  forge. GitHub's native build provenance attestations (Sigstore/OIDC, already free, no private key to
+  manage) are the right primitive -- CI produces a signed statement tying an exact image digest to an exact
+  commit, repo and workflow; a fork's own CI run would attest to ITS OWN repo identity, which is publicly,
+  cryptographically distinguishable from `fogelmanjg/redroid-forge`. A small Plenum-hosted page/endpoint
+  (receives an image digest, looks up its public attestation) would be a convenience layer on top of that
+  public verification, not the trust root itself -- nice for a fleet-wide dashboard and for a casual user who
+  does not want to run `gh attestation verify` by hand. Entirely opt-in by design, same ceiling as any
+  "verified" badge: it only helps whoever chooses to check.
