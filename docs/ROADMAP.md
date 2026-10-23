@@ -662,3 +662,27 @@ mechanism is picked up again (section 8 of `REQUIREMENTS.md`), not before.
   public verification, not the trust root itself -- nice for a fleet-wide dashboard and for a casual user who
   does not want to run `gh attestation verify` by hand. Entirely opt-in by design, same ceiling as any
   "verified" badge: it only helps whoever chooses to check.
+- **Module categories + an `aurora-store` module (idea, 23/10/2026).** With ~8 modules already
+  (`redroid-gralloc-fix`, `hwenc`, `hwdec`, `gapps`, `arm-translation`, `cifi`, `wifi-interno`/
+  `wifi-interno-virtwifi`) the flat checkbox list in the "new instance" form is getting crowded. Two
+  separate additions, not one:
+  - A `categoria` field in the manifest (`codec`, `compat`, `network`, `store`, `utility`), purely for
+    grouping the catalog/form UI -- no behavior tied to it.
+  - `aurora-store`: an open-source (GPLv3) client for Google Play's real backend -- unlike `gapps`/
+    `arm-translation` it CAN be redistributed by this project (no "you provide the files" dance), and
+    unlike every other module so far it needs no `/system` write before boot (install it after first
+    boot like any user app, no `moduleRunner` stage-4 involvement). Found while chasing a real
+    "may not have purchased this app" error on a test PvZ2 install (manual `adb push` of the APK/OBB
+    has no Play purchase record attached to it; downloading through Aurora with a real logged-in
+    account does, since it is the same backend Play itself uses). Caveat: depends on a community-run,
+    reverse-engineered Play API (token dispenser services) that Google can break at any time -- much
+    less solid than the hash-pinned official SDK images `gapps`/`arm-translation` use, so this would
+    ship as a convenience option, not with the same guarantee level as the rest.
+  - **`gapps` and `aurora-store` are not alternatives, they are complementary** -- Aurora only
+    downloads the APK legitimately, it does not provide Play Services at runtime, so apps that need
+    those still need `gapps` too. This is the actual reason the "category" idea needs a second,
+    separate field: `conflictsWith` (hard exclusion, enforced by `moduleGate.js` -- the first real use
+    would be formalizing what `wifi-interno-virtwifi`'s own manifest already says in prose today, "do
+    not enable both wifi modules on the same instance", never actually checked in code) vs
+    `relatedModules` (soft, informational only -- what `gapps` and `aurora-store` need between them).
+    Neither field exists yet; design only, nothing implemented.
