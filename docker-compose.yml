@@ -3,8 +3,10 @@ services:
     build:
       context: .
       args:
-        # 1 = daemon with hardware decode (development only, see the Dockerfile)
-        HWDEC: ${HWDEC:-0}
+        # 1 = daemon with hardware decode (own minimal LGPL FFmpeg build, see the Dockerfile) -- on
+        # by default since 23/10/2026; set HWDEC=0 only to skip building it (e.g. a smaller image
+        # on a host that will never use it).
+        HWDEC: ${HWDEC:-1}
     container_name: redroid-forge
     privileged: true
     pid: host

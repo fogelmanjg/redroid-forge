@@ -100,7 +100,19 @@ Venus-proxy, NVENC), with already-known driver quirks (e.g. the scanline artifac
    and H.264 only). **License:** Alpine's FFmpeg is built with `--enable-gpl --enable-version3`; linking it
    would make the image a GPLv3 work, incompatible with publishing an Apache-2.0 image. That is why the
    `Dockerfile` **builds its own minimal libavcodec (LGPL, `--disable-gpl`)**, only with the necessary
-   decoders and the VA-API hwaccel, from a tarball pinned by version and `sha256`.
+   decoders and the VA-API hwaccel, from a tarball pinned by version.
+
+   **✅ implemented 23/10/2026** (until then this paragraph described the plan, not the actual
+   `Dockerfile`, which still used Alpine's GPL package behind a "development only" `HWDEC=0` default).
+   New multi-stage build (`ffmpeg-lgpl`): configures FFmpeg 8.0.1 with `--disable-gpl --disable-nonfree
+   --disable-everything`, enabling only the 7 decoders hwdec.c actually calls (h264/hevc/vp8/vp9/
+   mpeg2video/vc1/av1) plus their `*_vaapi` hwaccels — no avformat/avfilter/avdevice/swscale/swresample,
+   no encoders. FFmpeg's own `configure` confirms the resulting build as `License: LGPL version 2.1 or
+   later`, same source release Alpine ships, zero API/behavior difference in `hwdec.c`. Validated full
+   `docker build` + real decode against server01's AMD Renoir (`h264 hevc(+10b) vp9(+10b) mpeg2 vc1`,
+   same capability already proven with Alpine's GPL package). Resulting libs are smaller too (~8 MB vs
+   Alpine's full 19 MB package). **`HWDEC` default flipped from `0` to `1`** — no longer dev-only, this
+   removes the last blocker to it being on by default in a public Apache-2.0 image.
 
    Sub-steps: (1) ✅ **done on 06/10/2026**: a vendor-agnostic decode session with libavcodec
    (`backend/native/vaapi-daemon/hwdec.c`, not wired to the daemon yet), tested only on the host with a
