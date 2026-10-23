@@ -686,3 +686,20 @@ mechanism is picked up again (section 8 of `REQUIREMENTS.md`), not before.
     not enable both wifi modules on the same instance", never actually checked in code) vs
     `relatedModules` (soft, informational only -- what `gapps` and `aurora-store` need between them).
     Neither field exists yet; design only, nothing implemented.
+  - **Validated by hand, 23/10/2026.** Two more real findings from testing Aurora manually on a
+    throwaway instance (host GPU, 2 vCPU, 4 GB RAM, `arm-translation` only, no `gapps`/wifi): (1) Aurora
+    4.8.4 crashes on its own app-list screens with `IllegalArgumentException: Key "..." was already
+    used` (a Jetpack Compose `LazyColumn` duplicate-key bug introduced by that version's UI rewrite,
+    confirmed against the official changelog -- 4.8.3, the last pre-Compose release, does not have it);
+    (2) a *second*, unrelated crash the first time Aurora's own WebView-based screen (login) opened --
+    same native `SIGSEGV` in the sandboxed WebView renderer that `gapps` already works around by writing
+    `/data/local/tmp/webview-command-line` (`--no-sandbox --single-process
+    --disable-features=WebViewSandboxedRenderer`); applying the exact same fix by hand resolved it.
+    **Any real `aurora-store` module needs both: pin 4.8.3 (or whatever the next pre-crash release
+    turns out to be) and write the webview-command-line fix itself, independent of `gapps`.**
+    Separately: Aurora talks to the same Play catalog backend as the Play Store app, with the same
+    device identity, so by itself it does NOT fix an app missing from the catalog on an uncertified
+    device (confirmed: PvZ2 was missing from Aurora's listing too, same as Play Store). Aurora's own
+    **device-spoofing setting** (present itself as a different device model) does fix catalog
+    visibility -- tested, PvZ2 appeared and downloaded normally after spoofing to a different device
+    profile. Worth exposing as a documented option of the module, not left for the user to find.
