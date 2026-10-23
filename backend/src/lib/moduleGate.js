@@ -42,7 +42,7 @@ function defaultModuleIdsForImage(img) {
 // requiredModuleIdsForImage above) for apps that do not work at all without it, but any OTHER
 // image can also have it opted into per instance (e.g. to test a WiFi-dependent app on an image
 // that does not declare it by default) -- same dual pattern as gapps/hasGapps.
-const OPTIONAL_PER_INSTANCE = ['gapps', 'hwenc', 'hwdec', 'arm-translation', 'cifi', 'wifi-interno'];
+const OPTIONAL_PER_INSTANCE = ['gapps', 'hwenc', 'hwdec', 'arm-translation', 'cifi', 'wifi-interno', 'wifi-interno-virtwifi'];
 
 // The modules of an instance: what the image is bound to, plus the optional ones.
 //  - `requested` omitted (undefined/null): the image's defaults (hwenc if it supports it).
