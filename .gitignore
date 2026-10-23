@@ -7,4 +7,5 @@ backend/native/vaapi-daemon/hwdec-test
 scenario-results/
 backend/data/gapps/
 backend/data/arm-translation/
+backend/data/virtwifi-overlay/
 __pycache__/

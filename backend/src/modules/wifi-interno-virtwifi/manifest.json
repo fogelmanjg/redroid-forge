@@ -4,6 +4,7 @@
   "esTerceroNoLibre": false,
   "descripcion": "EXPERIMENTAL alternative to \"wifi-interno\" (mac80211_hwsim): same fake WiFi HAL (SupplicantStaIfaceHalHidlImplExt, makes apps that refuse to run without a detected WiFi connection work), but backed by a per-instance virt_wifi net_device that wraps the instance's own eth0 directly inside its own netns -- no shared pool of radios to claim/move, no race between instances starting together. Still only validated by hand in disposable test containers, never against a real app or a long-lived instance -- do NOT enable this on jg-dashboard/pvz2-tv or anything that matters; use \"wifi-interno\" (hwsim) for that. Do not enable both modules on the same instance.",
   "queToca": [
+    "before the first boot, copies our own patched com.android.wifi.apex + com.android.tethering.apex + framework-res.apk into the instance's /system (REDROID_FORGE_VIRTWIFI_OVERLAY_DIR, default backend/data/virtwifi-overlay) -- our own AOSP build, Apache-2.0, not a third party's; without it there is no HAL behind wlan0 at all",
     "loads the virt_wifi kernel module on the host (from REDROID_FORGE_VIRTWIFI_KO_PATH -- not shipped in the repo, has to be built against this exact host's running kernel, see kernel/virt_wifi/README.md)",
     "runs `ip link add link eth0 name wlan0 type virt_wifi` inside the instance right after it starts -- eth0 itself is never touched/renamed, wlan0 is just a wrapper net_device with the same MAC",
     "runs commands inside the container (svc wifi, cmd wifi connect-network) to force the connection, same as wifi-interno",
@@ -19,16 +20,18 @@
     ]
   },
   "etapa": [
+    4,
     5,
     6
   ],
   "entry": "./integrate.js",
-  "version": 1,
+  "version": 2,
   "i18n": {
     "es": {
       "nombre": "WiFi interno (virt_wifi, EXPERIMENTAL)",
       "descripcion": "Alternativa EXPERIMENTAL a \"wifi-interno\" (mac80211_hwsim): el mismo HAL de WiFi falso (SupplicantStaIfaceHalHidlImplExt, hace que apps que se niegan a correr sin una conexion WiFi detectada funcionen), pero respaldado por un net_device virt_wifi por instancia que envuelve el propio eth0 de la instancia directo dentro de su propio netns -- sin pool compartido de radios para reclamar/mover, sin condicion de carrera entre instancias que arrancan juntas. Todavia solo validado a mano en contenedores de prueba descartables, nunca contra una app real ni una instancia de larga duracion -- NO activar esto en jg-dashboard/pvz2-tv ni en nada que importe; usar \"wifi-interno\" (hwsim) para eso. No activar ambos modulos en la misma instancia.",
       "queToca": [
+        "antes del primer arranque, copia nuestros propios com.android.wifi.apex + com.android.tethering.apex + framework-res.apk parcheados al /system de la instancia (REDROID_FORGE_VIRTWIFI_OVERLAY_DIR, default backend/data/virtwifi-overlay) -- build propio de AOSP, Apache-2.0, no de un tercero; sin esto no hay ningun HAL detras de wlan0",
         "carga el modulo de kernel virt_wifi en el host (desde REDROID_FORGE_VIRTWIFI_KO_PATH -- no viene en el repo, hay que compilarlo contra el kernel exacto que corre en ese host, ver kernel/virt_wifi/README.md)",
         "corre `ip link add link eth0 name wlan0 type virt_wifi` dentro de la instancia apenas arranca -- eth0 en si nunca se toca/renombra, wlan0 es solo un net_device wrapper con la misma MAC",
         "ejecuta comandos dentro del contenedor (svc wifi, cmd wifi connect-network) para forzar la conexion, igual que wifi-interno",

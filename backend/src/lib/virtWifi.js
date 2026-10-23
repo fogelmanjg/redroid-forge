@@ -1,4 +1,5 @@
 const fs = require('fs');
+const path = require('path');
 const cp = require('child_process');
 const runtime = require('./dockerRuntime');
 
@@ -34,6 +35,38 @@ function isModuleLoaded() {
   return fs.existsSync('/sys/module/virt_wifi');
 }
 
+// Stage 4 (integrate): the fake WiFi HAL overlay (patched com.android.wifi.apex +
+// com.android.tethering.apex + framework-res.apk, built 23/10/2026 against
+// android-15.0.0_r36 -- see redroid-wifi-patches/README.md for the 3 patches: the
+// virt_wifi-backed HAL itself, plus the two EthernetTracker fixes that stop eth0 from
+// showing up as a parallel ETHERNET transport next to the fake wlan0). Found missing
+// the hard way (23/10/2026, first instance created through the real API): stage 5/6
+// alone only wire the KERNEL side (the wlan0 net_device) -- without this, the plain
+// official image has no supplicant/HAL at all behind it, so `svc wifi enable` reports
+// success but the framework never actually leaves "disabled" (nothing above the
+// net_device to drive it). Not from any third party (this is our own AOSP build, same
+// Apache-2.0 license as the rest of the project) -- no package/hash verification
+// needed, a straight overlay like redroid-gralloc-fix's, not like gapps/arm-translation.
+const OVERLAY_DIR = process.env.REDROID_FORGE_VIRTWIFI_OVERLAY_DIR
+  || path.join(__dirname, '..', '..', 'data', 'virtwifi-overlay');
+
+async function integrate(containerId) {
+  const dir = OVERLAY_DIR;
+  if (!fs.existsSync(path.join(dir, 'system'))) {
+    throw new Error(
+      `wifi-interno-virtwifi: no overlay at ${dir} (expected <dir>/system/apex/{com.android.wifi.apex,`
+      + 'com.android.tethering.apex} + <dir>/system/framework/framework-res.apk, built from an AOSP tree '
+      + 'with redroid-wifi-patches/Wifi-virtwifi.patch + Connectivity.patch + frameworks-base.patch applied) '
+      + '-- set REDROID_FORGE_VIRTWIFI_OVERLAY_DIR or place it at the default path',
+    );
+  }
+  for (const unit of ['apex', 'framework']) {
+    // eslint-disable-next-line no-await-in-loop
+    await execFileAsync('docker', ['cp', `${path.join(dir, 'system', unit)}/.`, `${containerId}:/system/${unit}/`]);
+  }
+  log(`overlay (wifi apex + tethering apex + framework-res.apk) injected into ${containerId}`);
+}
+
 // Stage 5 (ensureHostInfraReady): idempotent, called before every create/start/restart.
 async function ensureHostInfraReady() {
   if (isModuleLoaded()) return;
@@ -60,13 +93,29 @@ async function ensureHostInfraReady() {
 // process's netns IS the container's, via `docker exec`). Idempotent: a restart that
 // keeps the same container (and so the same netns) hits "File exists" on the second
 // call, which is the expected steady state, not a failure.
+//
+// Found for real creating the first instance through the actual API (23/10/2026): `ip` is
+// `/system/bin/ip` -- part of Android's OWN rootfs (toybox), not something available the
+// instant the container starts. Calling this right after `start()` raced Android's own
+// mount/boot sequence and failed with "no such file or directory" (not "File exists", a
+// completely different error than the idempotency case above) -- same family of problem
+// hwsimWifi.js's `ensureEth0Routing` already retries for. Retried the same way here.
+const IFACE_MAX_ATTEMPTS = 8;
+const IFACE_RETRY_DELAY_MS = 2000;
+
 async function ensureVirtWifiIface(containerId) {
-  try {
-    await runtime.exec(containerId, ['ip', 'link', 'add', 'link', 'eth0', 'name', 'wlan0', 'type', 'virt_wifi']);
-  } catch (e) {
-    if (!/File exists/.test(e.output || e.message || '')) {
-      warn(`could not create wlan0 for ${containerId}: ${e.message || e}`);
-      return;
+  let created = false;
+  for (let attempt = 1; attempt <= IFACE_MAX_ATTEMPTS && !created; attempt++) {
+    try {
+      await runtime.exec(containerId, ['ip', 'link', 'add', 'link', 'eth0', 'name', 'wlan0', 'type', 'virt_wifi']);
+      created = true;
+    } catch (e) {
+      if (/File exists/.test(e.output || e.message || '')) { created = true; break; }
+      if (attempt === IFACE_MAX_ATTEMPTS) {
+        warn(`could not create wlan0 for ${containerId} after ${attempt} attempts: ${e.message || e}`);
+        return;
+      }
+      await new Promise((r) => setTimeout(r, IFACE_RETRY_DELAY_MS));
     }
   }
   try {
@@ -80,21 +129,29 @@ async function ensureVirtWifiIface(containerId) {
 // the fake HAL once wlan0 exists) -- kept as its own small copy instead of sharing code
 // with hwsimWifi.js, which is live production logic for jg-dashboard/pvz2-tv and is not
 // to be touched or coupled to for this experimental path.
+//
+// Unlike hwsimWifi.js, this does NOT wrap commands in `su 0 sh -c`: found for real
+// (23/10/2026, first instance created through the actual API) that the PLAIN official
+// image (what this module targets) ships no `/system/bin/su` at all -- jg-dashboard's
+// own images have it only because `su` there is a Magisk symlink
+// (`/system/bin/su -> ./magisk`), which `wifi-interno-virtwifi` has no dependency on and
+// must not require. `docker exec` already runs as root (confirmed earlier by hand:
+// `svc wifi enable`/`cmd wifi connect-network` work directly, no su needed at all).
 async function ensureWifiConnected(containerId) {
   const MAX_ATTEMPTS = 6;
   for (let i = 0; i < MAX_ATTEMPTS; i++) {
     let status = '';
     try {
-      status = await runtime.exec(containerId, ['su', '0', 'sh', '-c', 'cmd wifi status']);
+      status = await runtime.exec(containerId, ['cmd', 'wifi', 'status']);
     } catch (e) {
       warn(`status check failed for ${containerId}: ${e}`);
     }
     if (status.includes('Wifi is connected')) return;
 
     try {
-      await runtime.exec(containerId, ['su', '0', 'sh', '-c', 'svc wifi enable']);
+      await runtime.exec(containerId, ['svc', 'wifi', 'enable']);
       await new Promise((r) => setTimeout(r, 3000));
-      await runtime.exec(containerId, ['su', '0', 'sh', '-c', 'cmd wifi connect-network jg-wifi open']);
+      await runtime.exec(containerId, ['cmd', 'wifi', 'connect-network', 'jg-wifi', 'open']);
     } catch (e) {
       warn(`attempt ${i + 1} failed for ${containerId}: ${e}`);
     }
@@ -117,5 +174,5 @@ async function ensureRuntimeReady(containerId) {
 }
 
 module.exports = {
-  ensureHostInfraReady, ensureVirtWifiIface, ensureWifiConnected, ensureRuntimeReady,
+  integrate, ensureHostInfraReady, ensureVirtWifiIface, ensureWifiConnected, ensureRuntimeReady,
 };
