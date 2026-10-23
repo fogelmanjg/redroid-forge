@@ -151,7 +151,12 @@ async function ensureWifiConnected(containerId) {
     try {
       await runtime.exec(containerId, ['svc', 'wifi', 'enable']);
       await new Promise((r) => setTimeout(r, 3000));
-      await runtime.exec(containerId, ['cmd', 'wifi', 'connect-network', 'jg-wifi', 'open']);
+      // "VirtWifi" is not our choice -- it is the SSID the virt_wifi kernel driver itself
+      // hardcodes for its fake scan result (kernel/virt_wifi/virt_wifi.c, fake_router_bssid's
+      // WLAN_EID_SSID). Settings only shows "Connected" under a scan entry whose SSID matches
+      // the currently-associated one; using any other name here (e.g. the old "jg-wifi") leaves
+      // the connection fully functional but with no visible "Connected" label in Settings.
+      await runtime.exec(containerId, ['cmd', 'wifi', 'connect-network', 'VirtWifi', 'open']);
     } catch (e) {
       warn(`attempt ${i + 1} failed for ${containerId}: ${e}`);
     }

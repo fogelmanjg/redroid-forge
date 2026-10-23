@@ -449,7 +449,7 @@ function buildDisplayEditRow(inst) {
 // POST /:id/display's `modules` REPLACES the whole optional list (see routes/instances.js),
 // not just the codec ones: toggling encode/decode must not silently drop gapps/arm/cifi/any
 // future user module the instance already has.
-const OPTIONAL_PER_INSTANCE = ['gapps', 'hwenc', 'hwdec', 'arm-translation', 'cifi', 'wifi-interno'];
+const OPTIONAL_PER_INSTANCE = ['gapps', 'hwenc', 'hwdec', 'arm-translation', 'cifi', 'wifi-interno', 'wifi-interno-virtwifi'];
 
 // Same 428 + pending manifests -> modal -> retry gate as applyDisplay/applyDeviceProfile.
 async function applyCodec(instanceId, modules) {
@@ -569,10 +569,11 @@ let openWifiInternoId = null;
 
 function buildWifiInternoCell(inst) {
   const ids = inst.requiredModuleIds || [];
-  const active = ids.includes('wifi-interno');
+  const activeVirt = ids.includes('wifi-interno-virtwifi');
+  const active = ids.includes('wifi-interno') || activeVirt;
   const chip = document.createElement('span');
   chip.className = 'resource-chip';
-  chip.textContent = t(active ? 'instances.wifiInterno.on' : 'instances.wifiInterno.off');
+  chip.textContent = t(activeVirt ? 'instances.wifiInterno.onVirt' : (active ? 'instances.wifiInterno.on' : 'instances.wifiInterno.off'));
   chip.title = t('instances.wifiInterno.changeHint');
   chip.addEventListener('click', () => {
     openWifiInternoId = openWifiInternoId === inst.id ? null : inst.id;
