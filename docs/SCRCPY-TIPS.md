@@ -20,6 +20,12 @@ shortcuts you'll actually use. Full reference:
 | Picture looks blocky, or the connection can't keep up | Default bit rate is 8 Mbps — too high for a slow/shared link | `--video-bit-rate=4M` or `2M` (the connector scripts offer this as a menu choice) |
 | High latency, input feels delayed | H.265 costs more latency than H.264 for marginal quality gain here | Stick to the default `--video-codec=h264` |
 
+**Verified on real redroid instances** (via `scrcpy --list-encoders`, checked against both an
+Android 11 and an Android 15 image): the only audio encoders present are **AAC** and **FLAC** —
+there is no Opus or Vorbis encoder at all, on either version. If `--audio-codec=aac` isn't enough
+for some reason, `--audio-codec=raw` (uncompressed PCM) is a fallback that needs no device encoder
+at all, at the cost of bandwidth. Video encoders present: `h264`, `vp8`, `vp9` (no h265/av1).
+
 ## Shortcuts worth knowing (MOD = left Alt **or** left Super, by default)
 
 | Shortcut | Action |

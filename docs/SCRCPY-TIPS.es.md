@@ -20,6 +20,13 @@ se usan. Referencia completa:
 | Imagen pixelada/bloques, o la conexión no llega | El bitrate default es 8 Mbps — demasiado para un link lento/compartido | `--video-bit-rate=4M` o `2M` (los scripts de conexión ya lo ofrecen como opción de menú) |
 | Latencia alta, se siente demorado | H.265 cuesta más latencia que H.264 por una ganancia de calidad marginal acá | Quedarse con el default `--video-codec=h264` |
 
+**Verificado en instancias redroid reales** (con `scrcpy --list-encoders`, chequeado contra una
+imagen Android 11 y una Android 15): los únicos encoders de audio presentes son **AAC** y
+**FLAC** — no hay ningún encoder de Opus ni Vorbis, en ninguna de las dos versiones. Si
+`--audio-codec=aac` no alcanza por algún motivo, `--audio-codec=raw` (PCM sin comprimir) es un
+fallback que no necesita ningún encoder del dispositivo, a costa de ancho de banda. Encoders de
+video presentes: `h264`, `vp8`, `vp9` (sin h265/av1).
+
 ## Atajos que vale la pena conocer (MOD = Alt izquierdo **o** Super/Win izquierdo, por defecto)
 
 | Atajo | Acción |
