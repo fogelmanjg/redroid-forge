@@ -1,5 +1,7 @@
 # redroid-forge
 
+[![version](https://img.shields.io/github/v/release/fogelmanjg/redroid-forge?label=version)](https://github.com/fogelmanjg/redroid-forge/releases)
+
 **Idiomas:** [English](README.md) | Español
 
 > El idioma oficial de este proyecto es el **inglés**. Este archivo se ofrece por comodidad y
