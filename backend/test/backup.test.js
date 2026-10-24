@@ -87,6 +87,28 @@ test('compatibilityWarnings: gapps id mismatch only matters if the instance actu
   assert.strictEqual(backup.compatibilityWarnings(meta, { dockerImage: 'img', hasGapps: false }).length, 0);
 });
 
+test('deleteBackup: removes both the tarball and its sidecar', () => {
+  const dir = tmpDir();
+  fs.writeFileSync(path.join(dir, 'a.tar.gz'), 'x');
+  fs.writeFileSync(path.join(dir, 'a.tar.gz.json'), '{}');
+  backup.deleteBackup(dir, 'a.tar.gz');
+  assert.strictEqual(fs.existsSync(path.join(dir, 'a.tar.gz')), false);
+  assert.strictEqual(fs.existsSync(path.join(dir, 'a.tar.gz.json')), false);
+});
+
+test('deleteBackup: no sidecar present -- still deletes the tarball, does not throw', () => {
+  const dir = tmpDir();
+  fs.writeFileSync(path.join(dir, 'a.tar.gz'), 'x');
+  backup.deleteBackup(dir, 'a.tar.gz');
+  assert.strictEqual(fs.existsSync(path.join(dir, 'a.tar.gz')), false);
+});
+
+test('deleteBackup: rejects a path-escaping name and a missing file, same as restore', () => {
+  const dir = tmpDir();
+  assert.throws(() => backup.deleteBackup(dir, '../../etc/passwd'), /Invalid backup file/);
+  assert.throws(() => backup.deleteBackup(dir, 'missing.tar.gz'), /not found/);
+});
+
 test('restoreBackup: refuses while the instance is running, without touching the volume', async (t) => {
   t.mock.method(runtime, 'inspect', async () => ({ State: { Status: 'running' } }));
   t.mock.method(runtime, 'runEphemeral', async () => { throw new Error('should not be called'); });

@@ -10,4 +10,14 @@ router.get('/', (req, res) => {
   res.json(backup.listBackups(settings.get().backupDir));
 });
 
+router.delete('/:file', (req, res) => {
+  try {
+    backup.deleteBackup(settings.get().backupDir, req.params.file);
+    res.status(204).end();
+  } catch (e) {
+    const status = e.httpStatus >= 400 && e.httpStatus < 600 ? e.httpStatus : 500;
+    res.status(status).json({ error: e.message });
+  }
+});
+
 module.exports = router;

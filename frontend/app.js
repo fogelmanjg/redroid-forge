@@ -655,6 +655,20 @@ async function restoreBackupOnto(inst, file, resetIdentity, btn) {
   }
 }
 
+async function deleteBackupFile(file, btn) {
+  if (!confirm(t('instances.storage.deleteConfirm', { file }))) return;
+  btn.disabled = true;
+  try {
+    await api(`/backups/${encodeURIComponent(file)}`, { method: 'DELETE' });
+    backupsCache = null;
+  } catch (e) {
+    alert(e.message);
+    btn.disabled = false;
+  } finally {
+    loadInstances({ silent: true });
+  }
+}
+
 // Backups are a global pool (any instance can restore from any backup -- see
 // routes/backups.js), so this is the same list/markup regardless of which instance's panel
 // is open; only the Restore target (and the running-state check the backend itself enforces)
@@ -705,6 +719,12 @@ function buildBackupsSection(inst) {
     restoreBtn.textContent = t('instances.storage.restore');
     restoreBtn.addEventListener('click', () => restoreBackupOnto(inst, b.file, resetChk.checked, restoreBtn));
     li.appendChild(restoreBtn);
+    const deleteBtn = document.createElement('button');
+    deleteBtn.type = 'button';
+    deleteBtn.className = 'secondary';
+    deleteBtn.textContent = t('instances.storage.delete');
+    deleteBtn.addEventListener('click', () => deleteBackupFile(b.file, deleteBtn));
+    li.appendChild(deleteBtn);
     ul.appendChild(li);
   }
   wrap.appendChild(ul);

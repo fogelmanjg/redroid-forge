@@ -89,6 +89,12 @@ function resolveBackupPath(backupDir, file) {
   return full;
 }
 
+function deleteBackup(backupDir, file) {
+  const full = resolveBackupPath(backupDir, file);
+  fs.unlinkSync(full);
+  try { fs.unlinkSync(metaFileFor(full)); } catch { /* sidecar missing/already gone -- fine */ }
+}
+
 // Compatibility warnings (never block the restore -- same "warn, don't gatekeep" posture as
 // the known-combinations tiers): version mismatch, and gapps id mismatch specifically (that's
 // the one piece of restored data most likely to end up orphaned if the id differs, since
@@ -144,5 +150,5 @@ async function restoreBackup(instance, backupDir, file, { resetIdentity = false 
 }
 
 module.exports = {
-  createBackup, listBackups, restoreBackup, backupFileName, compatibilityWarnings,
+  createBackup, listBackups, restoreBackup, deleteBackup, backupFileName, compatibilityWarnings,
 };
