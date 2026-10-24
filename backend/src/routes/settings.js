@@ -12,11 +12,24 @@ router.get('/', (req, res) => {
 // not scoped to any one instance's ownership.
 router.put('/', (req, res) => {
   if (!permissions.canManageSettings(req.user)) return res.status(403).json({ error: 'Admin only' });
-  const { backupDir } = req.body || {};
+  const { backupDir, networkInterfaceOverrides } = req.body || {};
   if (backupDir !== undefined && (typeof backupDir !== 'string' || backupDir.trim() === '')) {
     return res.status(400).json({ error: 'backupDir must be a non-empty string' });
   }
-  res.json(settings.update(backupDir !== undefined ? { backupDir: backupDir.trim() } : {}));
+  if (networkInterfaceOverrides !== undefined) {
+    if (typeof networkInterfaceOverrides !== 'object' || networkInterfaceOverrides === null || Array.isArray(networkInterfaceOverrides)) {
+      return res.status(400).json({ error: 'networkInterfaceOverrides must be an object of {ifaceName: boolean}' });
+    }
+    for (const [name, value] of Object.entries(networkInterfaceOverrides)) {
+      if (typeof value !== 'boolean') {
+        return res.status(400).json({ error: `networkInterfaceOverrides["${name}"] must be a boolean` });
+      }
+    }
+  }
+  const patch = {};
+  if (backupDir !== undefined) patch.backupDir = backupDir.trim();
+  if (networkInterfaceOverrides !== undefined) patch.networkInterfaceOverrides = networkInterfaceOverrides;
+  res.json(settings.update(patch));
 });
 
 module.exports = router;

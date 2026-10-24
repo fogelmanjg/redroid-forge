@@ -1245,10 +1245,45 @@ async function loadUserModulesTab() {
   }
 }
 
+// The heuristic in backend/src/lib/networkInterfaceFilter.js decides a sane default (hide
+// docker0/br-*/veth*/CNI noise, show everything else) -- this panel is only for the exceptions:
+// an admin forcing one it hid back into view, or hiding one it let through. Each checkbox
+// remembers the heuristic's own verdict in a data attribute, so the submit handler below only
+// has to send what actually *differs* from it, not a full replacement (see there for why).
+function renderNetIfacesSettings(ifaces) {
+  const list = $('#settings-net-ifaces-list');
+  list.innerHTML = '';
+  if (ifaces.length === 0) {
+    list.innerHTML = `<li class="muted">${t('settings.netIfaces.none')}</li>`;
+    return;
+  }
+  for (const i of ifaces) {
+    const li = document.createElement('li');
+    const label = document.createElement('label');
+    label.className = 'contract-checkbox';
+    const chk = document.createElement('input');
+    chk.type = 'checkbox';
+    chk.checked = i.visible;
+    chk.dataset.iface = i.iface;
+    chk.dataset.heuristicVisible = String(i.heuristicVisible);
+    label.appendChild(chk);
+    label.appendChild(document.createTextNode(` ${i.iface} (${i.addresses.join(', ')})`));
+    if (!i.heuristicVisible) {
+      const badge = document.createElement('span');
+      badge.className = 'muted';
+      badge.textContent = ` ${t('settings.netIfaces.hiddenByDefault')}`;
+      label.appendChild(badge);
+    }
+    li.appendChild(label);
+    list.appendChild(li);
+  }
+}
+
 async function loadSettings() {
   try {
     const settings = await api('/settings');
     $('#settings-backup-dir').value = settings.backupDir;
+    renderNetIfacesSettings(await api('/network/interfaces/all'));
   } catch (e) {
     alert(e.message);
   }
@@ -1260,8 +1295,20 @@ $('#settings-form').addEventListener('submit', async (ev) => {
   saved.hidden = true;
   try {
     const backupDir = $('#settings-backup-dir').value;
-    const settings = await api('/settings', { method: 'PUT', body: JSON.stringify({ backupDir }) });
+    // Based on the CURRENT stored overrides, not a blank object -- this panel only ever
+    // renders the interfaces that exist on the host right now, so an interface that is
+    // temporarily absent (e.g. a VPN that is down) would otherwise silently lose its stored
+    // override just because it had no checkbox to carry it forward this time.
+    const current = await api('/settings');
+    const networkInterfaceOverrides = { ...current.networkInterfaceOverrides };
+    for (const chk of $$('#settings-net-ifaces-list input[type="checkbox"]')) {
+      const heuristic = chk.dataset.heuristicVisible === 'true';
+      if (chk.checked === heuristic) delete networkInterfaceOverrides[chk.dataset.iface];
+      else networkInterfaceOverrides[chk.dataset.iface] = chk.checked;
+    }
+    const settings = await api('/settings', { method: 'PUT', body: JSON.stringify({ backupDir, networkInterfaceOverrides }) });
     $('#settings-backup-dir').value = settings.backupDir;
+    networkInterfacesCache = null; // the per-instance Configure panel re-fetches with the new filter next time it opens
     saved.hidden = false;
   } catch (e) {
     alert(e.message);

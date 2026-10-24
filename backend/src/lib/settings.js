@@ -11,6 +11,11 @@ const SETTINGS_FILE = path.join(__dirname, '..', '..', 'data', 'settings.json');
 // filesystem view. The fallback (no Docker/tests) is just a plain local folder.
 const DEFAULTS = {
   backupDir: process.env.REDROID_FORGE_BACKUPS_DIR || path.join(__dirname, '..', '..', 'data', 'backups'),
+  // Per-interface exceptions to networkInterfaceFilter.js's default heuristic (docs/ROADMAP.md
+  // Phase 6) -- {[ifaceName]: boolean}. Empty by default: a fresh install gets the heuristic's
+  // own judgment with nothing to configure; an admin only needs this once a specific interface
+  // on their own host is mis-classified either way.
+  networkInterfaceOverrides: {},
 };
 
 function get(file = SETTINGS_FILE) {

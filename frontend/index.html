@@ -85,6 +85,11 @@ gunzip -c image.tar.gz | docker load</pre>
           <input type="text" name="backupDir" id="settings-backup-dir" />
         </label>
         <p class="muted" data-i18n="settings.backupDir.hint"></p>
+        <fieldset class="display-fields" style="grid-template-columns: 1fr;">
+          <legend data-i18n="settings.netIfaces.legend">Network interfaces shown in the instance Configure panel</legend>
+          <p class="muted" data-i18n="settings.netIfaces.hint"></p>
+          <ul id="settings-net-ifaces-list" class="doctor-list"></ul>
+        </fieldset>
         <div class="dialog-actions">
           <button type="submit" data-i18n="settings.save">Save</button>
           <span id="settings-saved" class="muted" hidden data-i18n="settings.saved">Saved.</span>

@@ -23,6 +23,15 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
 
 ### Added
 
+- `GET /api/network/interfaces` now hides Docker/container-internal interfaces (`docker0`,
+  `br-*`, `veth*`, CNI/k8s bridges -- `backend/src/lib/networkInterfaceFilter.js`) by default, so
+  a host running many containers does not drown the instance Configure panel's "Network"
+  section in dozens of irrelevant bridges. A new "Network interfaces" section in Settings
+  (backed by `GET /api/network/interfaces/all` and a `networkInterfaceOverrides` field on
+  `PUT /api/settings`, admin-only) lets an admin correct the heuristic per interface, in either
+  direction, for their own host. Live-verified against this real host's own interfaces (11
+  distinct interfaces out of 78 raw addresses, correctly narrowed to the 3 that matter: loopback,
+  the real LAN bridge and Tailscale).
 - Network exposure, local by default (`docs/ROADMAP.md` Phase 6): the app itself now binds to
   `127.0.0.1` by default (`REDROID_FORGE_BIND_HOST` to override), and so does every instance's ADB
   port (`dockerRuntime.create`'s `bindHosts`, previously hardcoded to `0.0.0.0` -- reachable from
