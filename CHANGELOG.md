@@ -23,6 +23,18 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
 
 ### Added
 
+- `aurora-store` module: Aurora Store (GPLv3), a client for Google Play's real catalog/download
+  backend, installed after boot (stage 6 only, no `/system` write) with no files for the user to
+  provide -- unlike `gapps`/`arm-translation`, this project downloads the pinned 4.8.3 release
+  itself from its official F-Droid mirror and verifies it against a sha256 fixed in the manifest
+  before installing anything. Pinned below latest (4.8.4 crashes on its own app-list screens, a
+  Jetpack Compose bug in that release) and applies the same WebView command-line fix `gapps` uses
+  for its own sign-in screen, independently of whether `gapps` is also enabled -- complementary to
+  it, not an alternative (Aurora gets the APK, it does not provide Play services at runtime).
+  Live-verified end to end: created a throwaway instance with it requested, accepted the contract
+  through the real `428` flow, confirmed Aurora Store installed itself and the WebView fix was
+  applied, deleted the instance.
+
 - Settings gained an "App network" section (`appBindHost`, admin-only): which address this app's
   own server (not any instance's) listens on, picked from the same filtered interface list as
   the per-instance picker, instead of only the `REDROID_FORGE_BIND_HOST` env var from

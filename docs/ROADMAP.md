@@ -786,6 +786,11 @@ mechanism is picked up again (section 8 of `REQUIREMENTS.md`), not before.
   public verification, not the trust root itself -- nice for a fleet-wide dashboard and for a casual user who
   does not want to run `gh attestation verify` by hand. Entirely opt-in by design, same ceiling as any
   "verified" badge: it only helps whoever chooses to check.
+- **`aurora-store` module: implemented and live-verified, 24/10/2026** (see `backend/src/modules/aurora-store/`,
+  `CHANGELOG.md`). What is below is the design/validation history that led to it; the module itself matches
+  everything "Validated by hand" found, except device-spoofing for catalog visibility, which is Aurora's own
+  in-app setting, not something the module automates. Module categories (`categoria`) and the
+  `conflictsWith`/`relatedModules` fields are still NOT implemented -- only `aurora-store` itself is.
 - **Module categories + an `aurora-store` module (idea, 23/10/2026).** With ~8 modules already
   (`redroid-gralloc-fix`, `hwenc`, `hwdec`, `gapps`, `arm-translation`, `cifi`, `wifi-interno`/
   `wifi-interno-virtwifi`) the flat checkbox list in the "new instance" form is getting crowded. Two
