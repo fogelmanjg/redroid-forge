@@ -11,6 +11,7 @@ const moduleManifests = require('../lib/moduleManifests');
 const moduleAcceptance = require('../lib/moduleAcceptance');
 const moduleRunner = require('../lib/moduleRunner');
 const moduleScheduler = require('../lib/moduleScheduler');
+const instanceSupport = require('../lib/instanceSupport');
 const instanceParams = require('../lib/instanceParams');
 const catalog = require('../../images.json');
 
@@ -606,6 +607,19 @@ router.post('/:id/display', async (req, res) => {
     }
 
     res.json(await withRuntimeStatus(updated));
+  } catch (e) {
+    sendError(res, e);
+  }
+});
+
+// Known-combinations verdict for THIS instance's actual base image + modules (section 3
+// of docs/KNOWN-COMBINATIONS.md), not the image's defaults -- an instance with extra
+// optional modules can legitimately differ from what the image alone would resolve to.
+router.get('/:id/soporte', async (req, res) => {
+  const instance = store.get(req.params.id);
+  if (!instance) return res.status(404).json({ error: 'Instancia no encontrada' });
+  try {
+    res.json(await instanceSupport.resolveForInstance(instance));
   } catch (e) {
     sendError(res, e);
   }

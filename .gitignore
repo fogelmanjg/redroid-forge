@@ -9,4 +9,5 @@ backend/data/gapps/
 backend/data/arm-translation/
 backend/data/virtwifi-overlay/
 backend/data/hwsim-wifi-overlay/
+backend/data/db/
 __pycache__/

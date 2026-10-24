@@ -100,6 +100,18 @@ async function inspect(containerId) {
   return docker.getContainer(containerId).inspect();
 }
 
+// Identifies an image the same way the known-combinations database does: by its
+// RepoDigest (`sha256:...`), never by tag (tags move; a digest does not). An image
+// pulled/built without any RepoDigest (e.g. a local `docker load`) returns null --
+// it can never match a base in the database, which is the correct outcome.
+async function getImageDigest(imageRef) {
+  const info = await docker.getImage(imageRef).inspect();
+  const repoDigest = (info.RepoDigests || [])[0];
+  if (!repoDigest) return null;
+  const at = repoDigest.lastIndexOf('@');
+  return at >= 0 ? repoDigest.slice(at + 1) : null;
+}
+
 async function getPid(containerId) {
   const info = await inspect(containerId);
   return String(info.State.Pid);
@@ -206,5 +218,5 @@ async function runEphemeral(image, cmd, binds, timeoutMs = 30000) {
 
 module.exports = {
   docker, listLocalImageTags, create, start, stop, restart, remove, removeVolume,
-  inspect, getPid, getBridgeIp, exec, runEphemeral, readLogs, readFile, updateResources,
+  inspect, getImageDigest, getPid, getBridgeIp, exec, runEphemeral, readLogs, readFile, updateResources,
 };
