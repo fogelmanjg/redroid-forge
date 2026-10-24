@@ -1,6 +1,7 @@
 # redroid-forge
 
 [![version](https://img.shields.io/github/v/release/fogelmanjg/redroid-forge?label=version)](https://github.com/fogelmanjg/redroid-forge/releases)
+[![support](https://img.shields.io/badge/support-Android_15_(official)-brightgreen)](docs/KNOWN-COMBINATIONS.es.md)
 
 **Idiomas:** [English](README.md) | Español
 
