@@ -15,7 +15,9 @@ sin depender de ninguna otra infraestructura.
 > `jg-dashboard`/`plenum-redroid`). Ver [`docs/REQUIREMENTS.es.md`](docs/REQUIREMENTS.es.md) (qué y por
 > qué), [`docs/ARCHITECTURE.es.md`](docs/ARCHITECTURE.es.md) (cómo encajan las piezas — imagen base,
 > módulos, y en qué momento del ciclo de vida de una instancia se toca cada uno) y
-> [`docs/ROADMAP.md`](docs/ROADMAP.md) (en qué orden; solo en inglés) para el panorama completo. Lo que
+> [`docs/ROADMAP.md`](docs/ROADMAP.md) (en qué orden; solo en inglés) y
+> [`CHANGELOG.md`](CHANGELOG.md) (releases etiquetados, política de versionado; solo en inglés) para
+> el panorama completo. Lo que
 > hay hoy corresponde a las **Fases 0, 1, 2 y 4** del roadmap: el port íntegro de
 > `redroid-manager`, tiers de soporte por imagen, el primer módulo real (hwenc) y el
 > sistema de contrato de módulo genérico, el **decode de video por hardware** (AMD e Intel) y la
@@ -175,6 +177,7 @@ scripts/                 connect.sh / connect.ps1 -- scripts de conexión scrcpy
 docs/                     REQUIREMENTS (qué y por qué), ARCHITECTURE (cómo encajan las
                           piezas), KNOWN-COMBINATIONS, ROADMAP (en qué orden) y SCRCPY-TIPS
                           (troubleshooting del lado cliente)
+CHANGELOG.md              releases etiquetados, política de versionado (solo en inglés, igual que ROADMAP)
 ```
 
 ## Créditos y atribución
