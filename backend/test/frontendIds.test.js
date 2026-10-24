@@ -20,7 +20,12 @@ test('every #id that app.js looks up exists in index.html', () => {
 
 test('every field of the new-instance form that app.js reads exists with that name', () => {
   const form = html.slice(html.indexOf('id="new-instance-form"'), html.indexOf('</form>', html.indexOf('id="new-instance-form"')));
-  const fields = [...new Set([...app.matchAll(/\bform\.(\w+)\.(?:value|checked)\b/g)].map((m) => m[1]))];
+  // Scoped to that one submit handler, not the whole file -- app.js has more than one form
+  // (e.g. #new-user-form, Phase 7) that also does `form.<field>.value`, for fields that belong
+  // to a different <form> entirely and would otherwise show up here as false positives.
+  const handlerMatch = app.match(/\$\('#new-instance-form'\)\.addEventListener\('submit'[\s\S]*?\n\}\);/);
+  assert.ok(handlerMatch, 'the scan found the submit handler');
+  const fields = [...new Set([...handlerMatch[0].matchAll(/\bform\.(\w+)\.(?:value|checked)\b/g)].map((m) => m[1]))];
   assert.ok(fields.includes('width') && fields.includes('hwenc') && fields.includes('gapps'), 'the scan found the fields');
   const missing = fields.filter((f) => !new RegExp(`name="${f}"`).test(form));
   assert.deepStrictEqual(missing, []);

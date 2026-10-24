@@ -15,6 +15,7 @@ const instanceSupport = require('../lib/instanceSupport');
 const instanceParams = require('../lib/instanceParams');
 const backup = require('../lib/backup');
 const settings = require('../lib/settings');
+const permissions = require('../lib/permissions');
 const catalog = require('../../images.json');
 
 const router = express.Router();
@@ -236,13 +237,17 @@ async function withRuntimeStatus(instance) {
 }
 
 router.get('/', async (req, res) => {
-  const all = store.readAll();
+  // Ownership-filtered BEFORE withRuntimeStatus/attachSupport -- a non-admin never sees another
+  // user's instance in this list at all (docs/ROADMAP.md Phase 7's own framing: "a user who can
+  // only see their own instances"), not just blocked from acting on it.
+  const all = permissions.visibleInstances(req.user, store.readAll());
   const withStatus = await Promise.all(all.map(withRuntimeStatus));
   res.json(await instanceSupport.attachSupport(withStatus));
 });
 
 router.post('/', async (req, res) => {
   try {
+    permissions.assertCan(req.user, 'create');
     const { name, imageId, modules } = req.body;
     const display = instanceParams.parseDisplay(req.body);
     const resources = instanceParams.parseResources(req.body);
@@ -329,6 +334,7 @@ router.post('/', async (req, res) => {
       memoryMb: resources.memoryMb || null,
       cpusetCpus: resources.cpusetCpus || null,
       bindHosts,
+      ownerId: req.user.id,
       androidId: null,
       androidIdRegisteredAt: null,
       createdAt: new Date().toISOString(),
@@ -358,6 +364,7 @@ router.post('/:id/start', async (req, res) => {
   const instance = store.get(req.params.id);
   if (!instance) return res.status(404).json({ error: 'Instance not found' });
   try {
+    permissions.assertCan(req.user, 'start-stop', instance);
     // It revalidates the contract on every start, not only at creation: if the
     // manifest of a module this instance uses went up a version since it was
     // created, the next start stays blocked until it is accepted again.
@@ -379,12 +386,13 @@ router.post('/:id/stop', async (req, res) => {
   const instance = store.get(req.params.id);
   if (!instance) return res.status(404).json({ error: 'Instancia no encontrada' });
   try {
+    permissions.assertCan(req.user, 'start-stop', instance);
     moduleScheduler.stop(instance.id);
     await releaseWifiFixes(instance);
     await runtime.stop(instance.containerId);
     res.json(await withRuntimeStatus(instance));
   } catch (e) {
-    res.status(500).json({ error: e.message });
+    sendError(res, e);
   }
 });
 
@@ -392,6 +400,7 @@ router.post('/:id/restart', async (req, res) => {
   const instance = store.get(req.params.id);
   if (!instance) return res.status(404).json({ error: 'Instancia no encontrada' });
   try {
+    permissions.assertCan(req.user, 'start-stop', instance);
     await revalidateModulesIfImageKnown(instance);
     const requiredModuleIds = requiredModuleIdsFor(instance);
     await moduleRunner.ensureHostInfraReady(requiredModuleIds);
@@ -419,6 +428,7 @@ router.post('/:id/device-profile', async (req, res) => {
   const instance = store.get(req.params.id);
   if (!instance) return res.status(404).json({ error: 'Instancia no encontrada' });
   try {
+    permissions.assertCan(req.user, 'configure', instance);
     const { profile } = req.body || {};
     if (profile !== undefined && typeof profile !== 'string') {
       throw httpError('"profile" must be a string (a profile name) or be omitted to revert to the default.', 400);
@@ -463,14 +473,22 @@ router.get('/:id/android-id', async (req, res) => {
   const instance = store.get(req.params.id);
   if (!instance) return res.status(404).json({ error: 'Instancia no encontrada' });
   try {
+    permissions.assertCan(req.user, 'view', instance);
     const androidId = await androidIdentity.get(instance.id);
     res.json({ androidId, androidIdRegisteredAt: store.get(instance.id)?.androidIdRegisteredAt || null });
   } catch (e) {
-    res.status(500).json({ error: e.message });
+    sendError(res, e);
   }
 });
 
 router.post('/:id/android-id/registered', (req, res) => {
+  const instance = store.get(req.params.id);
+  if (!instance) return res.status(404).json({ error: 'Instancia no encontrada' });
+  try {
+    permissions.assertCan(req.user, 'configure', instance);
+  } catch (e) {
+    return sendError(res, e);
+  }
   const updated = androidIdentity.markRegistered(req.params.id);
   if (!updated) return res.status(404).json({ error: 'Instancia no encontrada' });
   res.json({ androidId: updated.androidId, androidIdRegisteredAt: updated.androidIdRegisteredAt });
@@ -484,6 +502,7 @@ router.post('/:id/resources', async (req, res) => {
   const instance = store.get(req.params.id);
   if (!instance) return res.status(404).json({ error: 'Instancia no encontrada' });
   try {
+    permissions.assertCan(req.user, 'configure', instance);
     const resources = instanceParams.parseResources(req.body);
     await runtime.updateResources(instance.containerId, resources);
     const updated = store.upsert({
@@ -514,6 +533,7 @@ router.post('/:id/display', async (req, res) => {
   const instance = store.get(req.params.id);
   if (!instance) return res.status(404).json({ error: 'Instancia no encontrada' });
   try {
+    permissions.assertCan(req.user, 'configure', instance);
     const display = instanceParams.parseDisplay(req.body, instance.display);
     const gpuModeChoice = instanceParams.parseGpuMode(req.body);
     const bindHosts = instanceParams.parseBindHosts(req.body, instance.bindHosts || instanceParams.DEFAULT_BIND_HOSTS);
@@ -628,6 +648,7 @@ router.get('/:id/soporte', async (req, res) => {
   const instance = store.get(req.params.id);
   if (!instance) return res.status(404).json({ error: 'Instancia no encontrada' });
   try {
+    permissions.assertCan(req.user, 'view', instance);
     res.json(await instanceSupport.resolveForInstance(instance));
   } catch (e) {
     sendError(res, e);
@@ -641,6 +662,7 @@ router.get('/:id/storage', async (req, res) => {
   const instance = store.get(req.params.id);
   if (!instance) return res.status(404).json({ error: 'Instancia no encontrada' });
   try {
+    permissions.assertCan(req.user, 'view', instance);
     const info = instance.volumeName ? await runtime.inspectVolume(instance.volumeName) : null;
     res.json({
       volumeName: instance.volumeName || null,
@@ -659,6 +681,7 @@ router.post('/:id/backup', async (req, res) => {
   const instance = store.get(req.params.id);
   if (!instance) return res.status(404).json({ error: 'Instancia no encontrada' });
   try {
+    permissions.assertCan(req.user, 'backup-restore', instance);
     res.status(201).json(await backup.createBackup(instance, settings.get().backupDir));
   } catch (e) {
     sendError(res, e);
@@ -671,6 +694,7 @@ router.post('/:id/restore', async (req, res) => {
   const instance = store.get(req.params.id);
   if (!instance) return res.status(404).json({ error: 'Instancia no encontrada' });
   try {
+    permissions.assertCan(req.user, 'backup-restore', instance);
     const { file, resetIdentity } = req.body || {};
     res.json(await backup.restoreBackup(instance, settings.get().backupDir, file, { resetIdentity: !!resetIdentity }));
   } catch (e) {
@@ -681,6 +705,11 @@ router.post('/:id/restore', async (req, res) => {
 router.get('/:id/watchdogs', (req, res) => {
   const instance = store.get(req.params.id);
   if (!instance) return res.status(404).json({ error: 'Instancia no encontrada' });
+  try {
+    permissions.assertCan(req.user, 'view', instance);
+  } catch (e) {
+    return sendError(res, e);
+  }
   res.json(moduleScheduler.status(instance.id, requiredModuleIdsFor(instance)));
 });
 
@@ -688,6 +717,11 @@ function watchdogPauseRoute(paused) {
   return (req, res) => {
     const instance = store.get(req.params.id);
     if (!instance) return res.status(404).json({ error: 'Instancia no encontrada' });
+    try {
+      permissions.assertCan(req.user, 'configure', instance);
+    } catch (e) {
+      return sendError(res, e);
+    }
     const ids = requiredModuleIdsFor(instance);
     if (!moduleRunner.watchdogModules(ids).some((m) => m.id === req.params.moduleId)) {
       return res.status(404).json({ error: `This instance has no watchdog module "${req.params.moduleId}"` });
@@ -703,6 +737,7 @@ router.delete('/:id', async (req, res) => {
   const instance = store.get(req.params.id);
   if (!instance) return res.status(404).json({ error: 'Instancia no encontrada' });
   try {
+    permissions.assertCan(req.user, 'delete', instance);
     moduleScheduler.stop(instance.id);
     await releaseWifiFixes(instance);
     await runtime.remove(instance.containerId, { force: true });
@@ -710,7 +745,7 @@ router.delete('/:id', async (req, res) => {
     store.remove(instance.id);
     res.status(204).end();
   } catch (e) {
-    res.status(500).json({ error: e.message });
+    sendError(res, e);
   }
 });
 

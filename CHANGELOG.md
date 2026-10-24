@@ -32,6 +32,21 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
   live warning once anything beyond localhost is selected. "All interfaces (0.0.0.0)" is mutually
   exclusive with the rest (confirmed live that Docker does not support binding both at once for the
   same port -- it is a superset, not an addition).
+- Access control: roles, per-instance ownership, pluggable auth (`docs/ROADMAP.md` Phase 7). New
+  `REDROID_FORGE_AUTH` env var (`none` default, `local`, `oidc`); a fixed three-role model (admin,
+  operator, viewer -- `backend/src/lib/permissions.js`) with per-instance ownership (`ownerId`,
+  admin bypasses it); every instance route checks role + ownership, a non-admin never even sees
+  another user's instance (404, not 403, for one invisible to them, so IDs cannot be probed to tell
+  "not yours" apart from "does not exist"); the UI hides/disables actions the current user cannot
+  perform instead of only failing after the fact. `local` mode is a minimal built-in account store
+  (scrypt-hashed passwords, no new dependency) with a bootstrap admin from
+  `REDROID_FORGE_LOCAL_ADMIN_USER`/`_PASSWORD` and an admin-only Users panel. `oidc` mode is a
+  generic OIDC client (`openid-client@5.7.1`, pinned to the last CommonJS-compatible release --
+  v6 is ESM-only) against any standard IdP, not Keycloak-specific, with the role claim's path and
+  the three role names all configurable (`REDROID_FORGE_OIDC_*`). Verified live end-to-end in
+  `local` mode with three real accounts of different roles; `oidc` mode's live callback against a
+  real IdP was not verified (no IdP available in this environment) -- covered by unit tests for its
+  pure parts (role mapping, PKCE/state handling) only.
 
 ## [0.1.0] - 2026-10-24
 

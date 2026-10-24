@@ -5,7 +5,12 @@
 const I18n = (() => {
   const strings = {
     en: {
-      'nav.instances': 'Instances', 'nav.modules': 'Modules', 'nav.userModules': 'User modules', 'nav.doctor': 'Doctor', 'nav.help': 'Help',
+      'nav.instances': 'Instances', 'nav.modules': 'Modules', 'nav.userModules': 'User modules', 'nav.doctor': 'Doctor', 'nav.help': 'Help', 'nav.users': 'Users',
+      'auth.logout': 'Log out', 'auth.loginTitle': 'Log in', 'auth.username': 'Username', 'auth.password': 'Password',
+      'auth.loginSubmit': 'Log in', 'auth.loginSso': 'Log in via SSO',
+      'users.intro': 'Local accounts for this instance of redroid-forge (REDROID_FORGE_AUTH=local). Admin manages who can log in and what they can do -- see the role model in docs/ROADMAP.md.',
+      'users.new': '+ New user', 'users.newTitle': 'New user', 'users.role': 'Role', 'users.create': 'Create',
+      'users.delete': 'Delete', 'users.deleteConfirm': 'Delete user "{username}"? This cannot be undone.', 'users.none': 'No users yet.',
       'userModules.intro': 'Per-game/situation automations (stage 7) -- a different category from Modules: they don\'t apply to any instance in general, they automate one specific thing (e.g. CIFI). Attach one to an instance from the create form\'s "User modules" section.',
       'common.refresh': 'Refresh', 'common.cancel': 'Cancel', 'common.loading': 'Loading...', 'common.error': 'Error: {msg}',
       'instances.new': '+ New instance',
@@ -126,7 +131,12 @@ const I18n = (() => {
       'contract.failed': 'Could not record the module acceptance',
     },
     es: {
-      'nav.instances': 'Instancias', 'nav.modules': 'Módulos', 'nav.userModules': 'Módulos de usuario', 'nav.doctor': 'Doctor', 'nav.help': 'Ayuda',
+      'nav.instances': 'Instancias', 'nav.modules': 'Módulos', 'nav.userModules': 'Módulos de usuario', 'nav.doctor': 'Doctor', 'nav.help': 'Ayuda', 'nav.users': 'Usuarios',
+      'auth.logout': 'Cerrar sesión', 'auth.loginTitle': 'Iniciar sesión', 'auth.username': 'Usuario', 'auth.password': 'Contraseña',
+      'auth.loginSubmit': 'Iniciar sesión', 'auth.loginSso': 'Iniciar sesión con SSO',
+      'users.intro': 'Cuentas locales para esta instancia de redroid-forge (REDROID_FORGE_AUTH=local). El administrador gestiona quién puede entrar y qué puede hacer -- ver el modelo de roles en docs/ROADMAP.md.',
+      'users.new': '+ Nuevo usuario', 'users.newTitle': 'Nuevo usuario', 'users.role': 'Rol', 'users.create': 'Crear',
+      'users.delete': 'Eliminar', 'users.deleteConfirm': 'Eliminar usuario "{username}"? No se puede deshacer.', 'users.none': 'Todavía no hay usuarios.',
       'userModules.intro': 'Automatizaciones por juego/situación (etapa 7) — categoría distinta de Módulos: no aplican a cualquier instancia en general, automatizan algo puntual (ej. CIFI). Se adjuntan a una instancia desde la sección "User modules" del formulario de creación.',
       'common.refresh': 'Actualizar', 'common.cancel': 'Cancelar', 'common.loading': 'Cargando...', 'common.error': 'Error: {msg}',
       'instances.new': '+ Nueva instancia',

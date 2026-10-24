@@ -1,9 +1,19 @@
 const express = require('express');
 const path = require('path');
+const auth = require('./lib/auth');
 
 const app = express();
 app.use(express.json());
 app.use(express.static(path.join(__dirname, '..', '..', 'frontend')));
+
+// Sets req.user on every request (the always-admin bypass user in "none" mode, or whoever the
+// session cookie says in "local"/"oidc") -- runs before anything else so /api/auth/me can
+// answer "not logged in" instead of being gated out by requireAuth itself (docs/ROADMAP.md
+// Phase 7). /api/auth/* stays reachable with no login required (it IS the login surface); every
+// other /api/* route requires one, in whichever mode is active (a no-op check in "none" mode).
+app.use(auth.attachUser);
+app.use('/api/auth', require('./routes/auth'));
+app.use('/api', auth.requireAuth);
 
 app.use('/api/instances', require('./routes/instances'));
 app.use('/api/doctor', require('./routes/doctor'));
@@ -13,6 +23,8 @@ app.use('/api/db', require('./routes/db'));
 app.use('/api/settings', require('./routes/settings'));
 app.use('/api/backups', require('./routes/backups'));
 app.use('/api/network', require('./routes/network'));
+
+if (auth.AUTH_MODE === 'local') require('./lib/userStore').ensureBootstrapAdmin();
 
 const PORT = process.env.PORT || 8080;
 // Localhost-only by default (docs/ROADMAP.md Phase 6): in standalone mode there is no auth of

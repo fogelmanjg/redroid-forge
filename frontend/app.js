@@ -10,6 +10,7 @@ function switchTab(name) {
   if (name === 'user-modules') loadUserModulesTab();
   if (name === 'doctor') loadDoctor();
   if (name === 'settings') loadSettings();
+  if (name === 'users') loadUsers();
 }
 
 $$('.tab-btn').forEach((btn) => btn.addEventListener('click', () => switchTab(btn.dataset.tab)));
@@ -20,6 +21,10 @@ async function api(path, opts) {
     ...opts,
   });
   if (!res.ok) {
+    // The session cookie expired or was never there (docs/ROADMAP.md Phase 7) -- the simplest
+    // correct recovery is a reload, which re-runs AuthUi's own gate and shows the login dialog
+    // again instead of this call's caller trying to render a now-stale, now-inaccessible UI.
+    if (res.status === 401) { window.location.reload(); throw new Error('Session expired'); }
     const body = await res.json().catch(() => ({}));
     // status + modules (manifests pending acceptance, see moduleGate.js
     // in the backend) travel in the error so the caller can show the
@@ -830,12 +835,17 @@ function buildBackupsSection(inst) {
   header.textContent = t('instances.storage.backupsHeader');
   wrap.appendChild(header);
 
-  const createBtn = document.createElement('button');
-  createBtn.type = 'button';
-  createBtn.className = 'secondary';
-  createBtn.textContent = t('instances.storage.createBackup');
-  createBtn.addEventListener('click', () => createBackupNow(inst, createBtn));
-  wrap.appendChild(createBtn);
+  // Backup/restore/delete are gated on "backup-restore" (docs/ROADMAP.md Phase 7) -- the
+  // volume info and the list of what exists above/below stay visible to anyone who can see the
+  // instance at all (read-only, not sensitive), only the actions that change something disappear.
+  if (AuthUi.can('backup-restore')) {
+    const createBtn = document.createElement('button');
+    createBtn.type = 'button';
+    createBtn.className = 'secondary';
+    createBtn.textContent = t('instances.storage.createBackup');
+    createBtn.addEventListener('click', () => createBackupNow(inst, createBtn));
+    wrap.appendChild(createBtn);
+  }
 
   if (backupsCache === null) {
     wrap.appendChild(document.createTextNode(t('instances.storage.loading')));
@@ -863,18 +873,20 @@ function buildBackupsSection(inst) {
     const when = b.meta?.createdAt ? new Date(b.meta.createdAt).toLocaleString() : '?';
     const fromImage = b.meta?.dockerImage ? ` · ${b.meta.dockerImage}` : '';
     li.innerHTML = `<code>${b.file}</code> <span class="muted">(${formatBytes(b.sizeBytes)}, ${when}${fromImage})</span> `;
-    const restoreBtn = document.createElement('button');
-    restoreBtn.type = 'button';
-    restoreBtn.className = 'secondary';
-    restoreBtn.textContent = t('instances.storage.restore');
-    restoreBtn.addEventListener('click', () => restoreBackupOnto(inst, b.file, resetChk.checked, restoreBtn));
-    li.appendChild(restoreBtn);
-    const deleteBtn = document.createElement('button');
-    deleteBtn.type = 'button';
-    deleteBtn.className = 'secondary';
-    deleteBtn.textContent = t('instances.storage.delete');
-    deleteBtn.addEventListener('click', () => deleteBackupFile(b.file, deleteBtn));
-    li.appendChild(deleteBtn);
+    if (AuthUi.can('backup-restore')) {
+      const restoreBtn = document.createElement('button');
+      restoreBtn.type = 'button';
+      restoreBtn.className = 'secondary';
+      restoreBtn.textContent = t('instances.storage.restore');
+      restoreBtn.addEventListener('click', () => restoreBackupOnto(inst, b.file, resetChk.checked, restoreBtn));
+      li.appendChild(restoreBtn);
+      const deleteBtn = document.createElement('button');
+      deleteBtn.type = 'button';
+      deleteBtn.className = 'secondary';
+      deleteBtn.textContent = t('instances.storage.delete');
+      deleteBtn.addEventListener('click', () => deleteBackupFile(b.file, deleteBtn));
+      li.appendChild(deleteBtn);
+    }
     ul.appendChild(li);
   }
   wrap.appendChild(ul);
@@ -1009,7 +1021,7 @@ async function loadInstances({ silent = false } = {}) {
       const buttons = document.createElement('div');
       buttons.className = 'instance-secondary-buttons';
 
-      if (inst.hasGapps && inst.androidId && !inst.androidIdRegisteredAt) {
+      if (inst.hasGapps && inst.androidId && !inst.androidIdRegisteredAt && AuthUi.can('configure')) {
         const link = document.createElement('a');
         link.href = 'https://www.google.com/android/uncertified';
         link.target = '_blank';
@@ -1039,32 +1051,34 @@ async function loadInstances({ silent = false } = {}) {
         buttons.appendChild(markBtn);
       }
 
-      const resourcesBtn = document.createElement('button');
-      resourcesBtn.type = 'button';
-      resourcesBtn.className = 'secondary';
-      resourcesBtn.textContent = t('instances.resources.toggle');
-      resourcesBtn.title = t('instances.resources.changeHint');
-      resourcesBtn.addEventListener('click', () => {
-        openNoRestartId = openNoRestartId === inst.id ? null : inst.id;
-        loadInstances({ silent: true });
-      });
-      buttons.appendChild(resourcesBtn);
+      if (AuthUi.can('configure')) {
+        const resourcesBtn = document.createElement('button');
+        resourcesBtn.type = 'button';
+        resourcesBtn.className = 'secondary';
+        resourcesBtn.textContent = t('instances.resources.toggle');
+        resourcesBtn.title = t('instances.resources.changeHint');
+        resourcesBtn.addEventListener('click', () => {
+          openNoRestartId = openNoRestartId === inst.id ? null : inst.id;
+          loadInstances({ silent: true });
+        });
+        buttons.appendChild(resourcesBtn);
 
-      const configureBtn = document.createElement('button');
-      configureBtn.type = 'button';
-      configureBtn.className = 'secondary';
-      configureBtn.textContent = t('instances.configure.toggle');
-      configureBtn.title = t('instances.configure.changeHint');
-      configureBtn.addEventListener('click', async () => {
-        const opening = openRestartId !== inst.id;
-        openRestartId = opening ? inst.id : null;
-        if (opening && (userModulesCache === null || networkInterfacesCache === null)) {
-          loadInstances({ silent: true }); // shows the panel's "loading" state while this resolves
-          await Promise.all([loadUserModulesCache(), loadNetworkInterfacesCache()]);
-        }
-        loadInstances({ silent: true });
-      });
-      buttons.appendChild(configureBtn);
+        const configureBtn = document.createElement('button');
+        configureBtn.type = 'button';
+        configureBtn.className = 'secondary';
+        configureBtn.textContent = t('instances.configure.toggle');
+        configureBtn.title = t('instances.configure.changeHint');
+        configureBtn.addEventListener('click', async () => {
+          const opening = openRestartId !== inst.id;
+          openRestartId = opening ? inst.id : null;
+          if (opening && (userModulesCache === null || networkInterfacesCache === null)) {
+            loadInstances({ silent: true }); // shows the panel's "loading" state while this resolves
+            await Promise.all([loadUserModulesCache(), loadNetworkInterfacesCache()]);
+          }
+          loadInstances({ silent: true });
+        });
+        buttons.appendChild(configureBtn);
+      }
 
       const storageBtn = document.createElement('button');
       storageBtn.type = 'button';
@@ -1109,6 +1123,7 @@ async function loadInstances({ silent = false } = {}) {
       };
       for (const action of state.actions) {
         if (action === 'delete') {
+          if (!AuthUi.can('delete')) continue;
           const del = document.createElement('button');
           del.textContent = t('instances.delete');
           del.className = 'secondary';
@@ -1122,7 +1137,7 @@ async function loadInstances({ silent = false } = {}) {
             }
           });
           buttons.appendChild(del);
-        } else {
+        } else if (AuthUi.can('start-stop')) {
           buttons.appendChild(mk(t(`instances.${action}`), action));
         }
       }
@@ -1248,6 +1263,63 @@ $('#settings-form').addEventListener('submit', async (ev) => {
     const settings = await api('/settings', { method: 'PUT', body: JSON.stringify({ backupDir }) });
     $('#settings-backup-dir').value = settings.backupDir;
     saved.hidden = false;
+  } catch (e) {
+    alert(e.message);
+  }
+});
+
+// Local user management (docs/ROADMAP.md Phase 7) -- admin + "local" auth mode only, same
+// pattern as the Doctor/Modules lists (ul#...-list rebuilt from scratch on every load).
+async function loadUsers() {
+  const list = $('#users-list');
+  list.innerHTML = `<li class="muted">${t('common.loading')}</li>`;
+  try {
+    const users = await api('/auth/users');
+    list.innerHTML = '';
+    if (users.length === 0) list.innerHTML = `<li class="muted">${t('users.none')}</li>`;
+    for (const u of users) {
+      const li = document.createElement('li');
+      const label = document.createElement('span');
+      label.textContent = `${u.username} (${u.role})`;
+      li.appendChild(label);
+      const delBtn = document.createElement('button');
+      delBtn.type = 'button';
+      delBtn.className = 'secondary';
+      delBtn.textContent = t('users.delete');
+      delBtn.disabled = AuthUi.currentUser() && AuthUi.currentUser().id === u.id;
+      delBtn.addEventListener('click', async () => {
+        if (!confirm(t('users.deleteConfirm', { username: u.username }))) return;
+        try {
+          await api(`/auth/users/${u.id}`, { method: 'DELETE' });
+          loadUsers();
+        } catch (e) {
+          alert(e.message);
+        }
+      });
+      li.appendChild(delBtn);
+      list.appendChild(li);
+    }
+  } catch (e) {
+    list.innerHTML = `<li class="fail-text">${t('common.error', { msg: e.message })}</li>`;
+  }
+}
+
+const newUserDialog = $('#new-user-dialog');
+$('#btn-new-user').addEventListener('click', () => newUserDialog.showModal());
+$('#btn-cancel-new-user').addEventListener('click', () => newUserDialog.close());
+$('#new-user-form').addEventListener('submit', async (ev) => {
+  ev.preventDefault();
+  const form = ev.target;
+  try {
+    await api('/auth/users', {
+      method: 'POST',
+      body: JSON.stringify({
+        username: form.username.value, password: form.password.value, role: form.role.value,
+      }),
+    });
+    form.reset();
+    newUserDialog.close();
+    loadUsers();
   } catch (e) {
     alert(e.message);
   }
@@ -1514,17 +1586,31 @@ document.addEventListener('langchange', () => {
 I18n.apply();
 syncLangButton();
 
-loadHostCoreCount();
-loadInstances();
+// Everything below waits on AuthUi.ready (docs/ROADMAP.md Phase 7): in "none" mode it resolves
+// immediately with the fixed admin bypass user, so this changes nothing from before Phase 7; in
+// "local"/"oidc" mode it only resolves once there is an actual logged-in user, so nothing here
+// ever races a still-open login dialog.
+AuthUi.ready.then(() => {
+  AuthUi.renderHeaderChrome();
+  // "Hides/disables rather than only failing after the fact" (docs/ROADMAP.md Phase 7's own
+  // wording) -- a viewer/operator without "create" never sees the button at all, and Settings
+  // (which only admin can write) is dropped from the nav entirely rather than shown read-only
+  // for a feature nobody but admin has any use for.
+  $('#btn-new-instance').hidden = !AuthUi.can('create');
+  $('.tab-btn[data-tab="settings"]').hidden = !AuthUi.canManageSettings();
 
-// The state of an instance changes by itself (it boots, it crashes, someone uses adb/docker): refresh
-// every few seconds while the Instances tab is the one on screen. It does not run while a dialog is
-// open, while a resources or display edit panel is open (same reasoning -- it rebuilds the whole
-// table from the server's last-known values, which would silently wipe out whatever the user
-// already typed/checked there before they got to click Apply; found for real, 22/10/2026) nor
-// when the browser tab is hidden.
-setInterval(() => {
-  const onInstances = $('.tab-btn.active')?.dataset.tab === 'instances';
-  const dialogOpen = $$('dialog').some((d) => d.open);
-  if (onInstances && !dialogOpen && openNoRestartId === null && openRestartId === null && openStorageId === null && !document.hidden) loadInstances({ silent: true });
-}, 4000);
+  loadHostCoreCount();
+  loadInstances();
+
+  // The state of an instance changes by itself (it boots, it crashes, someone uses adb/docker): refresh
+  // every few seconds while the Instances tab is the one on screen. It does not run while a dialog is
+  // open, while a resources or display edit panel is open (same reasoning -- it rebuilds the whole
+  // table from the server's last-known values, which would silently wipe out whatever the user
+  // already typed/checked there before they got to click Apply; found for real, 22/10/2026) nor
+  // when the browser tab is hidden.
+  setInterval(() => {
+    const onInstances = $('.tab-btn.active')?.dataset.tab === 'instances';
+    const dialogOpen = $$('dialog').some((d) => d.open);
+    if (onInstances && !dialogOpen && openNoRestartId === null && openRestartId === null && openStorageId === null && !document.hidden) loadInstances({ silent: true });
+  }, 4000);
+});

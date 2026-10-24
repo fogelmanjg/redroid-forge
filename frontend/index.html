@@ -16,7 +16,10 @@
       <button class="tab-btn" data-tab="doctor" data-i18n="nav.doctor">Doctor</button>
       <button class="tab-btn" data-tab="help" data-i18n="nav.help">Help</button>
       <button class="tab-btn" data-tab="settings" data-i18n="nav.settings">Settings</button>
+      <button class="tab-btn" id="nav-users-btn" data-tab="users" data-i18n="nav.users" hidden>Users</button>
     </nav>
+    <span id="current-user-info" class="muted" hidden></span>
+    <button id="btn-logout" class="secondary" data-i18n="auth.logout" hidden>Log out</button>
     <button id="btn-lang" class="secondary" title="Language / Idioma">ES</button>
   </header>
 
@@ -87,6 +90,15 @@ gunzip -c image.tar.gz | docker load</pre>
           <span id="settings-saved" class="muted" hidden data-i18n="settings.saved">Saved.</span>
         </div>
       </form>
+    </section>
+
+    <section id="tab-users" class="tab">
+      <p class="tab-intro" data-i18n="users.intro"></p>
+      <div class="toolbar">
+        <button id="btn-new-user" data-i18n="users.new">+ New user</button>
+        <button id="btn-refresh-users" data-i18n="common.refresh">Refresh</button>
+      </div>
+      <ul id="users-list" class="doctor-list"></ul>
     </section>
   </main>
 
@@ -165,9 +177,45 @@ gunzip -c image.tar.gz | docker load</pre>
     </form>
   </dialog>
 
+  <dialog id="login-dialog">
+    <form id="login-form-local" method="dialog">
+      <h2 data-i18n="auth.loginTitle">Log in</h2>
+      <label><span data-i18n="auth.username">Username</span> <input name="username" required autocomplete="username" /></label>
+      <label><span data-i18n="auth.password">Password</span> <input type="password" name="password" required autocomplete="current-password" /></label>
+      <p id="login-error" class="resources-warn-error" hidden></p>
+      <div class="dialog-actions">
+        <button type="submit" data-i18n="auth.loginSubmit">Log in</button>
+      </div>
+    </form>
+    <div id="login-oidc">
+      <h2 data-i18n="auth.loginTitle">Log in</h2>
+      <a href="/api/auth/oidc/login" class="link-btn" data-i18n="auth.loginSso">Log in via SSO</a>
+    </div>
+  </dialog>
+
+  <dialog id="new-user-dialog">
+    <form id="new-user-form" method="dialog">
+      <h2 data-i18n="users.newTitle">New user</h2>
+      <label><span data-i18n="auth.username">Username</span> <input name="username" required pattern="[a-z0-9][a-z0-9_-]{0,31}" /></label>
+      <label><span data-i18n="auth.password">Password</span> <input type="password" name="password" required minlength="8" autocomplete="new-password" /></label>
+      <label><span data-i18n="users.role">Role</span>
+        <select name="role">
+          <option value="admin">admin</option>
+          <option value="operator" selected>operator</option>
+          <option value="viewer">viewer</option>
+        </select>
+      </label>
+      <div class="dialog-actions">
+        <button type="button" id="btn-cancel-new-user" data-i18n="common.cancel">Cancel</button>
+        <button type="submit" data-i18n="users.create">Create</button>
+      </div>
+    </form>
+  </dialog>
+
   <script src="i18n.js"></script>
   <script src="contracts.js"></script>
   <script src="instanceState.js"></script>
+  <script src="authUi.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

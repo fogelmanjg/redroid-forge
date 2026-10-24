@@ -41,6 +41,28 @@ services:
       # SAME path on both sides for exactly that reason (same trick as
       # REDROID_HWENC_ARTIFACTS_DIR above, just not optional).
       - REDROID_FORGE_BACKUPS_DIR=${REDROID_FORGE_BACKUPS_DIR:-${PWD}/backend/data/backups}
+      # Access control (docs/ROADMAP.md Phase 7) -- "none" (default) is today's behavior
+      # unchanged, no login, everyone sees/does everything. "local" turns on the built-in
+      # account store (backend/src/lib/userStore.js, data persisted under
+      # backend/data/users.json, same bind mount as everything else above) and seeds the very
+      # first admin account from the two vars below (no-op once any user already exists, so it
+      # never resets a changed password). "oidc" defers entirely to an external IdP -- see the
+      # REDROID_FORGE_OIDC_* vars further down.
+      - REDROID_FORGE_AUTH=${REDROID_FORGE_AUTH:-none}
+      - REDROID_FORGE_LOCAL_ADMIN_USER=${REDROID_FORGE_LOCAL_ADMIN_USER:-}
+      - REDROID_FORGE_LOCAL_ADMIN_PASSWORD=${REDROID_FORGE_LOCAL_ADMIN_PASSWORD:-}
+      # Generic OIDC (NOT Keycloak-specific -- backend/src/lib/oidc.js) -- only read when
+      # REDROID_FORGE_AUTH=oidc. ROLES_CLAIM/*_ROLE map whatever the IdP calls its roles onto
+      # this app's own admin/operator/viewer; the defaults below match Keycloak's own
+      # convention (realm_access.roles) but are not Keycloak-specific in any other way.
+      - REDROID_FORGE_OIDC_ISSUER_URL=${REDROID_FORGE_OIDC_ISSUER_URL:-}
+      - REDROID_FORGE_OIDC_CLIENT_ID=${REDROID_FORGE_OIDC_CLIENT_ID:-}
+      - REDROID_FORGE_OIDC_CLIENT_SECRET=${REDROID_FORGE_OIDC_CLIENT_SECRET:-}
+      - REDROID_FORGE_OIDC_REDIRECT_URI=${REDROID_FORGE_OIDC_REDIRECT_URI:-}
+      - REDROID_FORGE_OIDC_ROLES_CLAIM=${REDROID_FORGE_OIDC_ROLES_CLAIM:-realm_access.roles}
+      - REDROID_FORGE_OIDC_ADMIN_ROLE=${REDROID_FORGE_OIDC_ADMIN_ROLE:-redroid-forge-admin}
+      - REDROID_FORGE_OIDC_OPERATOR_ROLE=${REDROID_FORGE_OIDC_OPERATOR_ROLE:-redroid-forge-operator}
+      - REDROID_FORGE_OIDC_VIEWER_ROLE=${REDROID_FORGE_OIDC_VIEWER_ROLE:-redroid-forge-viewer}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - /lib/modules:/lib/modules:ro
