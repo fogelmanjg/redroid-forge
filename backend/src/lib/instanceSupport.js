@@ -42,22 +42,55 @@ function modulesWithVersions(moduleIds) {
   return out;
 }
 
-// -> the same shape as knownDb.resolve(): { nivel, combinacion, motivos }, plus the
-// resolved input itself (useful for the UI/debugging to show WHY).
-async function resolveForInstance(instance) {
-  const { db } = knownDbStore.loadCurrent();
-  const [baseDigest, hostGpuVendor] = await Promise.all([
-    runtime.getImageDigest(instance.dockerImage).catch(() => null),
-    hwAccel.detectGpuVendor().catch(() => null),
-  ]);
-  const input = {
+function buildInput(instance, { baseDigest, hostGpuVendor }) {
+  return {
     baseDigest,
     gappsId: instance.hasGapps ? localGappsId() : null,
     magiskId: localMagiskId(),
     modulos: modulesWithVersions(instance.requiredModuleIds || []),
     hostGpuVendor,
   };
-  return { ...knownDb.resolve(db, input), input };
 }
 
-module.exports = { resolveForInstance, localGappsId, localMagiskId, modulesWithVersions };
+// Pure (no I/O): resolve() given an already-fetched db/baseDigest/hostGpuVendor. Split
+// out of resolveForInstance so attachSupport() below can reuse one db load, one GPU
+// detection (it spawns lspci) and one digest lookup per distinct image across an
+// entire instance list, instead of repeating all three per instance.
+function resolveOne(instance, ctx) {
+  return knownDb.resolve(ctx.db, buildInput(instance, ctx));
+}
+
+// -> the same shape as knownDb.resolve(): { nivel, combinacion, motivos }, plus the
+// resolved input itself (useful for the UI/debugging to show WHY). Does its own I/O --
+// for a single instance looked up on its own (GET /api/instances/:id/soporte).
+async function resolveForInstance(instance) {
+  const { db } = knownDbStore.loadCurrent();
+  const [baseDigest, hostGpuVendor] = await Promise.all([
+    runtime.getImageDigest(instance.dockerImage).catch(() => null),
+    hwAccel.detectGpuVendor().catch(() => null),
+  ]);
+  const ctx = { db, baseDigest, hostGpuVendor };
+  return { ...resolveOne(instance, ctx), input: buildInput(instance, ctx) };
+}
+
+// Attaches `soporte: {nivel, combinacion, motivos}` to every instance of a list, e.g. the
+// real payload of GET /api/instances (refreshed every few seconds by the frontend while
+// that tab is open -- see app.js) -- one db load, one GPU vendor detection and one digest
+// lookup per DISTINCT dockerImage across the whole list, not per instance.
+async function attachSupport(instances) {
+  const { db } = knownDbStore.loadCurrent();
+  const hostGpuVendor = await hwAccel.detectGpuVendor().catch(() => null);
+  const images = [...new Set(instances.map((i) => i.dockerImage))];
+  const digestPairs = await Promise.all(
+    images.map(async (image) => [image, await runtime.getImageDigest(image).catch(() => null)]),
+  );
+  const digestByImage = new Map(digestPairs);
+  return instances.map((instance) => ({
+    ...instance,
+    soporte: resolveOne(instance, { db, hostGpuVendor, baseDigest: digestByImage.get(instance.dockerImage) }),
+  }));
+}
+
+module.exports = {
+  resolveForInstance, attachSupport, localGappsId, localMagiskId, modulesWithVersions,
+};

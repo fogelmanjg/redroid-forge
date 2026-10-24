@@ -235,7 +235,8 @@ async function withRuntimeStatus(instance) {
 
 router.get('/', async (req, res) => {
   const all = store.readAll();
-  res.json(await Promise.all(all.map(withRuntimeStatus)));
+  const withStatus = await Promise.all(all.map(withRuntimeStatus));
+  res.json(await instanceSupport.attachSupport(withStatus));
 });
 
 router.post('/', async (req, res) => {

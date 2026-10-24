@@ -7,7 +7,7 @@ const runtime = require('../src/lib/dockerRuntime');
 const hwAccel = require('../src/lib/hwAccel');
 const knownDbStore = require('../src/lib/knownDbStore');
 const moduleManifests = require('../src/lib/moduleManifests');
-const { resolveForInstance, localGappsId, localMagiskId } = require('../src/lib/instanceSupport');
+const { resolveForInstance, attachSupport, localGappsId, localMagiskId } = require('../src/lib/instanceSupport');
 
 const DIGEST = `sha256:${'a'.repeat(64)}`;
 
@@ -96,6 +96,30 @@ test('resolveForInstance: a failed digest/vendor lookup degrades to sin-soporte 
   const instance = { dockerImage: 'redroid/redroid:15.0.0-latest', hasGapps: false, requiredModuleIds: ['wifi-interno'] };
   const r = await resolveForInstance(instance);
   assert.strictEqual(r.nivel, 'sin-soporte');
+});
+
+test('attachSupport: resolves each instance and calls getImageDigest only once per DISTINCT image', async (t) => {
+  const version = moduleManifests.get('wifi-interno').version;
+  t.mock.method(knownDbStore, 'loadCurrent', () => (
+    { db: fakeDb({ 'wifi-interno': version }), source: 'snapshot', warnings: [] }));
+  const digestMock = t.mock.method(runtime, 'getImageDigest', async (image) => (image === 'redroid/redroid:15.0.0-latest' ? DIGEST : null));
+  const vendorMock = t.mock.method(hwAccel, 'detectGpuVendor', async () => 'amd');
+
+  const instances = [
+    { id: 'a', dockerImage: 'redroid/redroid:15.0.0-latest', hasGapps: false, requiredModuleIds: ['wifi-interno'] },
+    { id: 'b', dockerImage: 'redroid/redroid:15.0.0-latest', hasGapps: false, requiredModuleIds: ['wifi-interno', 'gapps'] },
+    { id: 'c', dockerImage: 'other:local', hasGapps: false, requiredModuleIds: ['wifi-interno'] },
+  ];
+  const out = await attachSupport(instances);
+
+  assert.strictEqual(out[0].soporte.nivel, 'oficial');
+  assert.strictEqual(out[1].soporte.nivel, 'comunidad'); // extra module not in the combo
+  assert.strictEqual(out[2].soporte.nivel, 'sin-soporte'); // DIGEST only returned for the real image
+  // one shared db load / vendor detection, one digest lookup per distinct dockerImage (2, not 3)
+  assert.strictEqual(vendorMock.mock.callCount(), 1);
+  assert.strictEqual(digestMock.mock.callCount(), 2);
+  // the original instance fields survive untouched alongside the new `soporte` field
+  assert.strictEqual(out[0].id, 'a');
 });
 
 test('localGappsId: reads the id from the local package.json', (t) => {

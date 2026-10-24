@@ -588,6 +588,29 @@ function buildModulesCell(inst) {
   return wrap;
 }
 
+// `inst.soporte` comes straight from the backend (GET /api/instances already attaches it per
+// row, see instanceSupport.attachSupport -- one db load + one GPU detection for the whole
+// list, not per instance). Absent only if the backend predates this (defensive fallback).
+function buildSupportCell(inst) {
+  const soporte = inst.soporte;
+  const chip = document.createElement('span');
+  chip.className = 'support-chip';
+  if (!soporte) {
+    chip.textContent = t('instances.soporte.unknown');
+    return chip;
+  }
+  const niveles = { oficial: 'instances.soporte.oficial', comunidad: 'instances.soporte.comunidad', 'sin-soporte': 'instances.soporte.sinSoporte' };
+  chip.classList.add(soporte.nivel);
+  chip.textContent = t(niveles[soporte.nivel] || soporte.nivel);
+  if (soporte.nivel === 'oficial') {
+    chip.title = t('instances.soporte.hintOficial', { combo: soporte.combinacion || '' });
+  } else {
+    const reasons = (soporte.motivos || []).join('; ');
+    chip.title = t(soporte.nivel === 'comunidad' ? 'instances.soporte.hintComunidad' : 'instances.soporte.hintSinSoporte', { reasons });
+  }
+  return chip;
+}
+
 let openWifiInternoId = null;
 
 function buildWifiInternoCell(inst) {
@@ -718,11 +741,11 @@ function buildDeviceProfileCell(inst) {
 // `silent`: the periodic refresh does not flash "Loading..." over the table.
 async function loadInstances({ silent = false } = {}) {
   const tbody = $('#instances-table tbody');
-  if (!silent) tbody.innerHTML = `<tr><td colspan="11">${t('common.loading')}</td></tr>`;
+  if (!silent) tbody.innerHTML = `<tr><td colspan="12">${t('common.loading')}</td></tr>`;
   try {
     const instances = await api('/instances');
     if (instances.length === 0) {
-      tbody.innerHTML = `<tr><td colspan="11">${t('instances.none')}</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="12">${t('instances.none')}</td></tr>`;
       return;
     }
     // Built off-screen and swapped in one go, so a refresh never leaves the table half drawn.
@@ -740,6 +763,7 @@ async function loadInstances({ silent = false } = {}) {
         <td class="codec-cell"></td>
         <td class="wifi-interno-cell"></td>
         <td class="modules-cell"></td>
+        <td class="support-cell"></td>
         <td class="actions"></td>
       `;
       const state = InstanceState.describe(inst.status);
@@ -758,6 +782,7 @@ async function loadInstances({ silent = false } = {}) {
       tr.querySelector('.codec-cell').appendChild(buildCodecCell(inst));
       tr.querySelector('.wifi-interno-cell').appendChild(buildWifiInternoCell(inst));
       tr.querySelector('.modules-cell').appendChild(buildModulesCell(inst));
+      tr.querySelector('.support-cell').appendChild(buildSupportCell(inst));
       const actions = tr.querySelector('.actions');
       if (inst.hasGapps && inst.androidId && !inst.androidIdRegisteredAt) {
         const link = document.createElement('a');
@@ -833,7 +858,7 @@ async function loadInstances({ silent = false } = {}) {
     }
     tbody.replaceChildren(rows);
   } catch (e) {
-    tbody.innerHTML = `<tr><td colspan="11">${t('common.error', { msg: e.message })}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="12">${t('common.error', { msg: e.message })}</td></tr>`;
   }
 }
 
