@@ -614,6 +614,27 @@ with the ownership scope, not a fourth role.
 different accounts genuinely get different capabilities, verified live (not just by code review) — one
 limited to its own instances with no create/delete, another with broader access.
 
+**✅ Done (24/10/2026).** Steps 1-4 implemented. `backend/src/lib/permissions.js` (role × capability ×
+ownership, admin bypass, 404-not-403 for an instance invisible to the caller so IDs cannot be probed to
+tell "not yours" apart from "does not exist"), `userStore.js` (`local` accounts, scrypt-hashed, no new
+dependency), `session.js` (stateless HMAC-signed cookies, no `express-session`), `oidc.js` (generic OIDC
+via `openid-client@5.7.1`, pinned to the last CommonJS release — v6 is ESM-only and this backend has no
+build step), `auth.js` + `routes/auth.js` (the Express wiring and `/api/auth/*` routes), all gating every
+route in `routes/instances.js`/`settings.js`/`backups.js`, plus a login screen, a logout button, an
+admin-only Users panel, and per-capability hide/disable throughout the frontend. **Live-verified
+end-to-end in `local` mode** (not just unit tests, same discipline as Phase 6): an admin, an operator and
+a viewer account against the real running container — admin saw every pre-existing instance (created
+before this phase, so ownerless) while operator/viewer saw none of them; the operator created its own
+throwaway instance and could see/stop/delete it, the viewer could not see it at all (404, not 403) nor
+create one of its own (403); `none` mode re-confirmed behaviorally identical to before this phase.
+**Known gap, not yet verified:** `oidc` mode's live callback against a real IdP — no IdP was available in
+this environment, so only its pure parts (role-claim mapping, PKCE/state bookkeeping) are unit-tested;
+worth a real pass against an actual Keycloak/Authentik instance before relying on it. **Also a deliberate,
+undocumented-until-now migration gap:** an instance created before this phase (or under `none` mode) has
+no `ownerId`, so once `local`/`oidc` is turned on, only admin can see or manage it — there is no "reassign
+owner" feature yet; turning on auth on an existing fleet currently means admin either keeps using it as
+admin or there is no way for a non-admin account to take any of the earlier instances over.
+
 ## Phase 8 — Federation mode: `jg-dashboard` and Plenum as consumers
 
 **Difficulty: Medium-High** — two real integrations against two different codebases (Angular/NestJS in one
