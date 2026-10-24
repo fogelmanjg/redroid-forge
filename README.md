@@ -18,21 +18,61 @@ without depending on any other infrastructure.
 > why), [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) (how the pieces fit together — base image,
 > modules, and at which point of an instance's lifecycle each one is touched) and
 > [`docs/ROADMAP.md`](docs/ROADMAP.md) (in what order) and [`CHANGELOG.md`](CHANGELOG.md) (tagged
-> releases, SemVer policy) for the full picture. What exists today covers **Phases 0 through 5**
-> of the roadmap: the full port of `redroid-manager`, support tiers per image, hardware video
-> **encode and decode** on AMD and Intel (`hwenc`/`hwdec`), fake WiFi and device profile spoofing,
-> the generic module-contract system, the signed known-combinations database
-> ([`docs/KNOWN-COMBINATIONS.md`](docs/KNOWN-COMBINATIONS.md)), and user-defined modules (CIFI as
-> the first one) — plus instance backup/restore, settings and a redesigned instances UI built on
-> top of them since. See [`CHANGELOG.md`](CHANGELOG.md) for the detail, tag `v0.1.0`.
+> releases, SemVer policy) for the full picture. What exists today covers **Phases 0 through 7**
+> of the roadmap — everything in the Features table below — with Phase 8 (federation with
+> `jg-dashboard`/Plenum) next. See [`CHANGELOG.md`](CHANGELOG.md) for the detail, tag `v0.1.0`.
 
-It solves two things:
+## Features
 
-1. **Instance lifecycle**: create, start, stop, restart and delete redroid containers from a web
-   UI, including what does not travel with the image (per-instance `binderfs` devices, and the
-   `mac80211_hwsim` wiring for the images with fake WiFi).
-2. **Doctor**: host diagnostics — shows what is missing to configure and the exact command to fix
-   it. It never runs anything by itself, it only diagnoses.
+What it does today, and what's still ahead. "Official" vs "community" below is this project's own
+support-tier distinction (see [`docs/KNOWN-COMBINATIONS.md`](docs/KNOWN-COMBINATIONS.md)): official
+means validated with evidence on real hardware, not a guarantee.
+
+| | Status | |
+|---|---|---|
+| **Instance lifecycle** | ✅ | Create/start/stop/restart/delete from a web UI. Live CPU/RAM resize (no restart). Resolution/DPI/FPS/GPU-mode changes recreate the container but keep its data. |
+| **Hardware video encode** | ✅ AMD · Intel | VA-API, validated on real Polaris/Vega/Iris Xe hardware. "Every instance uses in hardware everything the host's GPU offers" — nothing hidden behind one fixed capability tier. |
+| **Hardware video decode** | ✅ AMD · Intel | H.264/HEVC/VP9/VP8 depending on what the host's GPU actually supports (Doctor shows which). |
+| | 🧪 NVIDIA | NVENC/NVDEC exist as a proof of the mechanism (single intra frame, no B-frames) — not production use yet. |
+| **Compatibility database** | ✅ | Signed, versioned, anti-rollback database of which image+module combinations are actually validated. Checked automatically, shown per instance, never blocks — an unvalidated combo still runs, just marked "community". |
+| **Optional modules, with consent** | ✅ | Google Apps/Play Store, ARM translation (arm64 apps on x86), fake WiFi, device profile spoofing, GPU mode — each behind an explicit contract dialog the first time it's used, never silently enabled. |
+| | 📝 planned | Magisk (manifest exists, no real integration yet). |
+| **User-defined watchdogs** | ✅ pilot | Periodic per-instance scripts (pause/resume/status from the UI, no cron to hand-edit) — CIFI (a specific game's reconnection logic) ported and running as the first one; the mechanism is generic for more. |
+| **Backup & restore** | ✅ | Whole-instance backup/restore (tar.gz via a throwaway container), optional Android ID reset, a warning (never a block) when restoring onto an instance with different modules/GApps version. |
+| **Access control** | ✅ | Three roles (admin/operator/viewer) with per-instance ownership. Pluggable: `none` (default, today's zero-friction behavior), `local` (built-in accounts), `oidc` (any standard identity provider — Keycloak, Authentik, Auth0, ...). |
+| **Network exposure control** | ✅ | The app and every instance bind to `127.0.0.1` only, by default — `redroid` itself has no access control of its own. Opt into any specific interface (or all of them) per instance and for the app itself, from the UI; Docker/container-internal interfaces (`docker0`, `br-*`, `veth*`, ...) are filtered out of that picker by default, with an admin override. |
+| **Doctor** | ✅ | Host diagnostics with the exact command to fix what's missing — it only diagnoses, never runs anything on its own. |
+| **Screen viewing** | ✅ | scrcpy connector scripts (`connect.sh`/`connect.ps1`), a port for viewing from an Android device itself, no bundled web viewer by design (see below). |
+| **Federation** | 📝 planned | `jg-dashboard` and Plenum becoming consumers of this app via `oidc`, reusing each host's existing identity provider instead of a separate login. |
+| **Port knocking** | 📝 planned, research stage | An optional `fwknop` companion for sysops who want it, on top of the network controls above. |
+
+## Use cases
+
+**Play an Android game on Linux, with real GPU acceleration.** Create an instance with `gpuMode:
+host` and GApps enabled, install the game from the Play Store, connect with scrcpy (see
+["Viewing the screen from another PC"](#viewing-the-screen-from-another-pc-scrcpy--eg-a-tv-with-an-old-laptop)
+below) and play — the same host GPU that would run a native Android emulator drives the actual
+rendering, not software fallback.
+
+**Revive an old tablet or phone as a thin client.** The device itself does almost nothing: it just
+needs a scrcpy-capable app (see [ScrcpyForAndroid](https://github.com/Miuzarte/ScrcpyForAndroid)
+below) and a network path to the instance's ADB port. The instance — and everything it needs to
+run well — lives on whatever PC actually has the CPU/GPU for it, so hardware that's too weak to
+run modern Android itself is still plenty to just display one.
+
+**Connect to a TV, with an old laptop as the "console".** Same idea, aimed at a living room: the
+laptop only runs a scrcpy client (far lighter than running Android locally), the real instance
+runs on a server with real resources, and the TV just shows whatever that laptop outputs over
+HDMI. See the connector scripts below for making this a one-command launch instead of typing the
+`adb connect`/`scrcpy` pair by hand every time.
+
+**Build a farm for testing or automation.** Every action here goes through a plain HTTP API
+(`GET`/`POST /api/instances`, …) — spin up and tear down instances from a script, run the same APK
+across several Android versions, or drive an instance headlessly (no human ever opening a scrcpy
+window) for a CI job or a bot. The **user-defined watchdog** mechanism (CIFI today) is built for
+exactly this: a periodic per-instance check/action with no cron job to hand-edit per host, and the
+same **backup/restore** mechanism that protects a personal instance's save data doubles as a way
+to snapshot a known-good test environment and restore it between runs.
 
 ## ⚠️ Images with GApps: register the Android ID within 48 hours
 
@@ -52,8 +92,9 @@ The app helps make sure it does not get overlooked:
 ## Third-party / non-free modules: a contract before enabling them
 
 Everything that is not 100% free software (GApps, Magisk) or that depends on a choice of the host
-(fake WiFi and, in the future, device profile/GPU mode/CPU-RAM) is declared with a versioned
-**manifest** (`backend/src/modules/manifests/*.json`) instead of having its own enablement logic.
+(fake WiFi, device profile, GPU mode) is declared with a versioned **manifest** (one
+`manifest.json` per module under `backend/src/modules/`) instead of having its own enablement
+logic.
 The backend never creates or starts an instance that requires a module without a current
 acceptance of its manifest — if it is missing, it answers `428` with the pending contract, the
 frontend shows it (the same generic dialog for all of them, `frontend/contracts.js`), and only
@@ -163,17 +204,21 @@ the shortcuts worth knowing, without the full manual.
 backend/src/server.js    Express, serves /api/* and the static frontend
 backend/src/lib/          dockerRuntime, binder, hwsimWifi, androidIdentity, doctor, store,
                            portAllocator, moduleManifests, moduleAcceptance, moduleGate, hwAccel,
-                           knownDb*
-backend/src/routes/       instances, doctor, images, modules, db
+                           knownDb*, permissions, userStore, session, oidc, auth,
+                           networkInterfaceFilter, settings
+backend/src/routes/       instances, doctor, images, modules, db, settings, backups, network, auth
 backend/src/modules/      manifests/*.json (each module's contract, section 5 of REQUIREMENTS.md)
-                           + hwenc/ (first real module: integration script, not just a manifest)
-backend/native/           vaapi-daemon — host daemon of the hwenc module (see docs/ARCHITECTURE.md)
+                           + one folder per real module (hwenc/, hwdec/, gapps/,
+                           arm-translation/, wifi-interno/, redroid-gralloc-fix/, cifi/):
+                           integration script, not just a manifest
+backend/native/           vaapi-daemon — host daemon of the hwenc/hwdec modules (see docs/ARCHITECTURE.md)
 backend/db/               bundled seed of the known-combinations database + trusted signing keys
 backend/images.json       catalog of the available redroid images
-backend/data/             persistent state (instances.json, module-acceptances.json)
+backend/data/             persistent state (instances.json, settings.json, users.json, ...)
 backend/test/             tests (node --test, no new dependencies)
 android/                  Codec2 components (hardware encoder/decoders) and their test tools
-frontend/                 vanilla frontend (no build step); contracts.js = generic contract modal
+frontend/                 vanilla frontend (no build step); contracts.js = generic contract modal,
+                           authUi.js = login gate + per-capability UI hide/disable (Phase 7)
 scripts/                 connect.sh / connect.ps1 -- scrcpy connector scripts for end users (not
                           backend/scripts/, which is dev/admin-time tooling)
 docs/                     REQUIREMENTS.md (what and why), ARCHITECTURE.md (how the pieces fit

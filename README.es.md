@@ -20,21 +20,63 @@ sin depender de ninguna otra infraestructura.
 > módulos, y en qué momento del ciclo de vida de una instancia se toca cada uno) y
 > [`docs/ROADMAP.md`](docs/ROADMAP.md) (en qué orden; solo en inglés) y
 > [`CHANGELOG.md`](CHANGELOG.md) (releases etiquetados, política de versionado; solo en inglés) para
-> el panorama completo. Lo que hay hoy corresponde a las **Fases 0 a 5** del roadmap: el port íntegro
-> de `redroid-manager`, tiers de soporte por imagen, **encode y decode** de video por hardware en
-> AMD e Intel (`hwenc`/`hwdec`), WiFi falso y device profile spoofing, el sistema de contrato de
-> módulo genérico, la base de combinaciones conocidas (`docs/KNOWN-COMBINATIONS.es.md`) y módulos
-> definidos por el usuario (CIFI como primer caso) — más backup/restore de instancias, configuración
-> y un rediseño de la UI de instancias construidos encima desde entonces. Ver
-> [`CHANGELOG.md`](CHANGELOG.md) para el detalle, tag `v0.1.0`.
+> el panorama completo. Lo que hay hoy corresponde a las **Fases 0 a 7** del roadmap — todo lo de
+> la tabla de Features más abajo — con la Fase 8 (federación con `jg-dashboard`/Plenum) como
+> próximo paso. Ver [`CHANGELOG.md`](CHANGELOG.md) para el detalle, tag `v0.1.0`.
 
-Resuelve dos cosas:
+## Features
 
-1. **Ciclo de vida de instancias**: crear, arrancar, parar, reiniciar y borrar contenedores
-   redroid desde una UI web, incluyendo lo que no viaja con la imagen (dispositivos `binderfs`
-   por instancia, y el wiring de `mac80211_hwsim` para las imágenes con WiFi falso).
-2. **Doctor**: diagnóstico del host — muestra qué falta configurar y el comando exacto para
-   arreglarlo. Nunca ejecuta nada solo, solo diagnostica.
+Qué hace hoy, y qué sigue pendiente. "Oficial" vs. "comunidad" abajo es la distinción de tier de
+soporte propia del proyecto (ver [`docs/KNOWN-COMBINATIONS.es.md`](docs/KNOWN-COMBINATIONS.es.md)):
+oficial significa validado con evidencia en hardware real, no una garantía.
+
+| | Estado | |
+|---|---|---|
+| **Ciclo de vida de instancias** | ✅ | Crear/arrancar/parar/reiniciar/borrar desde una UI web. Resize de CPU/RAM en vivo (sin restart). Cambios de resolución/DPI/FPS/modo GPU recrean el contenedor pero conservan sus datos. |
+| **Encode de video por hardware** | ✅ AMD · Intel | VA-API, validado en hardware real Polaris/Vega/Iris Xe. "Cada instancia usa en hardware todo lo que ofrece la GPU del host" — nada escondido detrás de un tier fijo de capacidad. |
+| **Decode de video por hardware** | ✅ AMD · Intel | H.264/HEVC/VP9/VP8 según lo que realmente soporte la GPU del host (Doctor muestra cuáles). |
+| | 🧪 NVIDIA | NVENC/NVDEC existen como prueba del mecanismo (un solo frame intra, sin B-frames) — todavía no para uso real. |
+| **Base de combinaciones conocidas** | ✅ | Base firmada, versionada, anti-rollback de qué combinaciones imagen+módulo están realmente validadas. Se chequea sola, se muestra por instancia, nunca bloquea — una combinación no validada igual corre, solo queda marcada "comunidad". |
+| **Módulos opcionales, con consentimiento** | ✅ | Google Apps/Play Store, traducción ARM (apps arm64 en x86), WiFi falso, device profile spoofing, modo GPU — cada uno detrás de un diálogo de contrato explícito la primera vez que se usa, nunca habilitado en silencio. |
+| | 📝 planeado | Magisk (el manifest existe, falta la integración real). |
+| **Watchdogs definidos por el usuario** | ✅ piloto | Scripts periódicos por instancia (pause/resume/status desde la UI, sin cron para editar a mano) — CIFI (la lógica de reconexión de un juego puntual) ya portado y corriendo como primer caso; el mecanismo es genérico para sumar más. |
+| **Backup y restore** | ✅ | Backup/restore de toda la instancia (tar.gz vía un contenedor descartable), reset opcional del Android ID, un aviso (nunca un bloqueo) al restaurar sobre una instancia con módulos/versión de GApps distinta. |
+| **Control de acceso** | ✅ | Tres roles (admin/operator/viewer) con ownership por instancia. Pluggable: `none` (default, comportamiento sin fricción de siempre), `local` (cuentas propias), `oidc` (cualquier identity provider estándar — Keycloak, Authentik, Auth0, ...). |
+| **Control de exposición de red** | ✅ | La app y cada instancia bindean a `127.0.0.1` solamente, por defecto — redroid en sí no tiene ningún control de acceso propio. Se puede optar por cualquier interfaz específica (o todas) por instancia y para la app en sí, desde la UI; las interfaces internas de Docker/contenedores (`docker0`, `br-*`, `veth*`, ...) quedan filtradas de ese selector por defecto, con override de admin. |
+| **Doctor** | ✅ | Diagnóstico del host con el comando exacto para arreglar lo que falta — solo diagnostica, nunca ejecuta nada solo. |
+| **Visualización de pantalla** | ✅ | Scripts de conexión scrcpy (`connect.sh`/`connect.ps1`), un puerto para ver desde un dispositivo Android mismo, sin visor web embebido por diseño (ver abajo). |
+| **Federación** | 📝 planeado | `jg-dashboard` y Plenum pasando a consumir esta app vía `oidc`, reusando el identity provider que cada host ya tiene en vez de un login aparte. |
+| **Port knocking** | 📝 planeado, etapa de investigación | Un acompañante opcional `fwknop` para sysops que lo quieran, encima de los controles de red de arriba. |
+
+## Casos de uso
+
+**Jugar un juego Android en Linux, con aceleración real de GPU.** Crear una instancia con
+`gpuMode: host` y GApps habilitado, instalar el juego desde Play Store, conectarse con scrcpy
+(ver ["Ver la pantalla desde otra PC"](#ver-la-pantalla-desde-otra-pc-scrcpy--ej-una-tv-con-una-notebook-vieja)
+más abajo) y jugar — la misma GPU del host que correría un emulador Android nativo maneja el
+render real, no un fallback por software.
+
+**Revivir una tablet o celular viejo como cliente liviano.** El dispositivo en sí casi no hace
+nada: solo necesita una app con scrcpy (ver [ScrcpyForAndroid](https://github.com/Miuzarte/ScrcpyForAndroid)
+más abajo) y un camino de red hasta el puerto ADB de la instancia. La instancia — y todo lo que
+necesita para andar bien — vive en la PC que realmente tenga el CPU/GPU para eso, así que
+hardware demasiado débil para correr Android moderno él mismo sigue siendo de sobra para solo
+mostrarlo.
+
+**Conectar a una TV, con una notebook vieja como "consola".** Misma idea, pensada para el living:
+la notebook solo corre un cliente scrcpy (mucho más liviano que correr Android localmente), la
+instancia real corre en un servidor con recursos de verdad, y la TV solo muestra lo que esa
+notebook manda por HDMI. Ver los scripts de conexión más abajo para que esto sea un lanzamiento de
+un solo comando en vez de tipear el par `adb connect`/`scrcpy` a mano cada vez.
+
+**Montar una granja para testeo o automatización.** Todo acá pasa por una API HTTP plana
+(`GET`/`POST /api/instances`, …) — levantar y tirar abajo instancias desde un script, correr el
+mismo APK en varias versiones de Android, o manejar una instancia sin humano de por medio (nadie
+abriendo nunca una ventana de scrcpy) para un job de CI o un bot. El mecanismo de **watchdog
+definido por el usuario** (CIFI hoy) está pensado justo para esto: un chequeo/acción periódico por
+instancia sin cron para editar a mano por host, y el mismo mecanismo de **backup/restore** que
+protege los datos de guardado de una instancia personal también sirve para sacarle una foto a un
+entorno de test conocido-bueno y restaurarlo entre corridas.
 
 ## ⚠️ Imágenes con GApps: registrar el Android ID dentro de las 48hs
 
@@ -54,8 +96,8 @@ La app ayuda a que no se pase por alto:
 ## Módulos de terceros / no libres: contrato antes de activarlos
 
 Todo lo que no es 100% software libre (GApps, Magisk) o depende de una elección del host
-(WiFi falso, y a futuro device profile/modo GPU/CPU-RAM) se declara con un **manifest**
-versionado (`backend/src/modules/manifests/*.json`) en vez de tener su propia lógica de
+(WiFi falso, device profile, modo GPU) se declara con un **manifest** versionado (un
+`manifest.json` por módulo bajo `backend/src/modules/`) en vez de tener su propia lógica de
 habilitación. El backend nunca crea ni arranca una instancia que requiera un módulo sin una
 aceptación vigente de su manifest — si falta, responde `428` con el contrato pendiente, el
 frontend lo muestra (mismo diálogo genérico para todos, `frontend/contracts.js`), y solo tras
@@ -166,17 +208,21 @@ atajos que vale la pena conocer, sin el manual completo.
 backend/src/server.js    Express, sirve /api/* y el frontend estático
 backend/src/lib/          dockerRuntime, binder, hwsimWifi, androidIdentity, doctor, store,
                            portAllocator, moduleManifests, moduleAcceptance, moduleGate, hwAccel,
-                           knownDb*
-backend/src/routes/       instances, doctor, images, modules, db
+                           knownDb*, permissions, userStore, session, oidc, auth,
+                           networkInterfaceFilter, settings
+backend/src/routes/       instances, doctor, images, modules, db, settings, backups, network, auth
 backend/src/modules/      manifests/*.json (contrato de cada módulo, sección 5 de REQUIREMENTS.md)
-                           + hwenc/ (primer módulo real: script de integración, no solo manifest)
-backend/native/           vaapi-daemon — daemon host del módulo hwenc (ver docs/ARCHITECTURE.es.md)
+                           + una carpeta por módulo real (hwenc/, hwdec/, gapps/,
+                           arm-translation/, wifi-interno/, redroid-gralloc-fix/, cifi/):
+                           script de integración, no solo manifest
+backend/native/           vaapi-daemon — daemon host de los módulos hwenc/hwdec (ver docs/ARCHITECTURE.es.md)
 backend/db/               semilla incluida de la base de combinaciones conocidas + claves de firma de confianza
 backend/images.json       catálogo de imágenes redroid disponibles
-backend/data/             estado persistente (instances.json, module-acceptances.json)
+backend/data/             estado persistente (instances.json, settings.json, users.json, ...)
 backend/test/             tests (node --test, sin dependencias nuevas)
 android/                  componentes Codec2 (encoder y decoders por hardware) y sus herramientas de prueba
-frontend/                 frontend vanilla (sin build step); contracts.js = modal de contrato genérico
+frontend/                 frontend vanilla (sin build step); contracts.js = modal de contrato genérico,
+                           authUi.js = gate de login + oculta/deshabilita UI por capacidad (Fase 7)
 scripts/                 connect.sh / connect.ps1 -- scripts de conexión scrcpy para el usuario final
                           (no confundir con backend/scripts/, que es tooling dev/admin)
 docs/                     REQUIREMENTS (qué y por qué), ARCHITECTURE (cómo encajan las
