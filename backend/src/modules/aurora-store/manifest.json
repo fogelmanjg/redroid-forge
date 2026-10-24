@@ -1,0 +1,42 @@
+{
+  "id": "aurora-store",
+  "nombre": "Aurora Store",
+  "esTerceroNoLibre": false,
+  "licencia": "GPLv3 (https://github.com/whyorean/AuroraStore). Free software: unlike GApps/ARM translation, redroid-forge downloads and installs it itself, there is nothing for you to provide.",
+  "origen": "https://f-droid.org/packages/com.aurora.store/",
+  "descripcion": "Installs Aurora Store, an open-source client for Google Play's real catalog/download backend (same backend the official Play Store app uses, reverse-engineered, not affiliated with Google). Lets you search for and download real APKs with a logged-in Google account -- including device/locale spoofing, useful for an app that is missing from the catalog on an uncertified device. It does NOT provide Google Play services at runtime: an app that actually needs those still needs the gapps module too, Aurora only gets you the APK.",
+  "queToca": [
+    "downloads Aurora Store 4.8.3 from its official F-Droid mirror the first time any instance needs it, verifies its sha256 against the one pinned in this manifest, and caches it on the host (REDROID_FORGE_AURORA_STORE_DIR, by default backend/data/aurora-store) -- nothing is installed if the download does not match",
+    "after the instance has booted, pushes the cached APK in and runs 'pm install' like any other user app -- no /system write, no effect on the instance's own first-boot image",
+    "writes the same WebView command line the gapps module writes (--no-sandbox --single-process): Aurora's own login screen opens a WebView and crashes inside the container without it. Applied independently of whether gapps is also enabled. This REDUCES the isolation of the WebView of that instance",
+    "pinned to 4.8.3, not the latest release: 4.8.4 crashes on its own app-list screens (a known Jetpack Compose bug in that release's UI rewrite)",
+    "depends on a community-run, reverse-engineered Play API that Google can break at any time -- much less solid a guarantee than the hash-pinned official SDK images gapps/arm-translation use"
+  ],
+  "compatibleCon": {
+    "androidVersion": [
+      15
+    ],
+    "gpuMode": [
+      "host",
+      "guest"
+    ]
+  },
+  "etapa": [
+    6
+  ],
+  "entry": "./integrate.js",
+  "version": 1,
+  "i18n": {
+    "es": {
+      "licencia": "GPLv3 (https://github.com/whyorean/AuroraStore). Software libre: a diferencia de GApps/traducción ARM, redroid-forge la descarga e instala solo, no tenés nada que poner vos.",
+      "descripcion": "Instala Aurora Store, un cliente open-source para el catálogo/backend de descargas real de Google Play (el mismo backend que usa la app oficial de Play Store, ingeniería inversa, sin afiliación con Google). Permite buscar y descargar APKs reales con una cuenta de Google logueada -- incluyendo spoofing de dispositivo/idioma, útil para una app que falta en el catálogo en un dispositivo no certificado. NO provee los servicios de Google Play en tiempo de ejecución: una app que realmente los necesita sigue necesitando también el módulo gapps, Aurora solo te consigue el APK.",
+      "queToca": [
+        "descarga Aurora Store 4.8.3 de su mirror oficial de F-Droid la primera vez que alguna instancia lo necesita, verifica su sha256 contra el que está fijado en este manifest, y lo cachea en el host (REDROID_FORGE_AURORA_STORE_DIR, por defecto backend/data/aurora-store) -- no se instala nada si la descarga no coincide",
+        "después de que la instancia bootea, copia el APK cacheado adentro y corre 'pm install' como cualquier otra app de usuario -- sin escritura a /system, sin efecto sobre la imagen de primer arranque de la instancia",
+        "escribe la misma línea de comandos de WebView que escribe el módulo gapps (--no-sandbox --single-process): la pantalla de login de Aurora abre un WebView y se cae dentro del contenedor sin eso. Se aplica independientemente de si gapps también está habilitado. Esto REDUCE el aislamiento del WebView de esa instancia",
+        "fijado en 4.8.3, no el último release: 4.8.4 se cae en sus propias pantallas de lista de apps (un bug conocido de Jetpack Compose en el rediseño de UI de ese release)",
+        "depende de una API de Play de ingeniería inversa manejada por la comunidad, que Google puede romper en cualquier momento -- una garantía mucho menos sólida que las imágenes oficiales de SDK con hash fijado que usan gapps/traducción ARM"
+      ]
+    }
+  }
+}

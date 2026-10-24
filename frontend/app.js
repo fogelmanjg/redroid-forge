@@ -599,6 +599,16 @@ function buildRestartEditRow(inst) {
   armWrap.appendChild(document.createTextNode(t('new.arm')));
   panel.appendChild(armWrap);
 
+  const auroraWrap = document.createElement('label');
+  auroraWrap.className = 'display-edit-field';
+  auroraWrap.style.flexDirection = 'row';
+  const auroraChk = document.createElement('input');
+  auroraChk.type = 'checkbox';
+  auroraChk.checked = ids.includes('aurora-store');
+  auroraWrap.appendChild(auroraChk);
+  auroraWrap.appendChild(document.createTextNode(t('new.auroraStore')));
+  panel.appendChild(auroraWrap);
+
   const userModuleChecks = [];
   for (const m of (userModulesCache || [])) {
     const wrap = document.createElement('label');
@@ -627,6 +637,7 @@ function buildRestartEditRow(inst) {
       if (wifiChk.checked) modules.push('wifi-interno');
       if (gappsChk.checked) modules.push('gapps');
       if (armChk.checked) modules.push('arm-translation');
+      if (auroraChk.checked) modules.push('aurora-store');
       for (const { id, chk } of userModuleChecks) if (chk.checked) modules.push(id);
       const bindHosts = netChecks.filter(({ chk }) => chk.checked).map(({ address }) => address);
       if (bindHosts.length === 0) { alert(t('instances.network.selectAtLeastOne')); return; }
@@ -1561,6 +1572,7 @@ $('#btn-new-instance').addEventListener('click', async () => {
   }
   $('#chk-gapps').checked = false;
   $('#chk-arm').checked = false;
+  $('#chk-aurora-store').checked = false;
   $('#chk-hwenc').checked = false;
   $('#chk-hwdec').checked = false;
   $('#chk-wifi-interno').checked = false;
@@ -1611,6 +1623,7 @@ $('#new-instance-form').addEventListener('submit', async (e) => {
   if (form.hwdec.checked) modules.push('hwdec');
   if (form.gapps.checked) modules.push('gapps');
   if (form.arm.checked) modules.push('arm-translation');
+  if (form.auroraStore.checked) modules.push('aurora-store');
   if (form.wifiInterno.checked) modules.push('wifi-interno');
   for (const chk of $$('.user-module-chk')) if (chk.checked) modules.push(chk.dataset.id);
   const display = {
