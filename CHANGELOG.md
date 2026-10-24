@@ -11,7 +11,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
   bullet so it is never missed just because the version number alone did not say so.
 - **PATCH** bump: bug fixes, internal refactors, tests, docs, UI rewording/reorganizing that adds no new
   capability.
-- **1.0.0**: reserved for the Phase 8 gate in `docs/ROADMAP.md` ("the project is in a condition to be
+- **1.0.0**: reserved for the Phase 10 gate in `docs/ROADMAP.md` ("the project is in a condition to be
   called beta 0.9") -- not claimed before that milestone is actually reached.
 - Every tag stays available forever (nothing gets deleted); "stable" means it also has a non-prerelease
   GitHub Release. Given this project already verifies live against a real backend before every commit

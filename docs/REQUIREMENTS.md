@@ -158,7 +158,7 @@ Consequences:
   code of `jg-dashboard` and `plenum-redroid` is removed** from those projects. It is not maintained or
   kept as a compatibility path. The previous code stays **on GitHub as an old project, dead and
   replaced by `redroid-forge`** (as history only). Before removing it, it must be **made sure that code
-  is really on GitHub** (see Phase 8 of `ROADMAP.md`; `plenum-redroid` was already archived at
+  is really on GitHub** (see Phase 10 of `ROADMAP.md`; `plenum-redroid` was already archived at
   `fogelmanjg-plenum/plenum-redroid`, private, as a project that did not achieve its goals).
 - **The `ws-scrcpy` web viewer is not ported.** It has been deprecated since 2026-07-02 (it was created
   when scrcpy could not be accessed from Android; today scrcpy is used directly and the viewer no longer

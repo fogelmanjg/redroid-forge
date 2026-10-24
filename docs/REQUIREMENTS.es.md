@@ -191,7 +191,7 @@ redroid-forge, y es **actualizable** por el usuario:
   conserva como camino de compatibilidad. El código anterior queda **en GitHub
   como un proyecto viejo, muerto y reemplazado por `redroid-forge`** (solo como
   historial). Antes de eliminar, hay que **asegurar que ese código esté
-  realmente en GitHub** (ver Fase 8 del `ROADMAP.md`; `plenum-redroid` ya se
+  realmente en GitHub** (ver Fase 10 del `ROADMAP.md`; `plenum-redroid` ya se
   archivó en `fogelmanjg-plenum/plenum-redroid`, privado, como proyecto que no
   logró sus objetivos).
 - **El visor web `ws-scrcpy` no se porta.** Está deprecado desde 2026-07-02

@@ -535,39 +535,131 @@ real pause/resume/status via the API (steps 1-3 done), and the specific bug the 
 inheritance) cannot reappear by construction (step 4). **Not met yet**: no live validation against a real
 host with the actual game (steps 3-4's remaining half), and step 5 (the second pilot) is still open.
 
-## Phase 6 — Optional authentication (Keycloak)
+## Phase 6 — Network exposure: local by default, interfaces opt-in
 
-**Difficulty: Medium** — the pattern is already agreed and tested in other projects of ours (Keycloak admin
-API, an optional bolt-on with Plenum), it is not unknown ground.
+**Redefined (24/10/2026)** from the original "Optional authentication (Keycloak)" into a broader
+**"Security and integration with external tools"** theme, split across this phase and the next three.
+Written for anyone running this, not tuned to any one deployment: someone on a Debian desktop running one
+or two instances to play a game gets a locked-down, zero-config default and never has to think about any
+of this; someone running a farm of instances as a sysop gets every knob below, documented well enough to
+use them.
+
+**Difficulty: Low-Medium** — no new dependency, it is tightening defaults that are already wrong and
+adding a per-resource choice on top.
+
+**Problem, confirmed in code, not hypothetical:** `redroid` itself has no access control of any kind — ADB
+on 5555 answers anyone who can reach it. Today, nothing stops that reach: `dockerRuntime.js`'s `create()`
+hardcodes `HostIp: '0.0.0.0'` on every instance's port binding (reachable from every host interface, LAN
+included), and the app's own UI/API runs under `network_mode: host` in `docker-compose.yml` with no bind
+address of its own either — so even an instance that *is* properly locked down doesn't help if the thing
+that can create/delete/start/stop it is itself reachable from anywhere.
 
 **Steps:**
-1. Implement the auth bolt-on: Keycloak directly, or delegated through Plenum/`jg-dashboard`.
-2. Confirm that with the environment variable off the behavior is identical to today (zero auth).
+1. The app binds to `127.0.0.1` by default; an env var overrides it for whoever deliberately wants it
+   reachable beyond the host.
+2. Each instance's ADB port binds to `127.0.0.1` by default too (fix the hardcoded `0.0.0.0`).
+3. Discover the host's network interfaces (name + address) and surface them in the UI.
+4. Per-instance interface selection (multi-select — Docker supports binding the same container port to
+   several host interfaces at once, e.g. localhost **and** a Tailscale IP simultaneously), applied through
+   the existing recreate mechanism (another sub-section in the "Configure" panel, same pattern as
+   resolution/codec/WiFi).
+5. A clear, non-blocking warning wherever an interface other than localhost is chosen while no auth
+   (Phase 7) is configured — warn, never hard-block, consistent with how the rest of the app already
+   handles risky-but-legitimate combinations (known-combinations tiers, restore mismatches).
 
-**Gate:** with auth off, behavior identical to today; with auth on, Keycloak filters access.
+**Gate:** a fresh install with zero configuration answers only on localhost, for both the app and every
+instance; any interface can be opened deliberately, per instance and for the app itself, with a visible
+warning when that combination has no auth behind it.
 
-## Phase 7 — `jg-dashboard` and `plenum-redroid` become consumers
+## Phase 7 — Access control: roles, per-instance ownership, pluggable auth
+
+**Difficulty: High** — a real permission model plus a generic (not Keycloak-specific) auth abstraction.
+
+**Design:** "admin / user / instance owner" is not three flat roles — it is two independent axes. A
+**global role** (what you can do at all: create for anyone, see/manage every instance, touch settings) and
+**per-instance ownership** (a new `ownerId` field on each instance, set to whoever created it, or
+reassignable by an admin). The example that motivated this: a user who can only see/start/stop the
+instances they own, not create or delete any — that is a role with no create/delete capability, combined
+with the ownership scope, not a fourth role.
+
+**Steps:**
+1. A small, fixed permission model: roles × a capability list (view, start/stop, create, delete,
+   configure, backup/restore, manage settings) × ownership scope (own vs. any). Admin bypasses ownership
+   checks.
+2. `ownerId` persisted per instance; every protected route checks role + ownership before acting, and the
+   UI hides/disables actions the current user cannot perform rather than only failing after the fact.
+3. Pluggable auth backend, selected via an env var, default `none` (today's behavior, unchanged):
+   - `none` — zero auth, any user sees/does everything (the Phase 6 default case keeps working exactly
+     as before).
+   - `local` — a minimal built-in account store (no external dependency) for someone who wants a login
+     wall without standing up an identity provider.
+   - `oidc` — a **generic OIDC client**, not a Keycloak-specific integration. Keycloak, Authentik, Auth0,
+     Zitadel, etc. all speak OIDC, so supporting the protocol covers "any authenticator" without a
+     per-provider integration. Maps OIDC roles/claims onto the permission model from step 1.
+4. Confirm `none` stays behaviorally identical to today — this phase adds capability, it does not remove
+   the zero-friction default.
+
+**Gate:** with auth `none`, identical to today, any user sees everything. With `local` or `oidc`, two
+different accounts genuinely get different capabilities, verified live (not just by code review) — one
+limited to its own instances with no create/delete, another with broader access.
+
+## Phase 8 — Federation mode: `jg-dashboard` and Plenum as consumers
 
 **Difficulty: Medium-High** — two real integrations against two different codebases (Angular/NestJS in one
-case, Plenum's federated module in the other), and the migration has to be coordinated with no real
-downtime over instances that are in use.
+case, Plenum's federated module in the other), coordinated with no real downtime over instances in use.
 
-**Clarification (05/10/2026):** `redroid-forge` and `jg-dashboard`'s redroid are treated as **two separate
-projects that do not have to be compatible with each other** (neither images, nor instances, nor state).
-That is why `redroid-forge`'s tests are done on `jgustavo46` and not on server01. When `redroid-forge` is
-working, the dashboard's redroid is **removed and replaced** by `redroid-forge`; only at that moment do we
-go back to server01. There is no migration of images or instances from the old dashboard.
+**Context:** see [[project_redroid_forge_origen_arquitectura]] in memory — `redroid-forge` exists
+specifically so it never has to be embedded as a library inside Plenum or `jg-dashboard` to be useful
+there; it stays its own process/container always. "Federated" only changes which identity provider it
+trusts and whose roles it reuses — it is a mode switch (env var), on top of Phase 7's auth, not a
+different architecture. `plenum-redroid` (the direct port into Plenum, started 08/2026) and `jg-dashboard`'s
+own `redroid.service.ts` are both already **deprecated** by this: `redroid-forge` is the only place new
+redroid work happens, and each predecessor gets removed only once `redroid-forge` reaches parity with
+what that specific predecessor did (gradual, piece by piece — not a single cutover).
+
+**Clarification (05/10/2026, still holds):** `redroid-forge` and `jg-dashboard`'s redroid are two separate
+projects that do not have to be compatible with each other (neither images, nor instances, nor state) —
+tests happen on `jgustavo46`, not on server01. There is no migration of images or instances from the old
+dashboard.
 
 **Steps:**
-1. `jg-dashboard` starts calling `redroid-forge`'s API/embed instead of using its own `redroid.service.ts`.
-2. `plenum-redroid` does the same.
-3. The old code in both stays in place untouched (the coexistence policy, section 4) during the whole
+1. `jg-dashboard` starts calling `redroid-forge`'s API instead of using its own `redroid.service.ts`.
+2. Plenum does the same (`plenum-redroid`'s replacement) — pointed at Plenum's **existing** Keycloak realm
+   via Phase 7's `oidc` backend, reusing Plenum's roles rather than defining new ones.
+3. Document exactly what "has everything configured" means for each (which realm, which roles map to
+   which `redroid-forge` permissions).
+4. The old code in both stays in place untouched (the coexistence policy, section 4) during the whole
    run-in period.
 
 **Gate:** both operate real instances exclusively through `redroid-forge` during a run-in period, with no
-regressions.
+regressions, authenticating through each host's own existing identity provider.
 
-## Phase 8 — Removal of the old code + public polish
+## Phase 9 — Advanced: optional port-knocking companion (research first)
+
+**Difficulty: Medium-High, and explicitly research-first** — `(to) investigate`, not commit to, per the
+original ask.
+
+**Reality check before committing to this:** classic port knocking (a fixed port sequence) is obscurity,
+not real security — a patient observer can still find it. A real version (`fwknop`, Single Packet
+Authorization with actual crypto) is stronger, but it needs to manipulate `iptables` **on the host**, which
+from inside a container means either `NET_ADMIN` or running the daemon outside the container entirely —
+real tension with "lives in one container, no host setup". For anyone already using Tailscale (or any
+private overlay network) for exposure, picking that interface in Phase 6 already gets most of the same
+outcome — nothing outside the private network can even see the port — with none of this complexity. Worth
+having for the sysop who genuinely wants it on a raw LAN/public interface; not worth defaulting toward.
+
+**Steps:**
+1. Design as a **separate, optional companion** (its own `docker-compose` profile/container), never baked
+   into the main image — the simple default stays simple regardless of whether this exists.
+2. `redroid-forge`'s UI detects and configures it when present (which instances/interfaces it guards), but
+   never requires it.
+3. Document the host prerequisites clearly — this is the one piece in this whole theme that genuinely
+   needs host-level changes, unlike everything in Phases 6-8.
+
+**Gate:** an instance exposed on a non-localhost interface can optionally require a valid SPA knock before
+the port responds at all, with zero effect on every instance that does not opt in.
+
+## Phase 10 — Removal of the old code + public polish
 
 **Difficulty: Low** — it is cleanup and documentation, not new technical work.
 
