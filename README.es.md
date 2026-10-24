@@ -17,11 +17,13 @@ sin depender de ninguna otra infraestructura.
 > módulos, y en qué momento del ciclo de vida de una instancia se toca cada uno) y
 > [`docs/ROADMAP.md`](docs/ROADMAP.md) (en qué orden; solo en inglés) y
 > [`CHANGELOG.md`](CHANGELOG.md) (releases etiquetados, política de versionado; solo en inglés) para
-> el panorama completo. Lo que
-> hay hoy corresponde a las **Fases 0, 1, 2 y 4** del roadmap: el port íntegro de
-> `redroid-manager`, tiers de soporte por imagen, el primer módulo real (hwenc) y el
-> sistema de contrato de módulo genérico, el **decode de video por hardware** (AMD e Intel) y la
-> base de combinaciones conocidas (`docs/KNOWN-COMBINATIONS.es.md`).
+> el panorama completo. Lo que hay hoy corresponde a las **Fases 0 a 5** del roadmap: el port íntegro
+> de `redroid-manager`, tiers de soporte por imagen, **encode y decode** de video por hardware en
+> AMD e Intel (`hwenc`/`hwdec`), WiFi falso y device profile spoofing, el sistema de contrato de
+> módulo genérico, la base de combinaciones conocidas (`docs/KNOWN-COMBINATIONS.es.md`) y módulos
+> definidos por el usuario (CIFI como primer caso) — más backup/restore de instancias, configuración
+> y un rediseño de la UI de instancias construidos encima desde entonces. Ver
+> [`CHANGELOG.md`](CHANGELOG.md) para el detalle, tag `v0.1.0`.
 
 Resuelve dos cosas:
 

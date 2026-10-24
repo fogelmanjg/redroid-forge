@@ -15,11 +15,13 @@ without depending on any other infrastructure.
 > why), [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) (how the pieces fit together — base image,
 > modules, and at which point of an instance's lifecycle each one is touched) and
 > [`docs/ROADMAP.md`](docs/ROADMAP.md) (in what order) and [`CHANGELOG.md`](CHANGELOG.md) (tagged
-> releases, SemVer policy) for the full picture. What exists today
-> covers **Phases 0, 1, 2 and 4** of the roadmap: the full port of `redroid-manager`, support tiers
-> per image, the first real module (hwenc, with hardware video **encode and decode** on AMD and
-> Intel), the generic module-contract system, and the signed known-combinations database
-> ([`docs/KNOWN-COMBINATIONS.md`](docs/KNOWN-COMBINATIONS.md)).
+> releases, SemVer policy) for the full picture. What exists today covers **Phases 0 through 5**
+> of the roadmap: the full port of `redroid-manager`, support tiers per image, hardware video
+> **encode and decode** on AMD and Intel (`hwenc`/`hwdec`), fake WiFi and device profile spoofing,
+> the generic module-contract system, the signed known-combinations database
+> ([`docs/KNOWN-COMBINATIONS.md`](docs/KNOWN-COMBINATIONS.md)), and user-defined modules (CIFI as
+> the first one) — plus instance backup/restore, settings and a redesigned instances UI built on
+> top of them since. See [`CHANGELOG.md`](CHANGELOG.md) for the detail, tag `v0.1.0`.
 
 It solves two things:
 
