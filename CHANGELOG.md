@@ -23,6 +23,15 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
 
 ### Added
 
+- Settings gained an "App network" section (`appBindHost`, admin-only): which address this app's
+  own server (not any instance's) listens on, picked from the same filtered interface list as
+  the per-instance picker, instead of only the `REDROID_FORGE_BIND_HOST` env var from
+  `docs/ROADMAP.md` Phase 6. Takes effect only after a restart (an `http.Server` cannot rebind
+  itself to a new address live) -- the UI says so rather than pretending it is immediate, and
+  warns more strongly when exposing it beyond localhost while `REDROID_FORGE_AUTH=none`, since
+  that is the whole app (every instance, every account), not just one instance. Live-verified: set
+  it to this host's real LAN address, confirmed the server stayed on `127.0.0.1` until actually
+  restarted and then bound to the new address, reverted the same way.
 - `GET /api/network/interfaces` now hides Docker/container-internal interfaces (`docker0`,
   `br-*`, `veth*`, CNI/k8s bridges -- `backend/src/lib/networkInterfaceFilter.js`) by default, so
   a host running many containers does not drown the instance Configure panel's "Network"

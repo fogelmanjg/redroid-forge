@@ -1279,11 +1279,55 @@ function renderNetIfacesSettings(ifaces) {
   }
 }
 
+// This app's OWN listen address, not any instance's -- a single select (an http.Server binds to
+// exactly one address, unlike an instance's Docker port which can bind several at once), built
+// from the same already-filtered interface list as the instance picker (reused, not re-fetched)
+// plus the two fixed choices every instance's own picker also has.
+function updateAppBindHostWarn() {
+  const select = $('#settings-app-bind-host');
+  const warn = $('#settings-app-bind-host-warn');
+  const exposed = select.value !== '' && select.value !== '127.0.0.1';
+  if (!exposed) { warn.hidden = true; return; }
+  warn.hidden = false;
+  // "none" mode has no login at all -- exposing the APP ITSELF (not just one instance) beyond
+  // localhost with no auth behind it means anyone who can reach it can create/delete/operate
+  // every instance and, in "local"/"oidc" mode, read the Users panel too.
+  warn.textContent = AuthUi.authMode() === 'none'
+    ? t('settings.appBindHost.warnExposedNoAuth')
+    : t('settings.appBindHost.warnExposed');
+}
+
+function renderAppBindHostSelect(currentValue, ifaces) {
+  const select = $('#settings-app-bind-host');
+  select.innerHTML = '';
+  const opt = (value, label) => {
+    const o = document.createElement('option');
+    o.value = value;
+    o.textContent = label;
+    select.appendChild(o);
+  };
+  opt('', t('settings.appBindHost.useDefault'));
+  opt('127.0.0.1', t('instances.network.localhost'));
+  for (const i of ifaces) {
+    if (!i.visible) continue;
+    for (const address of i.addresses) {
+      if (address === '127.0.0.1') continue;
+      opt(address, `${i.iface} (${address})`);
+    }
+  }
+  opt('0.0.0.0', t('instances.network.allInterfaces'));
+  select.value = currentValue || '';
+  updateAppBindHostWarn();
+}
+$('#settings-app-bind-host').addEventListener('change', updateAppBindHostWarn);
+
 async function loadSettings() {
   try {
     const settings = await api('/settings');
     $('#settings-backup-dir').value = settings.backupDir;
-    renderNetIfacesSettings(await api('/network/interfaces/all'));
+    const ifaces = await api('/network/interfaces/all');
+    renderNetIfacesSettings(ifaces);
+    renderAppBindHostSelect(settings.appBindHost, ifaces);
   } catch (e) {
     alert(e.message);
   }
@@ -1306,8 +1350,10 @@ $('#settings-form').addEventListener('submit', async (ev) => {
       if (chk.checked === heuristic) delete networkInterfaceOverrides[chk.dataset.iface];
       else networkInterfaceOverrides[chk.dataset.iface] = chk.checked;
     }
-    const settings = await api('/settings', { method: 'PUT', body: JSON.stringify({ backupDir, networkInterfaceOverrides }) });
+    const appBindHost = $('#settings-app-bind-host').value || null;
+    const settings = await api('/settings', { method: 'PUT', body: JSON.stringify({ backupDir, networkInterfaceOverrides, appBindHost }) });
     $('#settings-backup-dir').value = settings.backupDir;
+    renderAppBindHostSelect(settings.appBindHost, await api('/network/interfaces/all'));
     networkInterfacesCache = null; // the per-instance Configure panel re-fetches with the new filter next time it opens
     saved.hidden = false;
   } catch (e) {

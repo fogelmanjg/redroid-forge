@@ -16,6 +16,11 @@ const DEFAULTS = {
   // own judgment with nothing to configure; an admin only needs this once a specific interface
   // on their own host is mis-classified either way.
   networkInterfaceOverrides: {},
+  // Which address THIS APP's own server listens on (not any instance's) -- null means "defer to
+  // REDROID_FORGE_BIND_HOST, or 127.0.0.1 if that is unset too" (see server.js's own comment on
+  // why this, not the env var, wins once it is set, and why either way it needs a restart to
+  // actually take effect).
+  appBindHost: null,
 };
 
 function get(file = SETTINGS_FILE) {

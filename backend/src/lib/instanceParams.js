@@ -129,5 +129,5 @@ function parseBindHosts(body = {}, fallback = DEFAULT_BIND_HOSTS) {
 
 module.exports = {
   parseDisplay, DEFAULTS, LIMITS, parseResources, MEMORY_MB_LIMITS, CPUSET_RE, parseGpuMode, GPU_MODES,
-  parseBindHosts, DEFAULT_BIND_HOSTS,
+  parseBindHosts, DEFAULT_BIND_HOSTS, IP_SHAPE_RE,
 };

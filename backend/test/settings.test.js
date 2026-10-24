@@ -35,3 +35,13 @@ test('get(): corrupt file is ignored, falls back to defaults', () => {
   fs.writeFileSync(file, '{not json');
   assert.deepStrictEqual(settings.get(file), settings.DEFAULTS);
 });
+
+test('appBindHost: null by default, persists once set, clears back to null', () => {
+  const file = tmpFile();
+  assert.strictEqual(settings.get(file).appBindHost, null);
+  const after = settings.update({ appBindHost: '192.168.1.50' }, file);
+  assert.strictEqual(after.appBindHost, '192.168.1.50');
+  assert.strictEqual(settings.get(file).appBindHost, '192.168.1.50');
+  const cleared = settings.update({ appBindHost: null }, file);
+  assert.strictEqual(cleared.appBindHost, null);
+});
