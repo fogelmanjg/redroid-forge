@@ -815,6 +815,13 @@ mechanism is picked up again (section 8 of `REQUIREMENTS.md`), not before.
     not enable both wifi modules on the same instance", never actually checked in code) vs
     `relatedModules` (soft, informational only -- what `gapps` and `aurora-store` need between them).
     Neither field exists yet; design only, nothing implemented.
+  - **Flagged as worth doing soon (24/10/2026), now that `aurora-store` exists.** This was a hypothetical
+    pairing when first designed; now it is a real one (both modules shipped, both can be requested on the
+    same instance, right now with zero cross-module information shown to the user). Natural next candidate
+    for whichever of `conflictsWith`/`relatedModules` gets built first: it would surface, on the `aurora-store`
+    checkbox/contract, that it is complementary to (not a substitute for) `gapps` -- the actual gap today is
+    that nothing tells a user requesting `aurora-store` alone that apps needing Play Services still need
+    `gapps` too, it is only written in the manifest's `descripcion` prose.
   - **Validated by hand, 23/10/2026.** Two more real findings from testing Aurora manually on a
     throwaway instance (host GPU, 2 vCPU, 4 GB RAM, `arm-translation` only, no `gapps`/wifi): (1) Aurora
     4.8.4 crashes on its own app-list screens with `IllegalArgumentException: Key "..." was already
