@@ -100,6 +100,21 @@ async function inspect(containerId) {
   return docker.getContainer(containerId).inspect();
 }
 
+// The real host path backing a named volume (what `docker volume inspect` shows as
+// Mountpoint) -- instances use a Docker-managed named volume for /data, not a bind mount
+// to a path redroid-forge picks, so this is the only way to answer "where does my data
+// actually live" for someone used to choosing a folder themselves. Returns null if the
+// volume does not exist (e.g. the instance was never started, or got removed) instead
+// of throwing.
+async function inspectVolume(name) {
+  try {
+    return await docker.getVolume(name).inspect();
+  } catch (e) {
+    if (e.statusCode === 404) return null;
+    throw e;
+  }
+}
+
 // Identifies an image the same way the known-combinations database does: by its
 // RepoDigest (`sha256:...`), never by tag (tags move; a digest does not). An image
 // pulled/built without any RepoDigest (e.g. a local `docker load`) returns null --
@@ -218,5 +233,5 @@ async function runEphemeral(image, cmd, binds, timeoutMs = 30000) {
 
 module.exports = {
   docker, listLocalImageTags, create, start, stop, restart, remove, removeVolume,
-  inspect, getImageDigest, getPid, getBridgeIp, exec, runEphemeral, readLogs, readFile, updateResources,
+  inspect, inspectVolume, getImageDigest, getPid, getBridgeIp, exec, runEphemeral, readLogs, readFile, updateResources,
 };

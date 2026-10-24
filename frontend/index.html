@@ -15,6 +15,7 @@
       <button class="tab-btn" data-tab="user-modules" data-i18n="nav.userModules">User modules</button>
       <button class="tab-btn" data-tab="doctor" data-i18n="nav.doctor">Doctor</button>
       <button class="tab-btn" data-tab="help" data-i18n="nav.help">Help</button>
+      <button class="tab-btn" data-tab="settings" data-i18n="nav.settings">Settings</button>
     </nav>
     <button id="btn-lang" class="secondary" title="Language / Idioma">ES</button>
   </header>
@@ -77,6 +78,20 @@ gunzip -c image.tar.gz | docker load</pre>
       <h2 data-i18n="help.startTitle"></h2>
       <pre>docker compose up -d --build</pre>
       <p data-i18n="help.startNote"></p>
+    </section>
+
+    <section id="tab-settings" class="tab">
+      <p class="tab-intro" data-i18n="settings.intro"></p>
+      <form id="settings-form">
+        <label><span data-i18n="settings.backupDir">Default backup folder</span>
+          <input type="text" name="backupDir" id="settings-backup-dir" />
+        </label>
+        <p class="muted" data-i18n="settings.backupDir.hint"></p>
+        <div class="dialog-actions">
+          <button type="submit" data-i18n="settings.save">Save</button>
+          <span id="settings-saved" class="muted" hidden data-i18n="settings.saved">Saved.</span>
+        </div>
+      </form>
     </section>
   </main>
 

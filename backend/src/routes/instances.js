@@ -626,6 +626,23 @@ router.get('/:id/soporte', async (req, res) => {
   }
 });
 
+// Read-only: where this instance's /data actually lives on the host. Not configurable --
+// it's a Docker-managed named volume, redroid-forge does not pick the path -- but someone
+// used to choosing a folder themselves (e.g. coming from Windows) may still want to see it.
+router.get('/:id/storage', async (req, res) => {
+  const instance = store.get(req.params.id);
+  if (!instance) return res.status(404).json({ error: 'Instancia no encontrada' });
+  try {
+    const info = instance.volumeName ? await runtime.inspectVolume(instance.volumeName) : null;
+    res.json({
+      volumeName: instance.volumeName || null,
+      mountpoint: info ? info.Mountpoint : null,
+    });
+  } catch (e) {
+    sendError(res, e);
+  }
+});
+
 router.get('/:id/watchdogs', (req, res) => {
   const instance = store.get(req.params.id);
   if (!instance) return res.status(404).json({ error: 'Instancia no encontrada' });

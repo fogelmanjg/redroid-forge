@@ -30,4 +30,23 @@ function writeJsonArray(filePath, data) {
   fs.renameSync(tmp, filePath);
 }
 
-module.exports = { readJsonArray, writeJsonArray };
+// Same pattern as readJsonArray/writeJsonArray, for a single JSON object instead of an
+// array -- used by settings.js, which has no "list of records" shape to it.
+function readJsonObject(filePath) {
+  ensureDirFor(filePath);
+  if (!fs.existsSync(filePath)) return {};
+  try {
+    return JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+  } catch {
+    return {};
+  }
+}
+
+function writeJsonObject(filePath, data) {
+  ensureDirFor(filePath);
+  const tmp = `${filePath}.tmp`;
+  fs.writeFileSync(tmp, JSON.stringify(data, null, 2));
+  fs.renameSync(tmp, filePath);
+}
+
+module.exports = { readJsonArray, writeJsonArray, readJsonObject, writeJsonObject };

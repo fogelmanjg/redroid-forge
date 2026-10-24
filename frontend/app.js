@@ -9,6 +9,7 @@ function switchTab(name) {
   if (name === 'modules') loadModules();
   if (name === 'user-modules') loadUserModulesTab();
   if (name === 'doctor') loadDoctor();
+  if (name === 'settings') loadSettings();
 }
 
 $$('.tab-btn').forEach((btn) => btn.addEventListener('click', () => switchTab(btn.dataset.tab)));
@@ -612,6 +613,53 @@ function buildSupportCell(inst) {
 }
 
 let openWifiInternoId = null;
+let openStorageId = null;
+const storageCache = {}; // inst.id -> { volumeName, mountpoint } | { error } -- fetched on demand (needs a live docker inspect, not already in the /instances payload), kept around so toggling closed and back open doesn't re-fetch.
+
+// Read-only: where this instance's /data really lives on the host. Fetched on demand (not
+// batched into loadInstances' periodic poll, unlike soporte -- this is a live `docker volume
+// inspect`, only worth paying for when someone actually opens the panel) and cached per
+// instance id so re-opening it doesn't hit the backend again.
+function buildStorageEditRow(inst) {
+  const tr = document.createElement('tr');
+  tr.className = 'edit-row';
+  const td = document.createElement('td');
+  td.colSpan = 12;
+  const panel = document.createElement('div');
+  panel.className = 'resources-edit-panel';
+
+  const header = document.createElement('div');
+  header.className = 'resources-edit-header';
+  header.textContent = t('instances.storage.header');
+  panel.appendChild(header);
+
+  const info = storageCache[inst.id];
+  if (!info) {
+    panel.appendChild(document.createTextNode(t('instances.storage.loading')));
+  } else if (info.error || !info.mountpoint) {
+    panel.appendChild(document.createTextNode(t('instances.storage.unavailable')));
+  } else {
+    const p1 = document.createElement('p');
+    p1.innerHTML = `<strong>${t('instances.storage.volume')}:</strong> <code>${info.volumeName}</code>`;
+    const p2 = document.createElement('p');
+    p2.innerHTML = `<strong>${t('instances.storage.path')}:</strong> <code>${info.mountpoint}</code>`;
+    panel.appendChild(p1);
+    panel.appendChild(p2);
+  }
+
+  const closeBtn = document.createElement('button');
+  closeBtn.type = 'button';
+  closeBtn.textContent = t('common.cancel');
+  closeBtn.addEventListener('click', () => {
+    openStorageId = null;
+    loadInstances({ silent: true });
+  });
+  panel.appendChild(closeBtn);
+
+  td.appendChild(panel);
+  tr.appendChild(td);
+  return tr;
+}
 
 function buildWifiInternoCell(inst) {
   const ids = inst.requiredModuleIds || [];
@@ -813,6 +861,26 @@ async function loadInstances({ silent = false } = {}) {
         });
         actions.appendChild(markBtn);
       }
+      const storageBtn = document.createElement('button');
+      storageBtn.type = 'button';
+      storageBtn.className = 'secondary';
+      storageBtn.textContent = t('instances.storage.toggle');
+      storageBtn.title = t('instances.storage.changeHint');
+      storageBtn.addEventListener('click', async () => {
+        const opening = openStorageId !== inst.id;
+        openStorageId = opening ? inst.id : null;
+        if (opening && !storageCache[inst.id]) {
+          loadInstances({ silent: true }); // shows the "loading" row while the fetch below runs
+          try {
+            storageCache[inst.id] = await api(`/instances/${inst.id}/storage`);
+          } catch (e) {
+            storageCache[inst.id] = { error: e.message };
+          }
+        }
+        loadInstances({ silent: true });
+      });
+      actions.appendChild(storageBtn);
+
       // Only the actions that make sense for the current state (see instanceState.js).
       const mk = (label, action) => {
         const b = document.createElement('button');
@@ -855,6 +923,7 @@ async function loadInstances({ silent = false } = {}) {
       if (openDisplayId === inst.id) rows.appendChild(buildDisplayEditRow(inst));
       if (openCodecId === inst.id) rows.appendChild(buildCodecEditRow(inst));
       if (openWifiInternoId === inst.id) rows.appendChild(buildWifiInternoEditRow(inst));
+      if (openStorageId === inst.id) rows.appendChild(buildStorageEditRow(inst));
     }
     tbody.replaceChildren(rows);
   } catch (e) {
@@ -948,6 +1017,29 @@ async function loadUserModulesTab() {
     list.innerHTML = `<li>${t('common.error', { msg: e.message })}</li>`;
   }
 }
+
+async function loadSettings() {
+  try {
+    const settings = await api('/settings');
+    $('#settings-backup-dir').value = settings.backupDir;
+  } catch (e) {
+    alert(e.message);
+  }
+}
+
+$('#settings-form').addEventListener('submit', async (ev) => {
+  ev.preventDefault();
+  const saved = $('#settings-saved');
+  saved.hidden = true;
+  try {
+    const backupDir = $('#settings-backup-dir').value;
+    const settings = await api('/settings', { method: 'PUT', body: JSON.stringify({ backupDir }) });
+    $('#settings-backup-dir').value = settings.backupDir;
+    saved.hidden = false;
+  } catch (e) {
+    alert(e.message);
+  }
+});
 
 async function loadDoctor() {
   const list = $('#doctor-list');
@@ -1222,5 +1314,5 @@ loadInstances();
 setInterval(() => {
   const onInstances = $('.tab-btn.active')?.dataset.tab === 'instances';
   const dialogOpen = $$('dialog').some((d) => d.open);
-  if (onInstances && !dialogOpen && openResourcesId === null && openDisplayId === null && openCodecId === null && !document.hidden) loadInstances({ silent: true });
+  if (onInstances && !dialogOpen && openResourcesId === null && openDisplayId === null && openCodecId === null && openStorageId === null && !document.hidden) loadInstances({ silent: true });
 }, 4000);
