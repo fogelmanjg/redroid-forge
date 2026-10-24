@@ -200,3 +200,25 @@ tr.edit-row > td { background: rgba(58, 109, 240, 0.06); padding: 0.8rem 1rem; }
 .display-edit-field input { width: 6em; }
 .resources-warn { font-size: 0.8rem; opacity: 0.85; }
 .resources-warn-error { color: var(--fail); opacity: 1; }
+
+/* Instances redesign (24/10/2026): each instance is a pair of rows, not a row of columns --
+   a big "I already know my setup, just let me connect" line, then a smaller line with
+   every other detail and all the action buttons. */
+tr.instance-row-primary > td { border-bottom: none; padding-bottom: 0.2rem; }
+tr.instance-row-secondary > td { padding-top: 0.2rem; }
+.instance-primary { display: flex; align-items: baseline; gap: 0.9rem; flex-wrap: wrap; font-size: 1.1rem; }
+.instance-primary .instance-name { font-weight: 700; }
+.instance-primary .instance-status { font-size: 0.85rem; font-weight: 400; opacity: 0.85; white-space: nowrap; }
+.instance-primary .instance-status .status-dot { margin-right: 0.3rem; vertical-align: middle; }
+.instance-address {
+  font-family: monospace;
+  font-size: 0.95rem;
+  cursor: pointer;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.05rem 0.4rem;
+}
+.instance-address:hover { border-color: var(--accent); }
+.instance-secondary { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; font-size: 0.85rem; opacity: 0.9; }
+.instance-secondary .modules-cell-chips { max-width: none; }
+.instance-secondary-buttons { display: flex; gap: 0.4rem; flex-wrap: wrap; margin-left: auto; }

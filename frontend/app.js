@@ -114,12 +114,18 @@ async function loadHostCoreCount() {
   } catch { hostCoreCount = null; }
 }
 
-// Which instance's resources panel is open, like jg-dashboard's affinityId()/rdRamId()
-// signals -- one at a time, both CPU and RAM together (simpler than its two separate toggles,
-// same underlying idea). Re-rendered via the normal loadInstances() cycle, not a separate
-// DOM-patching path -- consistent with how this file already rebuilds the whole tbody on every
-// refresh.
-let openResourcesId = null;
+// Instances redesign (24/10/2026): every per-instance editable thing used to be its own
+// chip-click-to-toggle panel (openResourcesId/openDisplayId/openCodecId/openWifiInternoId).
+// Now there are only two edit panels, opened by two dedicated buttons in the secondary line --
+// grouped by what applying them actually costs, not by what they edit:
+//   - openNoRestartId: CPU/RAM (Docker's live Update API, nothing interrupted).
+//   - openRestartId: resolution/DPI/FPS/GPU mode, hwenc/hwdec, internal WiFi (all go through
+//     the same POST /:id/display recreate) and device profile (a different route, but it also
+//     restarts/interrupts whatever's running) -- one panel, several sub-sections.
+// Storage/backups keeps its own existing toggle (openStorageId) -- it edits DATA, not instance
+// options, so it was deliberately left out of this split.
+let openNoRestartId = null;
+let openRestartId = null;
 
 // "0,1,8,9" or "0-3" (Docker's own cpuset syntax, see instanceParams.js) -> Set of core
 // numbers, for the checkbox grid and conflict detection below.
@@ -140,23 +146,20 @@ function coreSetToCpuset(set) {
   return Array.from(set).sort((a, b) => a - b).join(',');
 }
 
-function buildResourcesCell(inst) {
-  const wrap = document.createElement('div');
-  const mk = (text, hint) => {
+// Informational only now -- editing happens through the dedicated "Resources" button, which
+// opens the shared no-restart panel (see openNoRestartId above). Two separate chips, same as
+// before, just no click handler of their own any more.
+function buildResourcesChips(inst) {
+  const frag = document.createDocumentFragment();
+  const mk = (text) => {
     const chip = document.createElement('span');
     chip.className = 'resource-chip';
     chip.textContent = text;
-    chip.title = hint;
-    chip.addEventListener('click', () => {
-      openResourcesId = openResourcesId === inst.id ? null : inst.id;
-      loadInstances({ silent: true });
-    });
     return chip;
   };
-  wrap.appendChild(mk(`cpu: ${inst.cpusetCpus || t('instances.resources.noLimit')}`, t('instances.resources.changeAffinity')));
-  wrap.appendChild(document.createElement('br'));
-  wrap.appendChild(mk(`ram: ${inst.memoryMb ? `${inst.memoryMb}MB` : t('instances.resources.noLimit')}`, t('instances.resources.changeRam')));
-  return wrap;
+  frag.appendChild(mk(`cpu: ${inst.cpusetCpus || t('instances.resources.noLimit')}`));
+  frag.appendChild(mk(`ram: ${inst.memoryMb ? `${inst.memoryMb}MB` : t('instances.resources.noLimit')}`));
+  return frag;
 }
 
 // The expandable panel a chip click opens, spanning the full table width -- same idea as
@@ -167,7 +170,7 @@ function buildResourcesEditRow(inst, allInstances) {
   const tr = document.createElement('tr');
   tr.className = 'edit-row';
   const td = document.createElement('td');
-  td.colSpan = 10;
+  td.colSpan = 1;
   const panel = document.createElement('div');
   panel.className = 'resources-edit-panel';
 
@@ -241,7 +244,7 @@ function buildResourcesEditRow(inst, allInstances) {
     cpuApplyBtn.disabled = true;
     try {
       await applyResources(inst.id, { cpusetCpus: coreSetToCpuset(selected) });
-      openResourcesId = null;
+      openNoRestartId = null;
     } catch (e) {
       alert(e.message);
     } finally {
@@ -301,7 +304,7 @@ function buildResourcesEditRow(inst, allInstances) {
     ramApplyBtn.disabled = true;
     try {
       await applyResources(inst.id, { memoryMb: Number(ramInput.value) });
-      openResourcesId = null;
+      openNoRestartId = null;
     } catch (e) {
       alert(e.message);
     } finally {
@@ -314,7 +317,7 @@ function buildResourcesEditRow(inst, allInstances) {
   cancelBtn.type = 'button';
   cancelBtn.textContent = t('common.cancel');
   cancelBtn.addEventListener('click', () => {
-    openResourcesId = null;
+    openNoRestartId = null;
     loadInstances({ silent: true });
   });
   panel.appendChild(cancelBtn);
@@ -324,45 +327,89 @@ function buildResourcesEditRow(inst, allInstances) {
   return tr;
 }
 
-// Same idea as applyDeviceProfile/createInstance: a 428 here means gpuMode is moving to
-// "host" and that contract has not been accepted yet (see assertStandaloneModuleReady in
-// routes/instances.js) -- show the modal, retry once.
-async function applyDisplay(instanceId, payload) {
+// width/height/dpi/fps/gpuMode/hwenc/hwdec/wifi-interno all go through the same POST
+// /:id/display route (see routes/instances.js) -- there is no live-update path for any of
+// them, changing one always means a real recreate (/data is preserved, the container itself
+// is not). One payload, one 428 + pending-manifests -> modal -> retry gate, shared by the
+// merged restart panel below (replaces the old separate applyDisplay/applyCodec, which only
+// differed in which fields of the same body they set).
+async function applyInstanceConfig(instanceId, payload) {
   try {
     await api(`/instances/${instanceId}/display`, { method: 'POST', body: JSON.stringify(payload) });
   } catch (err) {
     if (err.status === 428 && err.modules) {
       const allAccepted = await Contracts.ensureAccepted(err.modules);
-      if (allAccepted) return applyDisplay(instanceId, payload);
+      if (allAccepted) return applyInstanceConfig(instanceId, payload);
       return;
     }
     throw err;
   }
 }
 
-// Which instance's display/GPU-mode panel is open -- same single-panel-at-a-time pattern as
-// openResourcesId, independent of it (both could in principle be open for different
-// instances at once, nothing stops that).
-let openDisplayId = null;
+// Informational chips for the secondary line -- no click handlers of their own any more.
+// Editing all three (plus device profile) happens through the single "Configure" button, which
+// opens buildRestartEditRow below.
+function buildDisplayChip(inst) {
+  if (!inst.display) return null;
+  const d = inst.display;
+  const chip = document.createElement('span');
+  chip.className = 'resource-chip';
+  chip.textContent = `${d.width}×${d.height} · ${d.dpi} dpi · ${d.fps} fps${inst.gpuMode ? ` · gpu:${inst.gpuMode}` : ''}`;
+  return chip;
+}
+function buildCodecChips(inst) {
+  const frag = document.createDocumentFragment();
+  const ids = inst.requiredModuleIds || [];
+  const mk = (label, active) => {
+    const chip = document.createElement('span');
+    chip.className = 'resource-chip';
+    chip.textContent = `${label}: ${active ? 'hw' : 'off'}`;
+    return chip;
+  };
+  frag.appendChild(mk('encode', ids.includes('hwenc')));
+  frag.appendChild(mk('decode', ids.includes('hwdec')));
+  return frag;
+}
+function buildWifiInternoChip(inst) {
+  const ids = inst.requiredModuleIds || [];
+  const activeVirt = ids.includes('wifi-interno-virtwifi');
+  const active = ids.includes('wifi-interno') || activeVirt;
+  const chip = document.createElement('span');
+  chip.className = 'resource-chip';
+  chip.textContent = t(activeVirt ? 'instances.wifiInterno.onVirt' : (active ? 'instances.wifiInterno.on' : 'instances.wifiInterno.off'));
+  return chip;
+}
+function buildDeviceProfileChip(inst) {
+  const current = inst.deviceProfile || 'redroid';
+  const chip = document.createElement('span');
+  chip.className = 'resource-chip';
+  chip.textContent = `profile: ${current === 'redroid' ? t('instances.deviceProfile.default') : current}`;
+  return chip;
+}
 
-// width/height/dpi/fps/gpuMode are baked into the container's kernel cmdline at create time
-// (see routes/instances.js POST /:id/display) -- there is no live-update path for any of
-// them, changing one always means a real recreate (/data is preserved, the container itself
-// is not). Unlike the resources panel, Apply always confirms first when the instance is
-// running (resources only confirms/blocks for a RAM decrease -- here EVERY change restarts
-// the instance, there is no softer option).
-function buildDisplayEditRow(inst) {
+// The one panel for everything that interrupts the instance to apply (recreate: display/gpu
+// mode/hwenc/hwdec/wifi-interno -- restart: device profile). Replaces the four previously
+// separate chip-toggle panels (buildDisplayEditRow/buildCodecEditRow/buildWifiInternoEditRow/
+// the device-profile select) with one panel, several sub-sections, opened by the single
+// "Configure" button -- all sub-sections are visible at once, no further nested toggles.
+function buildRestartEditRow(inst) {
   const tr = document.createElement('tr');
   tr.className = 'edit-row';
   const td = document.createElement('td');
-  td.colSpan = 10;
+  td.colSpan = 1;
   const panel = document.createElement('div');
   panel.className = 'resources-edit-panel';
 
-  const header = document.createElement('div');
-  header.className = 'resources-edit-header';
-  header.textContent = t('instances.display.header');
-  panel.appendChild(header);
+  const recreateHeader = document.createElement('div');
+  recreateHeader.className = 'resources-edit-header';
+  recreateHeader.textContent = t('instances.configure.recreateHeader');
+  panel.appendChild(recreateHeader);
+
+  // --- Screen & GPU mode ---
+  const screenHeader = document.createElement('div');
+  screenHeader.className = 'resources-edit-header';
+  screenHeader.textContent = t('instances.configure.screenHeader');
+  panel.appendChild(screenHeader);
 
   const grid = document.createElement('div');
   grid.className = 'display-edit-grid';
@@ -407,114 +454,20 @@ function buildDisplayEditRow(inst) {
   gpuWrap.appendChild(gpuSelect);
   panel.appendChild(gpuWrap);
 
-  const applyBtn = document.createElement('button');
-  applyBtn.type = 'button';
-  applyBtn.className = 'secondary';
-  applyBtn.textContent = t('instances.resources.apply');
-  applyBtn.addEventListener('click', async () => {
-    if (inst.status === 'running' && !confirm(t('instances.display.confirmRunning'))) return;
-    applyBtn.disabled = true;
-    try {
-      await applyDisplay(inst.id, {
-        width: Number(inputs.width.value),
-        height: Number(inputs.height.value),
-        dpi: Number(inputs.dpi.value),
-        fps: Number(inputs.fps.value),
-        gpuMode: gpuSelect.value,
-      });
-      openDisplayId = null;
-    } catch (e) {
-      alert(e.message);
-    } finally {
-      applyBtn.disabled = false;
-      await loadInstances({ silent: true });
-    }
-  });
-  panel.appendChild(applyBtn);
+  // --- Hardware encode/decode ---
+  const codecHeader = document.createElement('div');
+  codecHeader.className = 'resources-edit-header';
+  codecHeader.textContent = t('instances.configure.codecHeader');
+  panel.appendChild(codecHeader);
 
-  const cancelBtn = document.createElement('button');
-  cancelBtn.type = 'button';
-  cancelBtn.textContent = t('common.cancel');
-  cancelBtn.addEventListener('click', () => {
-    openDisplayId = null;
-    loadInstances({ silent: true });
-  });
-  panel.appendChild(cancelBtn);
-
-  td.appendChild(panel);
-  tr.appendChild(td);
-  return tr;
-}
-
-// Mirrors moduleGate.OPTIONAL_PER_INSTANCE on the backend -- keep in sync. Needed here because
-// POST /:id/display's `modules` REPLACES the whole optional list (see routes/instances.js),
-// not just the codec ones: toggling encode/decode must not silently drop gapps/arm/cifi/any
-// future user module the instance already has.
-const OPTIONAL_PER_INSTANCE = ['gapps', 'hwenc', 'hwdec', 'arm-translation', 'cifi', 'wifi-interno', 'wifi-interno-virtwifi'];
-
-// Same 428 + pending manifests -> modal -> retry gate as applyDisplay/applyDeviceProfile.
-async function applyCodec(instanceId, modules) {
-  try {
-    await api(`/instances/${instanceId}/display`, { method: 'POST', body: JSON.stringify({ modules }) });
-  } catch (err) {
-    if (err.status === 428 && err.modules) {
-      const allAccepted = await Contracts.ensureAccepted(err.modules);
-      if (allAccepted) return applyCodec(instanceId, modules);
-      return;
-    }
-    throw err;
-  }
-}
-
-let openCodecId = null;
-
-function buildCodecCell(inst) {
-  const wrap = document.createElement('div');
   const ids = inst.requiredModuleIds || [];
-  const mk = (label, active) => {
-    const chip = document.createElement('span');
-    chip.className = 'resource-chip';
-    chip.textContent = `${label}: ${active ? 'hw' : 'off'}`;
-    chip.title = t('instances.codec.changeHint');
-    chip.addEventListener('click', () => {
-      openCodecId = openCodecId === inst.id ? null : inst.id;
-      loadInstances({ silent: true });
-    });
-    return chip;
-  };
-  wrap.appendChild(mk('encode', ids.includes('hwenc')));
-  wrap.appendChild(document.createElement('br'));
-  wrap.appendChild(mk('decode', ids.includes('hwdec')));
-  return wrap;
-}
-
-// Same recreate mechanism as buildDisplayEditRow -- integrate() for hwenc/hwdec can only
-// touch the container BEFORE its first boot (/vendor is read-only right after), so toggling
-// either one always means stop + remove the container + recreate, same as resolution/dpi/gpu.
-// Needs gpuMode="host" (see both modules' compatibleCon) -- disabled with an explanation if
-// the instance is not currently in that mode, same reasoning as the create form's checkboxes.
-function buildCodecEditRow(inst) {
-  const tr = document.createElement('tr');
-  tr.className = 'edit-row';
-  const td = document.createElement('td');
-  td.colSpan = 10;
-  const panel = document.createElement('div');
-  panel.className = 'resources-edit-panel';
-
-  const header = document.createElement('div');
-  header.className = 'resources-edit-header';
-  header.textContent = t('instances.codec.header');
-  panel.appendChild(header);
-
-  const needsHost = inst.gpuMode !== 'host';
+  const needsHost = gpuSelect.value !== 'host';
   if (needsHost) {
     const warn = document.createElement('div');
     warn.className = 'resources-warn';
     warn.textContent = t('instances.codec.needsHost');
     panel.appendChild(warn);
   }
-
-  const ids = inst.requiredModuleIds || [];
   const checks = {};
   for (const [key, label] of [['hwenc', t('new.hwenc')], ['hwdec', t('new.hwdec')]]) {
     const wrap = document.createElement('label');
@@ -523,10 +476,69 @@ function buildCodecEditRow(inst) {
     const chk = document.createElement('input');
     chk.type = 'checkbox';
     chk.checked = ids.includes(key);
-    chk.disabled = needsHost;
     checks[key] = chk;
     wrap.appendChild(chk);
     wrap.appendChild(document.createTextNode(label));
+    panel.appendChild(wrap);
+  }
+
+  // --- Internal WiFi ---
+  const wifiHeader = document.createElement('div');
+  wifiHeader.className = 'resources-edit-header';
+  wifiHeader.textContent = t('instances.configure.wifiHeader');
+  panel.appendChild(wifiHeader);
+
+  const wifiWrap = document.createElement('label');
+  wifiWrap.className = 'display-edit-field';
+  wifiWrap.style.flexDirection = 'row';
+  const wifiChk = document.createElement('input');
+  wifiChk.type = 'checkbox';
+  wifiChk.checked = ids.includes('wifi-interno');
+  wifiWrap.appendChild(wifiChk);
+  wifiWrap.appendChild(document.createTextNode(t('instances.wifiInterno.label')));
+  panel.appendChild(wifiWrap);
+
+  // --- Optional modules: gapps/arm-translation (hardcoded, same as the create form) plus
+  // whatever stage-7 "user modules" the catalog has (CIFI today, see loadUserModulesCache) --
+  // full parity with what the create form already lets you choose, just reachable after the
+  // fact too. wifi-interno-virtwifi (EXPERIMENTAL) has no checkbox here either, same as
+  // creation -- preserved automatically below instead of silently dropped.
+  const modulesHeader = document.createElement('div');
+  modulesHeader.className = 'resources-edit-header';
+  modulesHeader.textContent = t('instances.configure.modulesHeader');
+  panel.appendChild(modulesHeader);
+
+  const gappsWrap = document.createElement('label');
+  gappsWrap.className = 'display-edit-field';
+  gappsWrap.style.flexDirection = 'row';
+  const gappsChk = document.createElement('input');
+  gappsChk.type = 'checkbox';
+  gappsChk.checked = ids.includes('gapps');
+  gappsWrap.appendChild(gappsChk);
+  gappsWrap.appendChild(document.createTextNode(t('new.gapps')));
+  panel.appendChild(gappsWrap);
+
+  const armWrap = document.createElement('label');
+  armWrap.className = 'display-edit-field';
+  armWrap.style.flexDirection = 'row';
+  const armChk = document.createElement('input');
+  armChk.type = 'checkbox';
+  armChk.checked = ids.includes('arm-translation');
+  armWrap.appendChild(armChk);
+  armWrap.appendChild(document.createTextNode(t('new.arm')));
+  panel.appendChild(armWrap);
+
+  const userModuleChecks = [];
+  for (const m of (userModulesCache || [])) {
+    const wrap = document.createElement('label');
+    wrap.className = 'display-edit-field';
+    wrap.style.flexDirection = 'row';
+    const chk = document.createElement('input');
+    chk.type = 'checkbox';
+    chk.checked = ids.includes(m.id);
+    userModuleChecks.push({ id: m.id, chk });
+    wrap.appendChild(chk);
+    wrap.appendChild(document.createTextNode(loc(m, 'nombre')));
     panel.appendChild(wrap);
   }
 
@@ -538,11 +550,22 @@ function buildCodecEditRow(inst) {
     if (inst.status === 'running' && !confirm(t('instances.display.confirmRunning'))) return;
     applyBtn.disabled = true;
     try {
-      const modules = ids.filter((id) => OPTIONAL_PER_INSTANCE.includes(id) && id !== 'hwenc' && id !== 'hwdec');
+      const modules = ids.filter((id) => id === 'wifi-interno-virtwifi');
       if (checks.hwenc.checked) modules.push('hwenc');
       if (checks.hwdec.checked) modules.push('hwdec');
-      await applyCodec(inst.id, modules);
-      openCodecId = null;
+      if (wifiChk.checked) modules.push('wifi-interno');
+      if (gappsChk.checked) modules.push('gapps');
+      if (armChk.checked) modules.push('arm-translation');
+      for (const { id, chk } of userModuleChecks) if (chk.checked) modules.push(id);
+      await applyInstanceConfig(inst.id, {
+        width: Number(inputs.width.value),
+        height: Number(inputs.height.value),
+        dpi: Number(inputs.dpi.value),
+        fps: Number(inputs.fps.value),
+        gpuMode: gpuSelect.value,
+        modules,
+      });
+      openRestartId = null;
     } catch (e) {
       alert(e.message);
     } finally {
@@ -552,11 +575,47 @@ function buildCodecEditRow(inst) {
   });
   panel.appendChild(applyBtn);
 
+  // --- Device profile: a different backend route (restarts the container instead of
+  // recreating it), kept as its own sub-section with its own Apply button rather than folded
+  // into the payload above.
+  const profileHeader = document.createElement('div');
+  profileHeader.className = 'resources-edit-header';
+  profileHeader.textContent = t('instances.deviceProfile.header');
+  panel.appendChild(profileHeader);
+
+  const current = inst.deviceProfile || 'redroid';
+  const profileSelect = document.createElement('select');
+  for (const [value, text] of [['redroid', t('instances.deviceProfile.default')], ['samsung', 'Samsung Galaxy A55']]) {
+    const opt = document.createElement('option');
+    opt.value = value;
+    opt.textContent = text;
+    if (value === current) opt.selected = true;
+    profileSelect.appendChild(opt);
+  }
+  const profileBtn = document.createElement('button');
+  profileBtn.type = 'button';
+  profileBtn.className = 'secondary';
+  profileBtn.textContent = t('instances.deviceProfile.apply');
+  profileBtn.title = inst.status === 'running' ? t('instances.deviceProfile.applyNowHint') : t('instances.deviceProfile.applyNextStartHint');
+  profileBtn.addEventListener('click', async () => {
+    profileBtn.disabled = true;
+    try {
+      await applyDeviceProfile(inst.id, profileSelect.value);
+    } catch (e) {
+      alert(e.message);
+    } finally {
+      profileBtn.disabled = false;
+      await loadInstances({ silent: true });
+    }
+  });
+  panel.appendChild(profileSelect);
+  panel.appendChild(profileBtn);
+
   const cancelBtn = document.createElement('button');
   cancelBtn.type = 'button';
   cancelBtn.textContent = t('common.cancel');
   cancelBtn.addEventListener('click', () => {
-    openCodecId = null;
+    openRestartId = null;
     loadInstances({ silent: true });
   });
   panel.appendChild(cancelBtn);
@@ -566,7 +625,7 @@ function buildCodecEditRow(inst) {
   return tr;
 }
 
-// Raw module ids are already short and self-explanatory (same ids used in OPTIONAL_PER_INSTANCE
+// Raw module ids are already short and self-explanatory (same ids used in the Configure panel
 // above and in the "new instance" form) -- a separate display-name map would be one more place to
 // forget to update whenever a module is added (see the "wifi: off" bug this replaced). Shows
 // everything in requiredModuleIds, including modules the image implied rather than the user
@@ -612,9 +671,21 @@ function buildSupportCell(inst) {
   return chip;
 }
 
-let openWifiInternoId = null;
 let openStorageId = null;
 const storageCache = {}; // inst.id -> { volumeName, mountpoint } | { error } -- fetched on demand (needs a live docker inspect, not already in the /instances payload), kept around so toggling closed and back open doesn't re-fetch.
+
+// Stage-7 "user modules" (see loadUserModules's own comment -- CIFI today, discovered by
+// etapa rather than hardcoded) also need to be toggleable from the Configure panel, not only
+// at creation. Fetched once like hostCoreCount, not per instance -- the catalog is the same for
+// everyone's panel.
+let userModulesCache = null;
+async function loadUserModulesCache() {
+  if (userModulesCache !== null) return userModulesCache;
+  userModulesCache = await api('/modules').then(
+    (list) => list.filter((m) => Array.isArray(m.etapa) && m.etapa.includes(7)),
+  ).catch(() => []);
+  return userModulesCache;
+}
 let backupsCache = null; // not per-instance -- GET /api/backups is a global list (see backend/src/routes/backups.js); null means "not fetched yet", reset to null after a create/restore so the next render picks up the change.
 
 function formatBytes(n) {
@@ -739,7 +810,7 @@ function buildStorageEditRow(inst) {
   const tr = document.createElement('tr');
   tr.className = 'edit-row';
   const td = document.createElement('td');
-  td.colSpan = 12;
+  td.colSpan = 1;
   const panel = document.createElement('div');
   panel.className = 'resources-edit-panel';
 
@@ -778,177 +849,86 @@ function buildStorageEditRow(inst) {
   return tr;
 }
 
-function buildWifiInternoCell(inst) {
-  const ids = inst.requiredModuleIds || [];
-  const activeVirt = ids.includes('wifi-interno-virtwifi');
-  const active = ids.includes('wifi-interno') || activeVirt;
-  const chip = document.createElement('span');
-  chip.className = 'resource-chip';
-  chip.textContent = t(activeVirt ? 'instances.wifiInterno.onVirt' : (active ? 'instances.wifiInterno.on' : 'instances.wifiInterno.off'));
-  chip.title = t('instances.wifiInterno.changeHint');
-  chip.addEventListener('click', () => {
-    openWifiInternoId = openWifiInternoId === inst.id ? null : inst.id;
-    loadInstances({ silent: true });
-  });
-  return chip;
-}
-
-// Same recreate mechanism as buildCodecEditRow -- reuses applyCodec (a generic name: it just
-// POSTs whatever "modules" array it is given to /:id/display), since toggling wifi-interno goes
-// through the exact same route/semantics as hwenc/hwdec. Unlike those, it is not gated on
-// gpuMode="host" (its manifest declares compatibleCon.gpuMode: ["host","guest"] -- networking,
-// not GPU).
-function buildWifiInternoEditRow(inst) {
-  const tr = document.createElement('tr');
-  tr.className = 'edit-row';
-  const td = document.createElement('td');
-  td.colSpan = 10;
-  const panel = document.createElement('div');
-  panel.className = 'resources-edit-panel';
-
-  const header = document.createElement('div');
-  header.className = 'resources-edit-header';
-  header.textContent = t('instances.wifiInterno.header');
-  panel.appendChild(header);
-
-  const ids = inst.requiredModuleIds || [];
-  const wrap = document.createElement('label');
-  wrap.className = 'display-edit-field';
-  wrap.style.flexDirection = 'row';
-  const chk = document.createElement('input');
-  chk.type = 'checkbox';
-  chk.checked = ids.includes('wifi-interno');
-  wrap.appendChild(chk);
-  wrap.appendChild(document.createTextNode(t('instances.wifiInterno.label')));
-  panel.appendChild(wrap);
-
-  const applyBtn = document.createElement('button');
-  applyBtn.type = 'button';
-  applyBtn.className = 'secondary';
-  applyBtn.textContent = t('instances.resources.apply');
-  applyBtn.addEventListener('click', async () => {
-    if (inst.status === 'running' && !confirm(t('instances.display.confirmRunning'))) return;
-    applyBtn.disabled = true;
-    try {
-      const modules = ids.filter((id) => OPTIONAL_PER_INSTANCE.includes(id) && id !== 'wifi-interno');
-      if (chk.checked) modules.push('wifi-interno');
-      await applyCodec(inst.id, modules);
-      openWifiInternoId = null;
-    } catch (e) {
-      alert(e.message);
-    } finally {
-      applyBtn.disabled = false;
-      await loadInstances({ silent: true });
-    }
-  });
-  panel.appendChild(applyBtn);
-
-  const cancelBtn = document.createElement('button');
-  cancelBtn.type = 'button';
-  cancelBtn.textContent = t('common.cancel');
-  cancelBtn.addEventListener('click', () => {
-    openWifiInternoId = null;
-    loadInstances({ silent: true });
-  });
-  panel.appendChild(cancelBtn);
-
-  td.appendChild(panel);
-  tr.appendChild(td);
-  return tr;
-}
-
-// The backend only allows applying a profile while the instance is running (it needs the overlay
-// writable, see deviceProfile.js) -- the select+button only render in that state, matching how the
-// Actions column already hides start/stop/restart/delete that do not apply to the current status.
-// Editable in BOTH states, unlike before -- the backend route itself now decides what
-// changing it actually DOES: stopped, it only stores the choice (reconciled silently on the
-// next start, see routes/instances.js reconcileDeviceProfile); running, it applies and
-// restarts right there. Was gated to "running only" here, which backwards -- the one state
-// where changing it is disruptive (it kills whatever is currently running inside Android) is
-// exactly the one that used to be required.
-function buildDeviceProfileCell(inst) {
-  const wrap = document.createElement('div');
-  const current = inst.deviceProfile || 'redroid';
-  const label = document.createElement('span');
-  label.className = 'muted';
-  label.textContent = current === 'redroid' ? t('instances.deviceProfile.default') : current;
-  wrap.appendChild(label);
-  wrap.appendChild(document.createElement('br'));
-  const select = document.createElement('select');
-  for (const [value, text] of [['redroid', t('instances.deviceProfile.default')], ['samsung', 'Samsung Galaxy A55']]) {
-    const opt = document.createElement('option');
-    opt.value = value;
-    opt.textContent = text;
-    if (value === current) opt.selected = true;
-    select.appendChild(opt);
-  }
-  const btn = document.createElement('button');
-  btn.type = 'button';
-  btn.className = 'secondary';
-  btn.textContent = t('instances.deviceProfile.apply');
-  btn.title = inst.status === 'running' ? t('instances.deviceProfile.applyNowHint') : t('instances.deviceProfile.applyNextStartHint');
-  btn.addEventListener('click', async () => {
-    btn.disabled = true;
-    try {
-      await applyDeviceProfile(inst.id, select.value);
-    } catch (e) {
-      alert(e.message);
-    } finally {
-      btn.disabled = false;
-      await loadInstances({ silent: true });
-    }
-  });
-  wrap.appendChild(select);
-  wrap.appendChild(btn);
-  return wrap;
-}
-
 // `silent`: the periodic refresh does not flash "Loading..." over the table.
+// Instances redesign (24/10/2026): each instance renders as a pair of rows, not a row of
+// columns -- see the CSS comment above .instance-primary/.instance-secondary. Row 1 (bigger
+// font) is "I already know how this is set up, just let me connect": name, status, address.
+// Row 2 (smaller) is everything else -- info chips AND every button, including the ones that
+// used to sit in their own always-visible column (device profile, register/mark-registered).
 async function loadInstances({ silent = false } = {}) {
   const tbody = $('#instances-table tbody');
-  if (!silent) tbody.innerHTML = `<tr><td colspan="12">${t('common.loading')}</td></tr>`;
+  if (!silent) tbody.innerHTML = `<tr><td>${t('common.loading')}</td></tr>`;
   try {
     const instances = await api('/instances');
     if (instances.length === 0) {
-      tbody.innerHTML = `<tr><td colspan="12">${t('instances.none')}</td></tr>`;
+      tbody.innerHTML = `<tr><td>${t('instances.none')}</td></tr>`;
       return;
     }
     // Built off-screen and swapped in one go, so a refresh never leaves the table half drawn.
     const rows = document.createDocumentFragment();
     for (const inst of instances) {
-      const tr = document.createElement('tr');
-      tr.innerHTML = `
-        <td>${inst.name}${inst.display ? `<span class="instance-meta muted">${inst.display.width}×${inst.display.height} · ${inst.display.dpi} dpi · ${inst.display.fps} fps${inst.gpuMode ? ` · gpu:${inst.gpuMode}` : ''}</span>` : ''}</td>
-        <td>${inst.dockerImage}</td>
-        <td class="status-cell"></td>
-        <td>${inst.adbPort}</td>
-        <td class="android-id-cell">${androidIdCellHtml(inst)}</td>
-        <td class="device-profile-cell"></td>
-        <td class="resources-cell"></td>
-        <td class="codec-cell"></td>
-        <td class="wifi-interno-cell"></td>
-        <td class="modules-cell"></td>
-        <td class="support-cell"></td>
-        <td class="actions"></td>
-      `;
       const state = InstanceState.describe(inst.status);
-      tr.querySelector('.status-cell').innerHTML = `<span class="status-dot ${state.tone}"></span>${t('instances.status.' + state.key)}`;
-      const metaSpan = tr.querySelector('.instance-meta');
-      if (metaSpan) {
-        metaSpan.classList.add('resource-chip');
-        metaSpan.title = t('instances.display.changeHint');
-        metaSpan.addEventListener('click', () => {
-          openDisplayId = openDisplayId === inst.id ? null : inst.id;
-          loadInstances({ silent: true });
-        });
-      }
-      tr.querySelector('.device-profile-cell').appendChild(buildDeviceProfileCell(inst));
-      tr.querySelector('.resources-cell').appendChild(buildResourcesCell(inst));
-      tr.querySelector('.codec-cell').appendChild(buildCodecCell(inst));
-      tr.querySelector('.wifi-interno-cell').appendChild(buildWifiInternoCell(inst));
-      tr.querySelector('.modules-cell').appendChild(buildModulesCell(inst));
-      tr.querySelector('.support-cell').appendChild(buildSupportCell(inst));
-      const actions = tr.querySelector('.actions');
+
+      // --- Row 1: name, status, address (host:adbPort -- click to copy, same as the Android
+      // ID copy-on-click pattern) ---
+      const trPrimary = document.createElement('tr');
+      trPrimary.className = 'instance-row-primary';
+      const tdPrimary = document.createElement('td');
+      const primary = document.createElement('div');
+      primary.className = 'instance-primary';
+
+      const nameSpan = document.createElement('span');
+      nameSpan.className = 'instance-name';
+      nameSpan.textContent = inst.name;
+      primary.appendChild(nameSpan);
+
+      const statusSpan = document.createElement('span');
+      statusSpan.className = 'instance-status';
+      statusSpan.innerHTML = `<span class="status-dot ${state.tone}"></span>${t('instances.status.' + state.key)}`;
+      primary.appendChild(statusSpan);
+
+      const address = `${location.hostname}:${inst.adbPort}`;
+      const addrSpan = document.createElement('span');
+      addrSpan.className = 'instance-address';
+      addrSpan.textContent = address;
+      addrSpan.title = t('instances.addressCopyHint');
+      addrSpan.addEventListener('click', async () => {
+        const ok = await copyText(address);
+        addrSpan.textContent = ok ? t('instances.copied') : t('instances.copyFailed');
+        setTimeout(() => { addrSpan.textContent = address; }, 1500);
+      });
+      primary.appendChild(addrSpan);
+
+      tdPrimary.appendChild(primary);
+      trPrimary.appendChild(tdPrimary);
+
+      // --- Row 2: every other info chip, then every button ---
+      const trSecondary = document.createElement('tr');
+      trSecondary.className = 'instance-row-secondary';
+      const tdSecondary = document.createElement('td');
+      const secondary = document.createElement('div');
+      secondary.className = 'instance-secondary';
+
+      const imageChip = document.createElement('span');
+      imageChip.className = 'resource-chip';
+      imageChip.textContent = inst.dockerImage;
+      secondary.appendChild(imageChip);
+      const displayChip = buildDisplayChip(inst);
+      if (displayChip) secondary.appendChild(displayChip);
+      secondary.appendChild(buildDeviceProfileChip(inst));
+      secondary.appendChild(buildResourcesChips(inst));
+      secondary.appendChild(buildCodecChips(inst));
+      secondary.appendChild(buildWifiInternoChip(inst));
+      secondary.appendChild(buildModulesCell(inst));
+      secondary.appendChild(buildSupportCell(inst));
+      const androidIdSpan = document.createElement('span');
+      androidIdSpan.className = 'android-id-cell';
+      androidIdSpan.innerHTML = androidIdCellHtml(inst);
+      secondary.appendChild(androidIdSpan);
+
+      const buttons = document.createElement('div');
+      buttons.className = 'instance-secondary-buttons';
+
       if (inst.hasGapps && inst.androidId && !inst.androidIdRegisteredAt) {
         const link = document.createElement('a');
         link.href = 'https://www.google.com/android/uncertified';
@@ -964,7 +944,7 @@ async function loadInstances({ silent = false } = {}) {
           link.textContent = t(ok ? 'instances.copied' : 'instances.copyFailed');
           setTimeout(() => { link.textContent = t('instances.register'); }, 2500);
         });
-        actions.appendChild(link);
+        buttons.appendChild(link);
         const markBtn = document.createElement('button');
         markBtn.textContent = t('instances.markRegistered');
         markBtn.className = 'secondary';
@@ -976,8 +956,36 @@ async function loadInstances({ silent = false } = {}) {
             alert(e.message);
           }
         });
-        actions.appendChild(markBtn);
+        buttons.appendChild(markBtn);
       }
+
+      const resourcesBtn = document.createElement('button');
+      resourcesBtn.type = 'button';
+      resourcesBtn.className = 'secondary';
+      resourcesBtn.textContent = t('instances.resources.toggle');
+      resourcesBtn.title = t('instances.resources.changeHint');
+      resourcesBtn.addEventListener('click', () => {
+        openNoRestartId = openNoRestartId === inst.id ? null : inst.id;
+        loadInstances({ silent: true });
+      });
+      buttons.appendChild(resourcesBtn);
+
+      const configureBtn = document.createElement('button');
+      configureBtn.type = 'button';
+      configureBtn.className = 'secondary';
+      configureBtn.textContent = t('instances.configure.toggle');
+      configureBtn.title = t('instances.configure.changeHint');
+      configureBtn.addEventListener('click', async () => {
+        const opening = openRestartId !== inst.id;
+        openRestartId = opening ? inst.id : null;
+        if (opening && userModulesCache === null) {
+          loadInstances({ silent: true }); // shows the panel's "loading" state while this resolves
+          await loadUserModulesCache();
+        }
+        loadInstances({ silent: true });
+      });
+      buttons.appendChild(configureBtn);
+
       const storageBtn = document.createElement('button');
       storageBtn.type = 'button';
       storageBtn.className = 'secondary';
@@ -999,7 +1007,7 @@ async function loadInstances({ silent = false } = {}) {
         }
         loadInstances({ silent: true });
       });
-      actions.appendChild(storageBtn);
+      buttons.appendChild(storageBtn);
 
       // Only the actions that make sense for the current state (see instanceState.js).
       const mk = (label, action) => {
@@ -1033,21 +1041,25 @@ async function loadInstances({ silent = false } = {}) {
               alert(e.message);
             }
           });
-          actions.appendChild(del);
+          buttons.appendChild(del);
         } else {
-          actions.appendChild(mk(t(`instances.${action}`), action));
+          buttons.appendChild(mk(t(`instances.${action}`), action));
         }
       }
-      rows.appendChild(tr);
-      if (openResourcesId === inst.id) rows.appendChild(buildResourcesEditRow(inst, instances));
-      if (openDisplayId === inst.id) rows.appendChild(buildDisplayEditRow(inst));
-      if (openCodecId === inst.id) rows.appendChild(buildCodecEditRow(inst));
-      if (openWifiInternoId === inst.id) rows.appendChild(buildWifiInternoEditRow(inst));
+
+      secondary.appendChild(buttons);
+      tdSecondary.appendChild(secondary);
+      trSecondary.appendChild(tdSecondary);
+
+      rows.appendChild(trPrimary);
+      rows.appendChild(trSecondary);
+      if (openNoRestartId === inst.id) rows.appendChild(buildResourcesEditRow(inst, instances));
+      if (openRestartId === inst.id) rows.appendChild(buildRestartEditRow(inst));
       if (openStorageId === inst.id) rows.appendChild(buildStorageEditRow(inst));
     }
     tbody.replaceChildren(rows);
   } catch (e) {
-    tbody.innerHTML = `<tr><td colspan="12">${t('common.error', { msg: e.message })}</td></tr>`;
+    tbody.innerHTML = `<tr><td>${t('common.error', { msg: e.message })}</td></tr>`;
   }
 }
 
@@ -1434,5 +1446,5 @@ loadInstances();
 setInterval(() => {
   const onInstances = $('.tab-btn.active')?.dataset.tab === 'instances';
   const dialogOpen = $$('dialog').some((d) => d.open);
-  if (onInstances && !dialogOpen && openResourcesId === null && openDisplayId === null && openCodecId === null && openStorageId === null && !document.hidden) loadInstances({ silent: true });
+  if (onInstances && !dialogOpen && openNoRestartId === null && openRestartId === null && openStorageId === null && !document.hidden) loadInstances({ silent: true });
 }, 4000);
