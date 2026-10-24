@@ -1,3 +1,5 @@
+const fs = require('fs');
+const path = require('path');
 const cp = require('child_process');
 const runtime = require('./dockerRuntime');
 const store = require('./store');
@@ -18,10 +20,123 @@ function execFileAsync(file, args) {
   });
 }
 
-const HWSIM_RADIO_COUNT = process.env.HWSIM_RADIO_COUNT || '6'; // 2 radios/instance
+// 2 radios/instance. Shared host-wide with jg-dashboard's OWN hwsim pool (same kernel
+// module, same host) -- keep this value in sync with HWSIM_RADIO_COUNT in
+// jg-dashboard/api/src/remote/redroid/redroid.service.ts, or whichever project's own
+// "0 free -> reload" self-heal runs next silently resets the other back down.
+const HWSIM_RADIO_COUNT = process.env.HWSIM_RADIO_COUNT || '20'; // 10 simultaneous needs-hwsim-wifi instances
 
 function log(msg) { console.log(`[hwsimWifi] ${msg}`); }
 function warn(msg) { console.warn(`[hwsimWifi] ${msg}`); }
+
+// Stage 4 (integrate): fake WiFi HAL overlay for the hwsim-backed path (patched
+// com.android.wifi.apex + com.android.tethering.apex + framework-res.apk, built
+// 24/10/2026 against android-15.0.0_r36, redroid-wifi-patches/Wifi.patch --
+// the SAME patch that backs jg-dashboard/pvz2-tv's own custom images, just
+// applied here as an overlay on the plain official image instead of baked into
+// a whole custom AOSP build). Found missing the hard way (24/10/2026, first
+// aurora-host-test attempt on android-15-official): claiming hwsim phys and
+// running `svc wifi enable`/`cmd wifi connect-network` (what this module already
+// did) only wires the KERNEL side -- without this, the plain official image has
+// no supplicant/HAL at all behind wlan0 (logcat: "WifiHal is null", "Vendor Hal
+// not supported"), so the connect attempt times out. Same reasoning as
+// virtWifi.js's own OVERLAY_DIR/integrate() for the virt_wifi-backed module --
+// our own AOSP build, Apache-2.0, not a third party's.
+const OVERLAY_DIR = process.env.REDROID_FORGE_HWSIM_OVERLAY_DIR
+  || path.join(__dirname, '..', '..', 'data', 'hwsim-wifi-overlay');
+
+async function integrate(containerId) {
+  const dir = OVERLAY_DIR;
+  if (!fs.existsSync(path.join(dir, 'system'))) {
+    throw new Error(
+      `wifi-interno: no HAL overlay at ${dir} (expected <dir>/system/apex/{com.android.wifi.apex,`
+      + 'com.android.tethering.apex} + <dir>/system/framework/framework-res.apk + <dir>/jg_netfix.sh, '
+      + 'built from an AOSP tree with redroid-wifi-patches/Wifi.patch + Connectivity.patch + '
+      + 'frameworks-base.patch applied) -- set REDROID_FORGE_HWSIM_OVERLAY_DIR or place it at the default path',
+    );
+  }
+  for (const unit of ['apex', 'framework']) {
+    // eslint-disable-next-line no-await-in-loop
+    await execFileAsync('docker', ['cp', `${path.join(dir, 'system', unit)}/.`, `${containerId}:/system/${unit}/`]);
+  }
+  // jg_netfix.sh (device/redroid/jg_netfix.sh in the AOSP tree, ported here as a
+  // standalone file since we are not building a whole custom device image): the
+  // native root daemon the HAL patch depends on for the actual interface-swap +
+  // static-IP self-heal (see the file's own header for why it is not done via
+  // `su -c` from system_server). Normally started by init.rc on a real device
+  // build; there is no init.rc here (plain official image, not our own device
+  // tree), so ensureRuntimeReady (stage 6, below) launches it by hand instead,
+  // same adaptation already applied to its init.redroid.rc `service` stanza.
+  await execFileAsync('docker', ['cp', path.join(dir, 'jg_netfix.sh'), `${containerId}:/system/bin/jg_netfix.sh`]);
+  await runtime.exec(containerId, ['chmod', '755', '/system/bin/jg_netfix.sh']).catch(() => {});
+  log(`HAL overlay (wifi apex + tethering apex + framework-res.apk + jg_netfix.sh) injected into ${containerId}`);
+}
+
+// jg_netfix.sh must run as root natively, never through Magisk's `su -c` from
+// system_server (see the script's own header -- that reproducibly broke gralloc
+// HAL resolution on the images where it was first found). `docker exec` already
+// runs as root, so no su wrapper is needed or wanted here, unlike
+// execMaybeSu/ensureWifiConnected below.
+// `ps -A`'s NAME column is truncated to the executable ("sh"), never the
+// full command -- confirmed by hand 24/10/2026, it silently never matches
+// and the `||` branch always runs, launching a new daemon on every call
+// (found running 3 duplicates after 3 manual tests). `-ef`'s CMD column has
+// the full command line.
+//
+// `setsid`, not plain `nohup ... &`: confirmed by hand 24/10/2026 that a
+// background job started through dockerode's exec (runtime.exec, unlike a
+// bare `docker exec` CLI call) does not reliably survive past the exec call
+// returning -- `setsid` gives the daemon its own session, detached from
+// whatever process group dockerode's exec itself runs under, which does.
+const NETFIX_SCRIPT = 'ps -ef 2>/dev/null | grep -v grep | grep -q jg_netfix.sh'
+  + ' || (setsid sh /system/bin/jg_netfix.sh </dev/null >/dev/null 2>&1 &)';
+
+// Same race already documented/retried in virtWifi.js's ensureVirtWifiIface
+// (calling `ip` right after start() can race Android's own mount sequence):
+// found by hand 24/10/2026 that scheduleRuntimeFixups calls this with no
+// delay at all, unlike the other hwsim fixups below (which all wait 20s) --
+// `exec /system/bin/sh: no such file or directory` right after a restart.
+const NETFIX_MAX_ATTEMPTS = 8;
+const NETFIX_RETRY_DELAY_MS = 2000;
+
+async function ensureNetfixDaemon(containerId) {
+  for (let attempt = 1; attempt <= NETFIX_MAX_ATTEMPTS; attempt++) {
+    try {
+      await runtime.exec(containerId, ['sh', '-c', NETFIX_SCRIPT]);
+      return;
+    } catch (e) {
+      if (attempt === NETFIX_MAX_ATTEMPTS) {
+        warn(`could not ensure jg_netfix.sh is running in ${containerId} after ${attempt} attempts: ${e.message || e}`);
+        return;
+      }
+      await new Promise((r) => setTimeout(r, NETFIX_RETRY_DELAY_MS));
+    }
+  }
+}
+
+async function ensureRuntimeReady(containerId) {
+  await ensureNetfixDaemon(containerId);
+}
+
+// Some images (jg-dashboard's own custom builds, Magisk-rooted) have `su`;
+// the plain official image this module also targets does not (confirmed by
+// hand 24/10/2026 on aurora-host-test: "su: executable file not found in
+// $PATH"). `docker exec` already runs as root for either kind of image, so
+// `su` was never required for privilege -- only harmless when present. Try it
+// first (cheapest no-op change for images that do have it) and fall back to
+// running the command directly the moment it is confirmed missing.
+let suConfirmedMissing = false;
+async function execMaybeSu(containerId, script) {
+  if (!suConfirmedMissing) {
+    try {
+      return await runtime.exec(containerId, ['su', '0', 'sh', '-c', script]);
+    } catch (e) {
+      if (!/executable file not found|no such file or directory/i.test(e.message || String(e))) throw e;
+      suConfirmedMissing = true;
+    }
+  }
+  return runtime.exec(containerId, ['sh', '-c', script]);
+}
 
 // Ports fake-wifi-networking.service.ts from plenum-redroid. It runs as root
 // inside the privileged --pid=host --network=host container, so the commands act
@@ -298,16 +413,16 @@ async function ensureWifiConnected(instanceId, containerId) {
   for (let i = 0; i < MAX_ATTEMPTS; i++) {
     let status = '';
     try {
-      status = await runtime.exec(containerId, ['su', '0', 'sh', '-c', 'cmd wifi status']);
+      status = await execMaybeSu(containerId, 'cmd wifi status');
     } catch (e) {
       warn(`status check failed for ${instanceId}: ${e}`);
     }
     if (status.includes('Wifi is connected')) return;
 
     try {
-      await runtime.exec(containerId, ['su', '0', 'sh', '-c', 'svc wifi enable']);
+      await execMaybeSu(containerId, 'svc wifi enable');
       await new Promise((r) => setTimeout(r, 3000));
-      await runtime.exec(containerId, ['su', '0', 'sh', '-c', 'cmd wifi connect-network jg-wifi open']);
+      await execMaybeSu(containerId, 'cmd wifi connect-network jg-wifi open');
     } catch (e) {
       warn(`attempt ${i + 1} failed for ${instanceId}: ${e}`);
     }
@@ -333,7 +448,7 @@ async function ensureEth0Routing(instanceId, containerId) {
 
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     try {
-      await runtime.exec(containerId, ['su', '0', 'sh', '-c', script]);
+      await execMaybeSu(containerId, script);
     } catch (e) {
       warn(`ip rule add failed for ${instanceId} (attempt ${attempt}): ${e}`);
       await new Promise((r) => setTimeout(r, RETRY_DELAY_MS));
@@ -376,5 +491,6 @@ module.exports = {
   ensureWifiConnected, scheduleWifiConnectedFix,
   ensureEth0Routing, scheduleEth0RoutingFix,
   releaseHwsimPhys,
+  integrate, ensureRuntimeReady,
   _resetHwsimClaimTailForTests,
 };

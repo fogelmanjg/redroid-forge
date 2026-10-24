@@ -8,4 +8,5 @@ scenario-results/
 backend/data/gapps/
 backend/data/arm-translation/
 backend/data/virtwifi-overlay/
+backend/data/hwsim-wifi-overlay/
 __pycache__/

@@ -1,0 +1,41 @@
+{
+  "id": "wifi-interno",
+  "nombre": "Internal WiFi (hwsim)",
+  "esTerceroNoLibre": false,
+  "descripcion": "Simulates a real WiFi interface inside the instance using mac80211_hwsim, for apps that do not work without a detected WiFi connection. The instance's actual connectivity is unchanged (still its own Docker networking) -- this only makes it look like WiFi to Android. Also injects our own patched WiFi HAL overlay (same fake-supplicant mechanism as jg-dashboard/pvz2-tv's custom images, redroid-wifi-patches/Wifi.patch) so the plain official image -- which ships no supplicant/HAL at all -- actually has something behind wlan0 to drive the connection.",
+  "queToca": [
+    "before the first boot, copies our own patched com.android.wifi.apex + com.android.tethering.apex + framework-res.apk into the instance's /system (REDROID_FORGE_HWSIM_OVERLAY_DIR, default backend/data/hwsim-wifi-overlay) -- our own AOSP build, Apache-2.0, not a third party's; without it there is no HAL behind wlan0 at all",
+    "loads the mac80211_hwsim kernel module on the host",
+    "moves radio interfaces (phys) from the host's netns to the instance's netns",
+    "runs commands inside the container (svc wifi, cmd wifi connect-network) to force the connection",
+    "runs a native root daemon (jg_netfix.sh) inside the instance that the HAL overlay depends on for the actual interface-swap + static-IP self-heal"
+  ],
+  "compatibleCon": {
+    "androidVersion": [
+      15
+    ],
+    "gpuMode": [
+      "host",
+      "guest"
+    ]
+  },
+  "etapa": [
+    4,
+    6
+  ],
+  "entry": "./integrate.js",
+  "version": 2,
+  "i18n": {
+    "es": {
+      "nombre": "WiFi interno (hwsim)",
+      "descripcion": "Simula una interfaz WiFi real dentro de la instancia usando mac80211_hwsim, para apps que no funcionan sin una conexion WiFi detectada. La conectividad real de la instancia no cambia (sigue siendo su misma red de Docker) -- esto solo hace que Android la vea como WiFi. Tambien inyecta nuestro propio HAL de WiFi parcheado (el mismo mecanismo de supplicant falso que usan las imagenes custom de jg-dashboard/pvz2-tv, redroid-wifi-patches/Wifi.patch) para que la imagen oficial sin modificar -- que no trae ningun supplicant/HAL -- tenga algo detras de wlan0 que maneje la conexion.",
+      "queToca": [
+        "antes del primer arranque, copia nuestros propios com.android.wifi.apex + com.android.tethering.apex + framework-res.apk parcheados al /system de la instancia (REDROID_FORGE_HWSIM_OVERLAY_DIR, default backend/data/hwsim-wifi-overlay) -- build propio de AOSP, Apache-2.0, no de un tercero; sin esto no hay ningun HAL detras de wlan0",
+        "carga el modulo de kernel mac80211_hwsim en el host",
+        "mueve interfaces de radio (phys) del netns del host al netns de la instancia",
+        "ejecuta comandos dentro del contenedor (svc wifi, cmd wifi connect-network) para forzar la conexion",
+        "corre un daemon root nativo (jg_netfix.sh) dentro de la instancia del que depende el overlay del HAL para el intercambio de interfaz + auto-reparacion de la IP estatica"
+      ]
+    }
+  }
+}
