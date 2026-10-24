@@ -336,9 +336,17 @@ static int virt_wifi_get_station(struct wiphy *wiphy, struct net_device *dev,
 {
 	struct virt_wifi_netdev_priv *priv = netdev_priv(dev);
 
-	wiphy_debug(wiphy, "get_station\n");
+	pr_info("jg-redroid virt_wifi: get_station called, is_up=%d requested_mac=%pM fake_bssid=%pM\n",
+		priv->is_up, mac, fake_router_bssid);
 
-	if (!priv->is_connected || !ether_addr_equal(mac, fake_router_bssid))
+	/* jg-redroid: idem start_xmit/rx_handler -- is_connected is the fake
+	 * driver-internal SME state machine the Java fake HAL never drives
+	 * (see the comment above start_xmit). Gating here on it means
+	 * wificond's periodic signal-poll (nl80211 get_station) always got
+	 * -ENOENT, which the framework logs as "Invalid signal poll result"
+	 * and which eventually kills the WifiNetworkAgent a few seconds
+	 * after it validates -- confirmed against a real instance 23/10. */
+	if (!priv->is_up || !ether_addr_equal(mac, fake_router_bssid))
 		return -ENOENT;
 
 	sinfo->filled = BIT_ULL(NL80211_STA_INFO_TX_PACKETS) |
@@ -363,7 +371,7 @@ static int virt_wifi_dump_station(struct wiphy *wiphy, struct net_device *dev,
 
 	wiphy_debug(wiphy, "dump_station\n");
 
-	if (idx != 0 || !priv->is_connected)
+	if (idx != 0 || !priv->is_up)
 		return -ENOENT;
 
 	ether_addr_copy(mac, fake_router_bssid);
