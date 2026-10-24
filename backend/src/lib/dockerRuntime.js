@@ -221,11 +221,18 @@ async function runEphemeral(image, cmd, binds, timeoutMs = 30000) {
   });
   try {
     await container.start();
-    await Promise.race([
+    const wait = await Promise.race([
       container.wait(),
       new Promise((_, reject) => setTimeout(() => reject(new Error('runEphemeral timeout')), timeoutMs)),
     ]);
-    return await readLogs(container);
+    const out = await readLogs(container);
+    // androidIdentity's one caller never hit this (it already wraps every call in its own
+    // try/catch and ignores the reason) -- made strict here because backup.js needs to tell
+    // a failed tar/restore apart from one that silently did nothing.
+    if (wait.StatusCode !== 0) {
+      throw Object.assign(new Error(`${cmd.join(' ')} exited with code ${wait.StatusCode}: ${out}`), { exitCode: wait.StatusCode, output: out });
+    }
+    return out;
   } finally {
     await container.remove({ force: true }).catch(() => {});
   }

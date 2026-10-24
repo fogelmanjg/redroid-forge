@@ -10,4 +10,5 @@ backend/data/arm-translation/
 backend/data/virtwifi-overlay/
 backend/data/hwsim-wifi-overlay/
 backend/data/db/
+backend/data/backups/
 __pycache__/

@@ -11,6 +11,7 @@ app.use('/api/images', require('./routes/images'));
 app.use('/api/modules', require('./routes/modules'));
 app.use('/api/db', require('./routes/db'));
 app.use('/api/settings', require('./routes/settings'));
+app.use('/api/backups', require('./routes/backups'));
 
 const PORT = process.env.PORT || 8080;
 app.listen(PORT, () => {

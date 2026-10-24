@@ -3,12 +3,14 @@ const { readJsonObject, writeJsonObject } = require('./jsonFileStore');
 
 const SETTINGS_FILE = path.join(__dirname, '..', '..', 'data', 'settings.json');
 
-// First (and for now only) global setting: where instance backups land by default --
-// right next to redroid-forge's own persistent state (instances.json, etc.), not inside
-// any instance's own volume. The actual backup/restore feature is built separately; this
-// just gives it (and the user) a place to look.
+// First (and for now only) global setting: where instance backups land by default.
+// REDROID_FORGE_BACKUPS_DIR (see docker-compose.yml) is a real HOST path, bound at the
+// same path inside this container too -- backup.js needs that to be true because it
+// bind-mounts this same directory into throwaway sibling containers via the Docker
+// socket, which resolves paths against the host, not against this process's own
+// filesystem view. The fallback (no Docker/tests) is just a plain local folder.
 const DEFAULTS = {
-  backupDir: path.join(__dirname, '..', '..', 'data', 'backups'),
+  backupDir: process.env.REDROID_FORGE_BACKUPS_DIR || path.join(__dirname, '..', '..', 'data', 'backups'),
 };
 
 function get(file = SETTINGS_FILE) {

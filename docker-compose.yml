@@ -27,6 +27,16 @@ services:
       # empty by default, same reasoning as REDROID_HWENC_ARTIFACTS_DIR: the .ko is built
       # against this exact host's running kernel, never shipped in the repo.
       - REDROID_FORGE_VIRTWIFI_KO_PATH=${REDROID_FORGE_VIRTWIFI_KO_PATH:-}
+      # Where instance backups live (see backend/src/lib/backup.js and settings.js) --
+      # unlike the other paths above, this one is NOT optional/no-op: it needs to be an
+      # absolute HOST path (defaults to $PWD, i.e. this repo checkout) because backup.js
+      # bind-mounts it into throwaway sibling containers via the Docker socket below, which
+      # resolves paths against the HOST, not against redroid-forge's own filesystem -- a
+      # container-internal path here (e.g. the old default under /app/backend/data) would
+      # silently create and fill a same-named folder on the real host instead. Bound at the
+      # SAME path on both sides for exactly that reason (same trick as
+      # REDROID_HWENC_ARTIFACTS_DIR above, just not optional).
+      - REDROID_FORGE_BACKUPS_DIR=${REDROID_FORGE_BACKUPS_DIR:-${PWD}/backend/data/backups}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - /lib/modules:/lib/modules:ro
@@ -40,4 +50,5 @@ services:
       - ${REDROID_HWENC_ARTIFACTS_DIR:-/dev/null}:${REDROID_HWENC_ARTIFACTS_DIR:-/dev/null}:ro
       # Same trick, single file instead of a directory, for the virt_wifi.ko above.
       - ${REDROID_FORGE_VIRTWIFI_KO_PATH:-/dev/null}:${REDROID_FORGE_VIRTWIFI_KO_PATH:-/dev/null}:ro
+      - ${REDROID_FORGE_BACKUPS_DIR:-${PWD}/backend/data/backups}:${REDROID_FORGE_BACKUPS_DIR:-${PWD}/backend/data/backups}
     restart: unless-stopped

@@ -615,6 +615,101 @@ function buildSupportCell(inst) {
 let openWifiInternoId = null;
 let openStorageId = null;
 const storageCache = {}; // inst.id -> { volumeName, mountpoint } | { error } -- fetched on demand (needs a live docker inspect, not already in the /instances payload), kept around so toggling closed and back open doesn't re-fetch.
+let backupsCache = null; // not per-instance -- GET /api/backups is a global list (see backend/src/routes/backups.js); null means "not fetched yet", reset to null after a create/restore so the next render picks up the change.
+
+function formatBytes(n) {
+  if (n < 1024) return `${n} B`;
+  const units = ['KB', 'MB', 'GB'];
+  let v = n;
+  let u = -1;
+  do { v /= 1024; u += 1; } while (v >= 1024 && u < units.length - 1);
+  return `${v.toFixed(1)} ${units[u]}`;
+}
+
+async function createBackupNow(inst, btn) {
+  btn.disabled = true;
+  try {
+    await api(`/instances/${inst.id}/backup`, { method: 'POST' });
+    backupsCache = null;
+  } catch (e) {
+    alert(e.message);
+  } finally {
+    btn.disabled = false;
+    loadInstances({ silent: true });
+  }
+}
+
+async function restoreBackupOnto(inst, file, resetIdentity, btn) {
+  if (!confirm(t('instances.storage.restoreConfirm', { file, name: inst.name }))) return;
+  btn.disabled = true;
+  try {
+    const { warnings } = await api(`/instances/${inst.id}/restore`, {
+      method: 'POST', body: JSON.stringify({ file, resetIdentity }),
+    });
+    alert(warnings.length ? warnings.join('\n\n') : t('instances.storage.restoreNoWarnings'));
+  } catch (e) {
+    alert(e.message);
+  } finally {
+    btn.disabled = false;
+    loadInstances({ silent: true });
+  }
+}
+
+// Backups are a global pool (any instance can restore from any backup -- see
+// routes/backups.js), so this is the same list/markup regardless of which instance's panel
+// is open; only the Restore target (and the running-state check the backend itself enforces)
+// is instance-specific.
+function buildBackupsSection(inst) {
+  const wrap = document.createElement('div');
+  const header = document.createElement('div');
+  header.className = 'resources-edit-header';
+  header.textContent = t('instances.storage.backupsHeader');
+  wrap.appendChild(header);
+
+  const createBtn = document.createElement('button');
+  createBtn.type = 'button';
+  createBtn.className = 'secondary';
+  createBtn.textContent = t('instances.storage.createBackup');
+  createBtn.addEventListener('click', () => createBackupNow(inst, createBtn));
+  wrap.appendChild(createBtn);
+
+  if (backupsCache === null) {
+    wrap.appendChild(document.createTextNode(t('instances.storage.loading')));
+    return wrap;
+  }
+  if (backupsCache.length === 0) {
+    const p = document.createElement('p');
+    p.className = 'muted';
+    p.textContent = t('instances.storage.noBackups');
+    wrap.appendChild(p);
+    return wrap;
+  }
+
+  const resetLabel = document.createElement('label');
+  resetLabel.className = 'contract-checkbox';
+  const resetChk = document.createElement('input');
+  resetChk.type = 'checkbox';
+  resetLabel.appendChild(resetChk);
+  resetLabel.appendChild(document.createTextNode(t('instances.storage.resetIdentity')));
+  wrap.appendChild(resetLabel);
+
+  const ul = document.createElement('ul');
+  for (const b of backupsCache) {
+    const li = document.createElement('li');
+    const when = b.meta?.createdAt ? new Date(b.meta.createdAt).toLocaleString() : '?';
+    const fromImage = b.meta?.dockerImage ? ` · ${b.meta.dockerImage}` : '';
+    li.innerHTML = `<code>${b.file}</code> <span class="muted">(${formatBytes(b.sizeBytes)}, ${when}${fromImage})</span> `;
+    const restoreBtn = document.createElement('button');
+    restoreBtn.type = 'button';
+    restoreBtn.className = 'secondary';
+    restoreBtn.textContent = t('instances.storage.restore');
+    restoreBtn.addEventListener('click', () => restoreBackupOnto(inst, b.file, resetChk.checked, restoreBtn));
+    li.appendChild(restoreBtn);
+    ul.appendChild(li);
+  }
+  wrap.appendChild(ul);
+  return wrap;
+}
 
 // Read-only: where this instance's /data really lives on the host. Fetched on demand (not
 // batched into loadInstances' periodic poll, unlike soporte -- this is a live `docker volume
@@ -646,6 +741,8 @@ function buildStorageEditRow(inst) {
     panel.appendChild(p1);
     panel.appendChild(p2);
   }
+
+  panel.appendChild(buildBackupsSection(inst));
 
   const closeBtn = document.createElement('button');
   closeBtn.type = 'button';
@@ -869,13 +966,16 @@ async function loadInstances({ silent = false } = {}) {
       storageBtn.addEventListener('click', async () => {
         const opening = openStorageId !== inst.id;
         openStorageId = opening ? inst.id : null;
-        if (opening && !storageCache[inst.id]) {
-          loadInstances({ silent: true }); // shows the "loading" row while the fetch below runs
-          try {
-            storageCache[inst.id] = await api(`/instances/${inst.id}/storage`);
-          } catch (e) {
-            storageCache[inst.id] = { error: e.message };
+        if (opening && (!storageCache[inst.id] || backupsCache === null)) {
+          loadInstances({ silent: true }); // shows the "loading" row while the fetches below run
+          if (!storageCache[inst.id]) {
+            try {
+              storageCache[inst.id] = await api(`/instances/${inst.id}/storage`);
+            } catch (e) {
+              storageCache[inst.id] = { error: e.message };
+            }
           }
+          if (backupsCache === null) backupsCache = await api('/backups').catch(() => []);
         }
         loadInstances({ silent: true });
       });

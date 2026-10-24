@@ -13,6 +13,8 @@ const moduleRunner = require('../lib/moduleRunner');
 const moduleScheduler = require('../lib/moduleScheduler');
 const instanceSupport = require('../lib/instanceSupport');
 const instanceParams = require('../lib/instanceParams');
+const backup = require('../lib/backup');
+const settings = require('../lib/settings');
 const catalog = require('../../images.json');
 
 const router = express.Router();
@@ -638,6 +640,33 @@ router.get('/:id/storage', async (req, res) => {
       volumeName: instance.volumeName || null,
       mountpoint: info ? info.Mountpoint : null,
     });
+  } catch (e) {
+    sendError(res, e);
+  }
+});
+
+// Whole-/data tar.gz, through a throwaway container (see lib/backup.js) -- safe to run
+// against a running instance (mounts the volume read-only). The list of existing backups
+// is NOT instance-scoped (GET /api/backups): restoring onto a different instance than the
+// one that made the backup is a supported use case, not a special case.
+router.post('/:id/backup', async (req, res) => {
+  const instance = store.get(req.params.id);
+  if (!instance) return res.status(404).json({ error: 'Instancia no encontrada' });
+  try {
+    res.status(201).json(await backup.createBackup(instance, settings.get().backupDir));
+  } catch (e) {
+    sendError(res, e);
+  }
+});
+
+// Requires the instance to be stopped (see restoreBackup -- /data cannot be safely
+// replaced under a running container). Body: { file, resetIdentity? }.
+router.post('/:id/restore', async (req, res) => {
+  const instance = store.get(req.params.id);
+  if (!instance) return res.status(404).json({ error: 'Instancia no encontrada' });
+  try {
+    const { file, resetIdentity } = req.body || {};
+    res.json(await backup.restoreBackup(instance, settings.get().backupDir, file, { resetIdentity: !!resetIdentity }));
   } catch (e) {
     sendError(res, e);
   }
