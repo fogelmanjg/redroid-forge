@@ -571,6 +571,17 @@ that can create/delete/start/stop it is itself reachable from anywhere.
 instance; any interface can be opened deliberately, per instance and for the app itself, with a visible
 warning when that combination has no auth behind it.
 
+**✅ Done (24/10/2026).** Steps 1-4 implemented and live-tested against real containers on this host (not
+only unit tests): confirmed the app and a fresh instance both bind to `127.0.0.1` only by default, that an
+instance opened on a LAN address is genuinely reachable there, and that a LAN address stays unreachable
+when not opted into. Step 5's warning is unconditional for now rather than gated on "no auth configured" —
+Phase 7 (the only thing that could make it conditional) does not exist yet. **Found and fixed along the
+way, not anticipated by the original design:** `0.0.0.0` is not additive with a specific address on the
+same port — Docker either rejects the combination outright (CLI) or silently publishes no port at all
+(the Engine API dockerode uses, confirmed live, the more dangerous failure mode since nothing errors).
+Both `instanceParams.parseBindHosts` and the Configure panel's "Network" checkboxes now treat
+`0.0.0.0`/`::` as exclusive with everything else instead of letting that combination reach Docker.
+
 ## Phase 7 — Access control: roles, per-instance ownership, pluggable auth
 
 **Difficulty: High** — a real permission model plus a generic (not Keycloak-specific) auth abstraction.
