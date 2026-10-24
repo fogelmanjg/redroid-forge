@@ -126,6 +126,33 @@ de scrcpy que corre como app Android: **ScrcpyForAndroid**
 por red al puerto ADB de la instancia (`<ip-del-server>:<adbPort>`) y decodifica el video ahí,
 sin necesitar una PC de por medio.
 
+### Un script de conexión, en vez de tipear el comando de arriba cada vez
+
+`scripts/connect.sh` (Linux/macOS) y `scripts/connect.ps1` (Windows PowerShell) leen
+`GET /api/instances` solos, muestran un menú con las instancias corriendo (o los dispositivos USB
+de esta PC), recuerdan tu última elección, y lanzan `scrcpy` ya con los flags de arriba aplicados:
+
+```bash
+scripts/connect.sh                                          # default http://localhost:8080
+REDROID_FORGE_URL=http://<ip-del-server>:8080 scripts/connect.sh  # redroid-forge en otra PC
+```
+
+```powershell
+powershell -File scripts\connect.ps1
+```
+
+Deliberadamente **no hay ningún visor web embebido** (sin Caddy, sin reverse proxy, sin stack de
+auth que armar) — el script de conexión más un cliente de scrcpy es toda la dependencia. Si
+preferís un cliente interactivo más prolijo (además de, o en vez de, estos scripts), mirá
+[**scrcpy-manager**](https://git.liaima.dev/liaima/scrcpy-manager) (una interfaz de terminal con
+mouse, perfiles de conexión guardados, y varias sesiones de scrcpy en vivo a la vez) — un proyecto
+aparte que no empaquetamos, pero una de sus ideas (recuperar un puerto ADB fijo tras reiniciar el
+dispositivo) está reflejada en estos scripts.
+
+¿Primera vez que te choca un problema de scrcpy (sin audio, video entrecortado, bitrate mal)? Ver
+[`docs/SCRCPY-TIPS.es.md`](docs/SCRCPY-TIPS.es.md) — los problemas que de verdad aparecen, más los
+atajos que vale la pena conocer, sin el manual completo.
+
 ## Estructura
 
 ```
@@ -143,8 +170,11 @@ backend/data/             estado persistente (instances.json, module-acceptances
 backend/test/             tests (node --test, sin dependencias nuevas)
 android/                  componentes Codec2 (encoder y decoders por hardware) y sus herramientas de prueba
 frontend/                 frontend vanilla (sin build step); contracts.js = modal de contrato genérico
+scripts/                 connect.sh / connect.ps1 -- scripts de conexión scrcpy para el usuario final
+                          (no confundir con backend/scripts/, que es tooling dev/admin)
 docs/                     REQUIREMENTS (qué y por qué), ARCHITECTURE (cómo encajan las
-                          piezas), KNOWN-COMBINATIONS y ROADMAP (en qué orden)
+                          piezas), KNOWN-COMBINATIONS, ROADMAP (en qué orden) y SCRCPY-TIPS
+                          (troubleshooting del lado cliente)
 ```
 
 ## Créditos y atribución
