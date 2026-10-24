@@ -386,6 +386,15 @@ function buildDeviceProfileChip(inst) {
   chip.textContent = `profile: ${current === 'redroid' ? t('instances.deviceProfile.default') : current}`;
   return chip;
 }
+function buildNetworkChip(inst) {
+  const hosts = inst.bindHosts && inst.bindHosts.length ? inst.bindHosts : ['127.0.0.1'];
+  const localOnly = hosts.every((h) => h === '127.0.0.1' || h === '::1');
+  const chip = document.createElement('span');
+  chip.className = `resource-chip${localOnly ? '' : ' resource-chip-warn'}`;
+  chip.textContent = `net: ${hosts.join(', ')}`;
+  chip.title = localOnly ? t('instances.network.localOnlyHint') : t('instances.network.exposedHint');
+  return chip;
+}
 
 // The one panel for everything that interrupts the instance to apply (recreate: display/gpu
 // mode/hwenc/hwdec/wifi-interno -- restart: device profile). Replaces the four previously
@@ -498,6 +507,63 @@ function buildRestartEditRow(inst) {
   wifiWrap.appendChild(document.createTextNode(t('instances.wifiInterno.label')));
   panel.appendChild(wifiWrap);
 
+  // --- Network: which host interfaces this instance's ADB port binds to (docs/ROADMAP.md
+  // Phase 6). Multi-select for any combination of specific addresses (e.g. localhost and a
+  // Tailscale IP together) -- except "All interfaces (0.0.0.0)", which is not additive with
+  // anything else: confirmed live that Docker either rejects binding 0.0.0.0 and a specific
+  // address on the same port at once, or worse, silently publishes no port at all. Checking it
+  // disables (and the backend independently collapses) every other option, so the UI never
+  // promises a combination that cannot actually work. `redroid` itself has no access control,
+  // so anything beyond localhost gets a visible warning that updates live, never a hard block.
+  const netHeader = document.createElement('div');
+  netHeader.className = 'resources-edit-header';
+  netHeader.textContent = t('instances.configure.networkHeader');
+  panel.appendChild(netHeader);
+
+  const currentBindHosts = inst.bindHosts && inst.bindHosts.length ? inst.bindHosts : ['127.0.0.1'];
+  const netOptions = [{ address: '127.0.0.1', label: t('instances.network.localhost') }];
+  for (const i of (networkInterfacesCache || [])) {
+    if (i.address === '127.0.0.1' || i.internal) continue;
+    netOptions.push({ address: i.address, label: `${i.iface} (${i.address})` });
+  }
+  netOptions.push({ address: '0.0.0.0', label: t('instances.network.allInterfaces') });
+
+  const netChecks = [];
+  for (const opt of netOptions) {
+    const wrap = document.createElement('label');
+    wrap.className = 'display-edit-field';
+    wrap.style.flexDirection = 'row';
+    const chk = document.createElement('input');
+    chk.type = 'checkbox';
+    chk.checked = currentBindHosts.includes(opt.address);
+    netChecks.push({ address: opt.address, chk });
+    wrap.appendChild(chk);
+    wrap.appendChild(document.createTextNode(opt.label));
+    panel.appendChild(wrap);
+  }
+  const allIfacesCheck = netChecks.find(({ address }) => address === '0.0.0.0');
+  const updateNetExclusivity = () => {
+    const allChecked = allIfacesCheck.chk.checked;
+    for (const { address, chk } of netChecks) {
+      if (address === '0.0.0.0') continue;
+      chk.disabled = allChecked;
+      if (allChecked) chk.checked = false;
+    }
+  };
+  allIfacesCheck.chk.addEventListener('change', updateNetExclusivity);
+  updateNetExclusivity();
+
+  const netWarn = document.createElement('div');
+  netWarn.className = 'resources-warn resources-warn-error';
+  netWarn.textContent = t('instances.network.warnExposed');
+  const updateNetWarn = () => {
+    const anyNonLocal = netChecks.some(({ address, chk }) => chk.checked && address !== '127.0.0.1');
+    netWarn.style.display = anyNonLocal ? '' : 'none';
+  };
+  for (const { chk } of netChecks) chk.addEventListener('change', updateNetWarn);
+  updateNetWarn();
+  panel.appendChild(netWarn);
+
   // --- Optional modules: gapps/arm-translation (hardcoded, same as the create form) plus
   // whatever stage-7 "user modules" the catalog has (CIFI today, see loadUserModulesCache) --
   // full parity with what the create form already lets you choose, just reachable after the
@@ -557,6 +623,8 @@ function buildRestartEditRow(inst) {
       if (gappsChk.checked) modules.push('gapps');
       if (armChk.checked) modules.push('arm-translation');
       for (const { id, chk } of userModuleChecks) if (chk.checked) modules.push(id);
+      const bindHosts = netChecks.filter(({ chk }) => chk.checked).map(({ address }) => address);
+      if (bindHosts.length === 0) { alert(t('instances.network.selectAtLeastOne')); return; }
       await applyInstanceConfig(inst.id, {
         width: Number(inputs.width.value),
         height: Number(inputs.height.value),
@@ -564,6 +632,7 @@ function buildRestartEditRow(inst) {
         fps: Number(inputs.fps.value),
         gpuMode: gpuSelect.value,
         modules,
+        bindHosts,
       });
       openRestartId = null;
     } catch (e) {
@@ -685,6 +754,16 @@ async function loadUserModulesCache() {
     (list) => list.filter((m) => Array.isArray(m.etapa) && m.etapa.includes(7)),
   ).catch(() => []);
   return userModulesCache;
+}
+
+// Host network interfaces (docs/ROADMAP.md Phase 6), for the Configure panel's "Network"
+// sub-section -- same lazy-fetch-once pattern as loadUserModulesCache, the host's interface
+// list does not change per instance.
+let networkInterfacesCache = null;
+async function loadNetworkInterfacesCache() {
+  if (networkInterfacesCache !== null) return networkInterfacesCache;
+  networkInterfacesCache = await api('/network/interfaces').catch(() => []);
+  return networkInterfacesCache;
 }
 let backupsCache = null; // not per-instance -- GET /api/backups is a global list (see backend/src/routes/backups.js); null means "not fetched yet", reset to null after a create/restore so the next render picks up the change.
 
@@ -919,6 +998,7 @@ async function loadInstances({ silent = false } = {}) {
       secondary.appendChild(buildResourcesChips(inst));
       secondary.appendChild(buildCodecChips(inst));
       secondary.appendChild(buildWifiInternoChip(inst));
+      secondary.appendChild(buildNetworkChip(inst));
       secondary.appendChild(buildModulesCell(inst));
       secondary.appendChild(buildSupportCell(inst));
       const androidIdSpan = document.createElement('span');
@@ -978,9 +1058,9 @@ async function loadInstances({ silent = false } = {}) {
       configureBtn.addEventListener('click', async () => {
         const opening = openRestartId !== inst.id;
         openRestartId = opening ? inst.id : null;
-        if (opening && userModulesCache === null) {
+        if (opening && (userModulesCache === null || networkInterfacesCache === null)) {
           loadInstances({ silent: true }); // shows the panel's "loading" state while this resolves
-          await loadUserModulesCache();
+          await Promise.all([loadUserModulesCache(), loadNetworkInterfacesCache()]);
         }
         loadInstances({ silent: true });
       });

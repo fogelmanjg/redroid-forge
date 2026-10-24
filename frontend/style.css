@@ -171,6 +171,7 @@ header nav { flex: 1; }
   margin: 0.1rem 0;
 }
 .resource-chip:hover { border-color: var(--accent); }
+.resource-chip-warn { border-color: var(--warn); color: var(--warn); }
 .modules-cell-chips { display: flex; flex-wrap: wrap; gap: 0.2rem; max-width: 16rem; }
 .modules-cell-chips .resource-chip { cursor: default; margin: 0; }
 .modules-cell-chips .resource-chip:hover { border-color: var(--border); }

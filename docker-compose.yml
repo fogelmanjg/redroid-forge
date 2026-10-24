@@ -13,6 +13,10 @@ services:
     network_mode: host
     environment:
       - PORT=${PORT:-8080}
+      # Localhost-only by default (docs/ROADMAP.md Phase 6) -- there is no auth yet (Phase 7),
+      # so whoever can reach this is able to create/delete/operate every instance. Set to
+      # 0.0.0.0 or a specific interface address only once that risk is actually wanted.
+      - REDROID_FORGE_BIND_HOST=${REDROID_FORGE_BIND_HOST:-127.0.0.1}
       - ADB_PORT_START=${ADB_PORT_START:-5555}
       - ADB_PORT_END=${ADB_PORT_END:-5595}
       # Only needed to really validate/use the hwenc module (see

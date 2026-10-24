@@ -18,7 +18,7 @@ async function listLocalImageTags() {
 // this with Privileged:true instead of listing /dev/dri by hand (see
 // instance-orchestrator.service.ts:170), and the same criterion is kept here.
 async function create({
-  name, image, cmd, binds, adbPort, memoryMb, cpusetCpus,
+  name, image, cmd, binds, adbPort, memoryMb, cpusetCpus, bindHosts = ['127.0.0.1'],
 }) {
   const container = await docker.createContainer({
     name,
@@ -27,7 +27,11 @@ async function create({
     HostConfig: {
       Privileged: true,
       Binds: binds,
-      PortBindings: { '5555/tcp': [{ HostIp: '0.0.0.0', HostPort: String(adbPort) }] },
+      // Localhost-only by default (docs/ROADMAP.md Phase 6) -- redroid itself has no access
+      // control, so whatever can reach this port owns the instance. One entry per host
+      // interface the caller opted into (instanceParams.parseBindHosts): Docker supports
+      // binding the same container port to several host interfaces at once.
+      PortBindings: { '5555/tcp': bindHosts.map((HostIp) => ({ HostIp, HostPort: String(adbPort) })) },
       RestartPolicy: { Name: 'unless-stopped' },
       // MemorySwap == Memory (not left to Docker's own default, and not -1/unlimited): a cap
       // with unlimited swap behind it is not really a hard cap -- Android can keep growing

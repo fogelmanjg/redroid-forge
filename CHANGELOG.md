@@ -21,6 +21,18 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
 
 ## [Unreleased]
 
+### Added
+
+- Network exposure, local by default (`docs/ROADMAP.md` Phase 6): the app itself now binds to
+  `127.0.0.1` by default (`REDROID_FORGE_BIND_HOST` to override), and so does every instance's ADB
+  port (`dockerRuntime.create`'s `bindHosts`, previously hardcoded to `0.0.0.0` -- reachable from
+  every host interface by default, with `redroid` itself having no access control of its own). A new
+  "Network" sub-section in the instance Configure panel lists the host's real interfaces
+  (`GET /api/network/interfaces`) and lets each instance opt into any combination of them, with a
+  live warning once anything beyond localhost is selected. "All interfaces (0.0.0.0)" is mutually
+  exclusive with the rest (confirmed live that Docker does not support binding both at once for the
+  same port -- it is a superset, not an addition).
+
 ## [0.1.0] - 2026-10-24
 
 First tagged release. Covers Phases 0-5 of `docs/ROADMAP.md` plus everything built on top of them since.

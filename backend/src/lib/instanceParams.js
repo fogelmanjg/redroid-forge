@@ -89,6 +89,45 @@ function parseGpuMode(body = {}) {
   return { gpuMode: raw };
 }
 
+// Which host interfaces an instance's ADB port binds to (dockerRuntime.create's `bindHosts` --
+// see docs/ROADMAP.md Phase 6). `redroid` itself has no access control of its own, so the
+// default has to be the safe one: localhost only, nobody else on the LAN/Internet can even see
+// the port. Docker supports binding the same container port to several host interfaces at once
+// (an array of {HostIp, HostPort}), so this is a list, not a single value. Only the shape of
+// each address is checked here (IPv4/IPv6-looking), same "defense in depth, not a topology
+// check" reasoning as cpusetCpus above -- Docker itself rejects an address that is not really
+// one of the host's own.
+const DEFAULT_BIND_HOSTS = ['127.0.0.1'];
+const IP_SHAPE_RE = /^[0-9a-fA-F:.]{2,45}$/;
+
+// -> string[]. `fallback`: DEFAULT_BIND_HOSTS at creation, an existing instance's own current
+// `bindHosts` when editing one (so changing just the display settings does not silently reset
+// network exposure back to localhost). Throws Error with httpStatus 400.
+function parseBindHosts(body = {}, fallback = DEFAULT_BIND_HOSTS) {
+  const raw = body.bindHosts;
+  if (raw === undefined || raw === null) return fallback;
+  if (!Array.isArray(raw) || raw.length === 0) {
+    throw httpError('"bindHosts" must be a non-empty array of IP addresses', 400);
+  }
+  const out = [];
+  for (const h of raw) {
+    if (typeof h !== 'string' || !IP_SHAPE_RE.test(h)) {
+      throw httpError(`"bindHosts" contains an invalid address: ${JSON.stringify(h)}`, 400);
+    }
+    out.push(h);
+  }
+  // 0.0.0.0 (or IPv6's ::) already covers every other address on the list, including
+  // 127.0.0.1 -- binding both at once is not "localhost + everything", it is the SAME port
+  // claimed twice. Confirmed live (24/10/2026): Docker rejects this outright through the CLI
+  // ("address already in use"), and through the Engine API (what dockerode uses) it is worse --
+  // no error at all, the container starts with NO port published, silently. Collapsing to the
+  // wildcard alone avoids ever sending Docker that combination.
+  if (out.includes('0.0.0.0')) return ['0.0.0.0'];
+  if (out.includes('::')) return ['::'];
+  return out;
+}
+
 module.exports = {
   parseDisplay, DEFAULTS, LIMITS, parseResources, MEMORY_MB_LIMITS, CPUSET_RE, parseGpuMode, GPU_MODES,
+  parseBindHosts, DEFAULT_BIND_HOSTS,
 };

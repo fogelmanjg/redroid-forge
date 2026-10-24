@@ -247,6 +247,7 @@ router.post('/', async (req, res) => {
     const display = instanceParams.parseDisplay(req.body);
     const resources = instanceParams.parseResources(req.body);
     const gpuModeChoice = instanceParams.parseGpuMode(req.body);
+    const bindHosts = instanceParams.parseBindHosts(req.body);
     if (!name || !imageId) throw httpError('name and imageId are required', 400);
     // The same pattern the UI enforces: the name ends up in container and volume names.
     if (typeof name !== 'string' || !/^[a-z0-9][a-z0-9-]{0,39}$/.test(name)) {
@@ -288,6 +289,7 @@ router.post('/', async (req, res) => {
       cmd,
       binds,
       adbPort,
+      bindHosts,
       ...resources,
     });
 
@@ -326,6 +328,7 @@ router.post('/', async (req, res) => {
       gpuMode: img.gpuMode,
       memoryMb: resources.memoryMb || null,
       cpusetCpus: resources.cpusetCpus || null,
+      bindHosts,
       androidId: null,
       androidIdRegisteredAt: null,
       createdAt: new Date().toISOString(),
@@ -513,6 +516,7 @@ router.post('/:id/display', async (req, res) => {
   try {
     const display = instanceParams.parseDisplay(req.body, instance.display);
     const gpuModeChoice = instanceParams.parseGpuMode(req.body);
+    const bindHosts = instanceParams.parseBindHosts(req.body, instance.bindHosts || instanceParams.DEFAULT_BIND_HOSTS);
     const catalogImg = catalog.find((i) => i.id === instance.imageId);
     if (!catalogImg) {
       throw httpError(`Image "${instance.imageId}" of this instance was not found in the catalog -- it cannot be recreated.`, 409);
@@ -572,6 +576,7 @@ router.post('/:id/display', async (req, res) => {
       cmd,
       binds,
       adbPort: instance.adbPort,
+      bindHosts,
       memoryMb: instance.memoryMb,
       cpusetCpus: instance.cpusetCpus,
     });
@@ -594,6 +599,7 @@ router.post('/:id/display', async (req, res) => {
       ...instance,
       containerId,
       display,
+      bindHosts,
       gpuMode: img.gpuMode,
       requiredModuleIds,
       needsHwsimWifi: !!img.needsHwsimWifi || requiredModuleIds.includes('wifi-interno'),
