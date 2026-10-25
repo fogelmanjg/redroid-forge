@@ -17,6 +17,7 @@
       <button class="tab-btn" data-tab="help" data-i18n="nav.help">Help</button>
       <button class="tab-btn" data-tab="settings" data-i18n="nav.settings">Settings</button>
       <button class="tab-btn" id="nav-users-btn" data-tab="users" data-i18n="nav.users" hidden>Users</button>
+      <button class="tab-btn" id="nav-identities-btn" data-tab="identities" data-i18n="nav.identities" hidden>Identities</button>
     </nav>
     <span id="current-user-info" class="muted" hidden></span>
     <button id="btn-logout" class="secondary" data-i18n="auth.logout" hidden>Log out</button>
@@ -99,6 +100,16 @@ gunzip -c image.tar.gz | docker load</pre>
           <p class="muted" data-i18n="settings.netIfaces.hint"></p>
           <ul id="settings-net-ifaces-list" class="doctor-list"></ul>
         </fieldset>
+        <fieldset class="display-fields" id="settings-operator-pool-fieldset" hidden>
+          <legend data-i18n="settings.operatorPool.legend">Shared quota across every operator (optional)</legend>
+          <p class="muted" data-i18n="settings.operatorPool.hint"></p>
+          <label><span data-i18n="quotas.vcpuLabel">Max vCPUs</span>
+            <input type="number" min="1" id="settings-pool-max-vcpus" placeholder="unlimited" />
+          </label>
+          <label><span data-i18n="quotas.ramLabel">Max RAM (MB)</span>
+            <input type="number" min="1" step="256" id="settings-pool-max-memory-mb" placeholder="unlimited" />
+          </label>
+        </fieldset>
         <div class="dialog-actions">
           <button type="submit" data-i18n="settings.save">Save</button>
           <span id="settings-saved" class="muted" hidden data-i18n="settings.saved">Saved.</span>
@@ -113,6 +124,14 @@ gunzip -c image.tar.gz | docker load</pre>
         <button id="btn-refresh-users" data-i18n="common.refresh">Refresh</button>
       </div>
       <ul id="users-list" class="doctor-list"></ul>
+    </section>
+
+    <section id="tab-identities" class="tab">
+      <p class="tab-intro" data-i18n="identities.intro"></p>
+      <div class="toolbar">
+        <button id="btn-refresh-identities" data-i18n="common.refresh">Refresh</button>
+      </div>
+      <ul id="identities-list" class="doctor-list"></ul>
     </section>
   </main>
 
@@ -205,7 +224,7 @@ gunzip -c image.tar.gz | docker load</pre>
     </form>
     <div id="login-oidc">
       <h2 data-i18n="auth.loginTitle">Log in</h2>
-      <a href="/api/auth/oidc/login" class="link-btn" data-i18n="auth.loginSso">Log in via SSO</a>
+      <div id="login-oidc-providers"></div>
     </div>
   </dialog>
 

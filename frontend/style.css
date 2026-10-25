@@ -92,6 +92,8 @@ th, td { text-align: left; padding: 0.5rem; border-bottom: 1px solid var(--borde
   margin-top: 0.5rem;
 }
 
+.quota-input { width: 4.5em; margin-left: 0.4rem; }
+
 .status-dot { width: 0.7rem; height: 0.7rem; border-radius: 50%; display: inline-block; }
 .status-dot.ok { background: var(--ok); }
 .status-dot.warn { background: var(--warn); }

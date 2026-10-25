@@ -11,6 +11,7 @@ function switchTab(name) {
   if (name === 'doctor') loadDoctor();
   if (name === 'settings') loadSettings();
   if (name === 'users') loadUsers();
+  if (name === 'identities') loadIdentities();
 }
 
 $$('.tab-btn').forEach((btn) => btn.addEventListener('click', () => switchTab(btn.dataset.tab)));
@@ -131,6 +132,18 @@ async function loadHostCoreCount() {
 // options, so it was deliberately left out of this split.
 let openNoRestartId = null;
 let openRestartId = null;
+let openOwnersId = null;
+// {id, username} for every known account/identity -- fetched lazily the first time the Owners
+// panel opens (see its toggle button below), same pattern as userModulesCache/
+// networkInterfacesCache for the other edit panels.
+let directoryCache = null;
+async function loadDirectoryCache() {
+  try {
+    directoryCache = await api('/auth/directory');
+  } catch {
+    directoryCache = [];
+  }
+}
 
 // "0,1,8,9" or "0-3" (Docker's own cpuset syntax, see instanceParams.js) -> Set of core
 // numbers, for the checkbox grid and conflict detection below.
@@ -171,6 +184,151 @@ function buildResourcesChips(inst) {
 // jg-dashboard's "edit-row" (an inline panel in the table flow, not a modal). `allInstances`
 // is only used to compute cpuset conflicts against the OTHER rows already loaded, nothing of
 // its own is fetched here.
+// Owners (who can see/use this instance -- a list since 25/10/2026, e.g. a household's shared
+// TV instance) + createdId attribution (who the quota, backend's quotas.js, counts against) --
+// docs/ROADMAP.md Phase 7. Pure metadata, no Docker/restart involved, so it is its own
+// lightweight panel rather than grouped with Resources/Configure. `directory`: {id, username}
+// pairs from GET /auth/directory, used to show real names instead of opaque ids.
+function buildOwnersEditRow(inst, directory) {
+  const tr = document.createElement('tr');
+  tr.className = 'edit-row';
+  const td = document.createElement('td');
+  td.colSpan = 1;
+  const panel = document.createElement('div');
+  panel.className = 'resources-edit-panel';
+
+  const byId = new Map((directory || []).map((d) => [d.id, d.username]));
+  const nameOf = (id) => byId.get(id) || id;
+  const owners = inst.ownerId || [];
+
+  const ownersHeader = document.createElement('div');
+  ownersHeader.className = 'resources-edit-header';
+  ownersHeader.textContent = t('instances.owners.header');
+  panel.appendChild(ownersHeader);
+
+  const list = document.createElement('ul');
+  list.className = 'doctor-list';
+  for (const ownerId of owners) {
+    const li = document.createElement('li');
+    const span = document.createElement('span');
+    span.textContent = nameOf(ownerId);
+    li.appendChild(span);
+    const rm = document.createElement('button');
+    rm.type = 'button';
+    rm.className = 'secondary';
+    rm.textContent = t('instances.owners.remove');
+    rm.disabled = owners.length <= 1; // never allowed to leave the list empty
+    rm.title = rm.disabled ? t('instances.owners.lastOwnerHint') : '';
+    rm.addEventListener('click', async () => {
+      try {
+        await api(`/instances/${inst.id}/owners`, {
+          method: 'PUT',
+          body: JSON.stringify({ ownerIds: owners.filter((id) => id !== ownerId) }),
+        });
+        await loadInstances({ silent: true });
+      } catch (e) {
+        alert(e.message);
+      }
+    });
+    li.appendChild(rm);
+    list.appendChild(li);
+  }
+  if (owners.length === 0) {
+    const li = document.createElement('li');
+    li.className = 'muted';
+    li.textContent = t('instances.owners.none');
+    list.appendChild(li);
+  }
+  panel.appendChild(list);
+
+  const addRow = document.createElement('div');
+  const select = document.createElement('select');
+  const blankOpt = document.createElement('option');
+  blankOpt.value = '';
+  blankOpt.textContent = t('instances.owners.addPlaceholder');
+  select.appendChild(blankOpt);
+  for (const d of directory || []) {
+    if (owners.includes(d.id)) continue;
+    const opt = document.createElement('option');
+    opt.value = d.id;
+    opt.textContent = d.username;
+    select.appendChild(opt);
+  }
+  const addBtn = document.createElement('button');
+  addBtn.type = 'button';
+  addBtn.className = 'secondary';
+  addBtn.textContent = t('instances.owners.add');
+  addBtn.addEventListener('click', async () => {
+    if (!select.value) return;
+    try {
+      await api(`/instances/${inst.id}/owners`, {
+        method: 'PUT',
+        body: JSON.stringify({ ownerIds: [...owners, select.value] }),
+      });
+      await loadInstances({ silent: true });
+    } catch (e) {
+      alert(e.message);
+    }
+  });
+  addRow.appendChild(select);
+  addRow.appendChild(addBtn);
+  panel.appendChild(addRow);
+
+  // createdId -- who the quota counts against (never who can see/use it, that is ownerId just
+  // above). An operator can only claim it for THEMSELVES, and only because they already have
+  // "transfer-ownership" on this instance (gated the same way the panel's own toggle button is);
+  // admin can attribute it to anyone in the directory, including themselves (the "rescue" case
+  // that exempts an instance from every quota from then on -- see quotas.js's own comment).
+  const createdHeader = document.createElement('div');
+  createdHeader.className = 'resources-edit-header';
+  createdHeader.textContent = t('instances.owners.createdByHeader');
+  panel.appendChild(createdHeader);
+  const createdP = document.createElement('p');
+  createdP.className = 'muted';
+  createdP.textContent = t('instances.owners.createdByCurrent', { name: inst.createdId ? nameOf(inst.createdId) : t('instances.owners.nobody') });
+  panel.appendChild(createdP);
+
+  const me = AuthUi.currentUser();
+  if (me && me.role === 'admin') {
+    const adminSelect = document.createElement('select');
+    for (const d of directory || []) {
+      const opt = document.createElement('option');
+      opt.value = d.id;
+      opt.textContent = d.username;
+      opt.selected = d.id === inst.createdId;
+      adminSelect.appendChild(opt);
+    }
+    adminSelect.addEventListener('change', async () => {
+      try {
+        await api(`/instances/${inst.id}/created-by`, { method: 'PUT', body: JSON.stringify({ createdId: adminSelect.value }) });
+        await loadInstances({ silent: true });
+      } catch (e) {
+        alert(e.message);
+        adminSelect.value = inst.createdId || '';
+      }
+    });
+    panel.appendChild(adminSelect);
+  } else if (me && inst.createdId !== me.id && owners.includes(me.id)) {
+    const claimBtn = document.createElement('button');
+    claimBtn.type = 'button';
+    claimBtn.className = 'secondary';
+    claimBtn.textContent = t('instances.owners.claim');
+    claimBtn.addEventListener('click', async () => {
+      try {
+        await api(`/instances/${inst.id}/created-by`, { method: 'PUT', body: JSON.stringify({ createdId: me.id }) });
+        await loadInstances({ silent: true });
+      } catch (e) {
+        alert(e.message);
+      }
+    });
+    panel.appendChild(claimBtn);
+  }
+
+  td.appendChild(panel);
+  tr.appendChild(td);
+  return tr;
+}
+
 function buildResourcesEditRow(inst, allInstances) {
   const tr = document.createElement('tr');
   tr.className = 'edit-row';
@@ -1091,6 +1249,24 @@ async function loadInstances({ silent = false } = {}) {
         buttons.appendChild(configureBtn);
       }
 
+      if (AuthUi.can('transfer-ownership')) {
+        const ownersBtn = document.createElement('button');
+        ownersBtn.type = 'button';
+        ownersBtn.className = 'secondary';
+        ownersBtn.textContent = t('instances.owners.toggle');
+        ownersBtn.title = t('instances.owners.changeHint');
+        ownersBtn.addEventListener('click', async () => {
+          const opening = openOwnersId !== inst.id;
+          openOwnersId = opening ? inst.id : null;
+          if (opening && directoryCache === null) {
+            loadInstances({ silent: true });
+            await loadDirectoryCache();
+          }
+          loadInstances({ silent: true });
+        });
+        buttons.appendChild(ownersBtn);
+      }
+
       const storageBtn = document.createElement('button');
       storageBtn.type = 'button';
       storageBtn.className = 'secondary';
@@ -1161,6 +1337,7 @@ async function loadInstances({ silent = false } = {}) {
       rows.appendChild(trSecondary);
       if (openNoRestartId === inst.id) rows.appendChild(buildResourcesEditRow(inst, instances));
       if (openRestartId === inst.id) rows.appendChild(buildRestartEditRow(inst));
+      if (openOwnersId === inst.id) rows.appendChild(buildOwnersEditRow(inst, directoryCache));
       if (openStorageId === inst.id) rows.appendChild(buildStorageEditRow(inst));
     }
     tbody.replaceChildren(rows);
@@ -1339,6 +1516,13 @@ async function loadSettings() {
     const ifaces = await api('/network/interfaces/all');
     renderNetIfacesSettings(ifaces);
     renderAppBindHostSelect(settings.appBindHost, ifaces);
+    // Operator quotas (docs/ROADMAP.md Phase 7, 25/10/2026) only mean anything once there is
+    // more than one person -- in "none" mode the only user is the always-admin bypass, which
+    // never counts against any quota (src/lib/quotas.js), so the fieldset stays hidden there.
+    const poolFieldset = $('#settings-operator-pool-fieldset');
+    poolFieldset.hidden = AuthUi.authMode() === 'none';
+    $('#settings-pool-max-vcpus').value = settings.operatorPoolMaxVcpus || '';
+    $('#settings-pool-max-memory-mb').value = settings.operatorPoolMaxMemoryMb || '';
   } catch (e) {
     alert(e.message);
   }
@@ -1362,7 +1546,16 @@ $('#settings-form').addEventListener('submit', async (ev) => {
       else networkInterfaceOverrides[chk.dataset.iface] = chk.checked;
     }
     const appBindHost = $('#settings-app-bind-host').value || null;
-    const settings = await api('/settings', { method: 'PUT', body: JSON.stringify({ backupDir, networkInterfaceOverrides, appBindHost }) });
+    const vcpusVal = $('#settings-pool-max-vcpus').value;
+    const memVal = $('#settings-pool-max-memory-mb').value;
+    const settings = await api('/settings', {
+      method: 'PUT',
+      body: JSON.stringify({
+        backupDir, networkInterfaceOverrides, appBindHost,
+        operatorPoolMaxVcpus: vcpusVal ? Number(vcpusVal) : null,
+        operatorPoolMaxMemoryMb: memVal ? Number(memVal) : null,
+      }),
+    });
     $('#settings-backup-dir').value = settings.backupDir;
     renderAppBindHostSelect(settings.appBindHost, await api('/network/interfaces/all'));
     networkInterfacesCache = null; // the per-instance Configure panel re-fetches with the new filter next time it opens
@@ -1372,13 +1565,57 @@ $('#settings-form').addEventListener('submit', async (ev) => {
   }
 });
 
+// Per-operator resource quota fields (docs/ROADMAP.md Phase 7, 25/10/2026, see src/lib/
+// quotas.js) -- shown only on operator rows (admin has no limit, viewer can never create/
+// configure an instance so a quota on one would never do anything). Fire-and-save on change,
+// same pattern as the Identities role <select> just below: no separate "Save" button, empty =
+// unlimited for that dimension. Shared by loadUsers() and loadIdentities(), since quotas are
+// keyed by user id regardless of which auth backend produced it.
+function appendQuotaFields(li, userId, role, quotasById) {
+  if (role !== 'operator') return;
+  const q = quotasById.get(userId) || {};
+  const vcpuInput = document.createElement('input');
+  vcpuInput.type = 'number';
+  vcpuInput.min = '1';
+  vcpuInput.className = 'quota-input';
+  vcpuInput.title = t('quotas.vcpuLabel');
+  vcpuInput.placeholder = t('quotas.vcpuLabel');
+  vcpuInput.value = q.maxVcpus || '';
+  const ramInput = document.createElement('input');
+  ramInput.type = 'number';
+  ramInput.min = '1';
+  ramInput.step = '256';
+  ramInput.className = 'quota-input';
+  ramInput.title = t('quotas.ramLabel');
+  ramInput.placeholder = t('quotas.ramLabel');
+  ramInput.value = q.maxMemoryMb || '';
+  const save = async () => {
+    try {
+      await api(`/quotas/${encodeURIComponent(userId)}`, {
+        method: 'PUT',
+        body: JSON.stringify({
+          maxVcpus: vcpuInput.value ? Number(vcpuInput.value) : null,
+          maxMemoryMb: ramInput.value ? Number(ramInput.value) : null,
+        }),
+      });
+    } catch (e) {
+      alert(e.message);
+    }
+  };
+  vcpuInput.addEventListener('change', save);
+  ramInput.addEventListener('change', save);
+  li.appendChild(vcpuInput);
+  li.appendChild(ramInput);
+}
+
 // Local user management (docs/ROADMAP.md Phase 7) -- admin + "local" auth mode only, same
 // pattern as the Doctor/Modules lists (ul#...-list rebuilt from scratch on every load).
 async function loadUsers() {
   const list = $('#users-list');
   list.innerHTML = `<li class="muted">${t('common.loading')}</li>`;
   try {
-    const users = await api('/auth/users');
+    const [users, quotas] = await Promise.all([api('/auth/users'), api('/quotas')]);
+    const quotasById = new Map(quotas.map((q) => [q.userId, q]));
     list.innerHTML = '';
     if (users.length === 0) list.innerHTML = `<li class="muted">${t('users.none')}</li>`;
     for (const u of users) {
@@ -1386,6 +1623,7 @@ async function loadUsers() {
       const label = document.createElement('span');
       label.textContent = `${u.username} (${u.role})`;
       li.appendChild(label);
+      appendQuotaFields(li, u.id, u.role, quotasById);
       const delBtn = document.createElement('button');
       delBtn.type = 'button';
       delBtn.className = 'secondary';
@@ -1396,6 +1634,70 @@ async function loadUsers() {
         try {
           await api(`/auth/users/${u.id}`, { method: 'DELETE' });
           loadUsers();
+        } catch (e) {
+          alert(e.message);
+        }
+      });
+      li.appendChild(delBtn);
+      list.appendChild(li);
+    }
+  } catch (e) {
+    list.innerHTML = `<li class="fail-text">${t('common.error', { msg: e.message })}</li>`;
+  }
+}
+
+// OIDC identity/role management (docs/ROADMAP.md Phase 7, redesigned 25/10/2026) -- admin +
+// "oidc" auth mode only. Unlike loadUsers(), there is no "new" dialog: an identity only exists
+// here once it has actually logged in once (see routes/auth.js's /oidc/callback), an admin only
+// ever approves/changes/revokes one that already showed up.
+async function loadIdentities() {
+  const list = $('#identities-list');
+  list.innerHTML = `<li class="muted">${t('common.loading')}</li>`;
+  try {
+    const [identities, quotas] = await Promise.all([api('/auth/identities'), api('/quotas')]);
+    const quotasById = new Map(quotas.map((q) => [q.userId, q]));
+    list.innerHTML = '';
+    if (identities.length === 0) list.innerHTML = `<li class="muted">${t('identities.none')}</li>`;
+    for (const idn of identities) {
+      const li = document.createElement('li');
+      const label = document.createElement('span');
+      const who = `${idn.username} [${idn.providerLabel || idn.providerId || '?'}]`;
+      label.textContent = idn.role ? `${who} (${idn.role})` : `${who} — ${t('identities.pending')}`;
+      li.appendChild(label);
+
+      const roleSelect = document.createElement('select');
+      for (const value of ['', 'viewer', 'operator', 'admin']) {
+        const opt = document.createElement('option');
+        opt.value = value;
+        opt.textContent = value || t('identities.pending');
+        roleSelect.appendChild(opt);
+      }
+      roleSelect.value = idn.role || '';
+      roleSelect.addEventListener('change', async () => {
+        try {
+          await api(`/auth/identities/${encodeURIComponent(idn.externalId)}/role`, {
+            method: 'PUT',
+            body: JSON.stringify({ role: roleSelect.value || null }),
+          });
+          loadIdentities();
+        } catch (e) {
+          alert(e.message);
+          roleSelect.value = idn.role || '';
+        }
+      });
+      li.appendChild(roleSelect);
+      appendQuotaFields(li, idn.externalId, idn.role, quotasById);
+
+      const delBtn = document.createElement('button');
+      delBtn.type = 'button';
+      delBtn.className = 'secondary';
+      delBtn.textContent = t('identities.delete');
+      delBtn.disabled = AuthUi.currentUser() && AuthUi.currentUser().id === idn.externalId;
+      delBtn.addEventListener('click', async () => {
+        if (!confirm(t('identities.deleteConfirm', { username: idn.username }))) return;
+        try {
+          await api(`/auth/identities/${encodeURIComponent(idn.externalId)}`, { method: 'DELETE' });
+          loadIdentities();
         } catch (e) {
           alert(e.message);
         }
@@ -1453,6 +1755,8 @@ async function loadDoctor() {
 $('#btn-refresh-instances').addEventListener('click', loadInstances);
 $('#btn-refresh-modules').addEventListener('click', loadModules);
 $('#btn-refresh-user-modules').addEventListener('click', loadUserModulesTab);
+$('#btn-refresh-users').addEventListener('click', loadUsers);
+$('#btn-refresh-identities').addEventListener('click', loadIdentities);
 $('#btn-run-doctor').addEventListener('click', loadDoctor);
 
 const dialog = $('#new-instance-dialog');
@@ -1717,6 +2021,6 @@ AuthUi.ready.then(() => {
   setInterval(() => {
     const onInstances = $('.tab-btn.active')?.dataset.tab === 'instances';
     const dialogOpen = $$('dialog').some((d) => d.open);
-    if (onInstances && !dialogOpen && openNoRestartId === null && openRestartId === null && openStorageId === null && !document.hidden) loadInstances({ silent: true });
+    if (onInstances && !dialogOpen && openNoRestartId === null && openRestartId === null && openOwnersId === null && openStorageId === null && !document.hidden) loadInstances({ silent: true });
   }, 4000);
 });

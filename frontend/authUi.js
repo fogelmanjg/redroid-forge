@@ -23,6 +23,32 @@ const AuthUi = (() => {
   // sequence is still waiting on AuthUi.ready), so closing it would just leave a blank app.
   document.querySelector('#login-dialog').addEventListener('cancel', (e) => e.preventDefault());
 
+  // Multi-provider (docs/ROADMAP.md Phase 7, redesigned 25/10/2026): one "Log in with X" link
+  // per entry in GET /api/auth/oidc/providers (public, no login needed to see this list) --
+  // there is no single fixed "SSO" link any more, the person picks which configured trust
+  // source to use. Re-fetched every time the dialog opens rather than cached: this list can
+  // only change via a restart anyway, but re-fetching costs nothing and avoids ever showing a
+  // stale list from an earlier page load.
+  async function renderOidcProviders() {
+    const container = document.querySelector('#login-oidc-providers');
+    container.innerHTML = '';
+    let providers = [];
+    try {
+      const res = await fetch('/api/auth/oidc/providers');
+      providers = await res.json();
+    } catch {
+      // leave the container empty -- the dialog still opens, just with nothing to click; a
+      // network hiccup here is not worth a dedicated error state.
+    }
+    for (const p of providers) {
+      const a = document.createElement('a');
+      a.href = `/api/auth/oidc/${encodeURIComponent(p.id)}/login`;
+      a.className = 'link-btn';
+      a.textContent = I18n.t('auth.loginWithProvider', { provider: p.label });
+      container.appendChild(a);
+    }
+  }
+
   function showLoginDialog() {
     const dialog = document.querySelector('#login-dialog');
     const localForm = document.querySelector('#login-form-local');
@@ -30,6 +56,7 @@ const AuthUi = (() => {
     const isLocal = state.authMode === 'local';
     localForm.hidden = !isLocal;
     oidcBlock.hidden = isLocal;
+    if (!isLocal) renderOidcProviders();
     if (!dialog.open) dialog.showModal();
   }
 
@@ -88,13 +115,14 @@ const AuthUi = (() => {
     });
   }
 
-  // Header chrome (username/role, logout button, Users nav tab) -- only meaningful once
-  // `ready` has resolved, called from app.js's own boot sequence rather than here, so it runs
-  // after I18n.apply() (the labels need translated text already applied once).
+  // Header chrome (username/role, logout button, Users/Identities nav tabs) -- only meaningful
+  // once `ready` has resolved, called from app.js's own boot sequence rather than here, so it
+  // runs after I18n.apply() (the labels need translated text already applied once).
   function renderHeaderChrome() {
     const info = document.querySelector('#current-user-info');
     const logoutBtn = document.querySelector('#btn-logout');
     const usersNavBtn = document.querySelector('#nav-users-btn');
+    const identitiesNavBtn = document.querySelector('#nav-identities-btn');
     if (state.authMode === 'none') {
       info.hidden = true;
       logoutBtn.hidden = true;
@@ -104,6 +132,10 @@ const AuthUi = (() => {
       logoutBtn.hidden = false;
     }
     usersNavBtn.hidden = !(state.authMode === 'local' && isAdmin());
+    // "oidc" mode's role management (roleAssignments.js) -- see routes/auth.js's /identities
+    // routes, admin only, separate from /users because OIDC identities are never created here,
+    // only approved once they already exist from having logged in.
+    identitiesNavBtn.hidden = !(state.authMode === 'oidc' && isAdmin());
   }
 
   wireLoginForm();
