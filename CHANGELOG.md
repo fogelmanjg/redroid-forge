@@ -23,6 +23,28 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
 
 ### Added
 
+- `oidc` auth mode is now identity-only AND multi-provider. Identity-only: no provider is ever asked for
+  a role claim any more (the old `REDROID_FORGE_OIDC_ROLES_CLAIM`/`_ADMIN_ROLE`/`_OPERATOR_ROLE`/
+  `_VIEWER_ROLE` are gone). A new `backend/src/lib/roleAssignments.js` is the actual permissions backend
+  for OIDC identities: a local table keyed by a stable external id, managed through a new admin-only
+  "Identities" panel -- a brand new identity that has never logged in before has no role and cannot log
+  in until an admin approves it (deliberate; nobody gets in just by having an account on an IdP). Why:
+  identity (who someone is) and permissions (what they can do here) are kept as two separable concerns on
+  purpose now, so that a later integration (e.g. with Plenum, see `docs/ROADMAP.md` Phase 8) only has to
+  change where `roleAssignments.resolveRole()` looks, not `oidc.js`/`auth.js`/the routes. Multi-provider:
+  `REDROID_FORGE_OIDC_PROVIDERS` (a JSON array) replaces the old single
+  `REDROID_FORGE_OIDC_ISSUER_URL`/`_CLIENT_ID`/`_CLIENT_SECRET`/`_REDIRECT_URI` -- any number of trust
+  sources configured at once (Google, your own Keycloak, Plenum, another federation, ...), the login
+  screen lists every one of them and the person picks which to use; `REDROID_FORGE_OIDC_REDIRECT_BASE_URL`
+  derives each provider's own callback URL from its id, so adding one is a single JSON object, never a
+  second place to keep in sync by hand. Because a bare `sub` is only unique within one issuer's own
+  namespace, every identity's external id is the composite `${providerId}:${sub}`.
+  `REDROID_FORGE_OIDC_BOOTSTRAP_ADMIN_ID` solves the chicken-and-egg of approving the very first admin
+  (nobody else could), the same role `REDROID_FORGE_LOCAL_ADMIN_USER`/`_PASSWORD` plays for `local` mode.
+  ⚠ Breaking: any existing `REDROID_FORGE_AUTH=oidc` deployment loses every account's role on upgrade
+  (nothing maps the old role claim any more) and has to migrate its provider config to the new JSON array
+  shape -- every identity has to be re-approved once through the new Identities panel.
+
 - `meminfoFix.js`: Android inside a capped instance was always reading the HOST's full RAM from
   `/proc/meminfo` (Linux never virtualizes that file per-container), never its real cgroup memory
   limit -- so it never triggered its own proactive low-memory trimming, and the cgroup OOM killer

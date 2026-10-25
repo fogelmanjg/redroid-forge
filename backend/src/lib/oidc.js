@@ -2,9 +2,25 @@
 
 // Generic OIDC client (docs/ROADMAP.md Phase 7) -- deliberately NOT a Keycloak-specific
 // integration. Any IdP that speaks standard OIDC discovery works the same way (Keycloak,
-// Authentik, Auth0, Zitadel, ...); what differs between them is only WHERE the role claim
-// lives, which is why the claim path and the three role names are all configurable instead of
-// hardcoded to Keycloak's `realm_access.roles` convention.
+// Authentik, Auth0, Zitadel, ...).
+//
+// Multi-provider (redesigned 25/10/2026, see docs/ROADMAP.md Phase 7): a login can come from ANY
+// number of configured trust sources at once -- the user's own framing was "ask Keycloak, ask
+// Google, ask Plenum, ask Rio Negro's federation, whichever one actually vouches for this person
+// right now". `REDROID_FORGE_OIDC_PROVIDERS` is a JSON array, one entry per source; the login
+// screen lists all of them (GET /api/auth/oidc/providers), the person picks one, and ONLY that
+// one is ever asked to prove anything -- OIDC has no "ask provider X if person Y is real" query
+// outside of an actual login by that person; a provider only ever vouches for whoever is sitting
+// in front of it right now, during its own flow.
+//
+// Still IDENTITY ONLY (see the 25/10/2026 single-provider redesign this built on): no provider's
+// role/group claims are ever read. All any provider hands back is a stable external id and a
+// display name -- roleAssignments.js is where that id gets turned into an actual permission,
+// completely independent of which provider vouched for it.
+//
+// Because the SAME `sub` value is only unique WITHIN one issuer's own namespace (two different
+// providers can hand out the same `sub` to two different real people), every identity's external
+// id is `${providerId}:${sub}`, never the bare `sub` -- see handleCallback.
 //
 // openid-client is pinned to the last v5.x release (5.7.1), not the current major: v6 rewrote
 // the package as ESM-only, and this backend is plain CommonJS with no build step by design (see
@@ -13,121 +29,175 @@
 // is the actual point of using a real library here instead of hand-rolling OIDC crypto.
 
 const { Issuer, generators } = require('openid-client');
-const { isValidRole } = require('./permissions');
 
-function config() {
-  return {
-    issuerUrl: process.env.REDROID_FORGE_OIDC_ISSUER_URL || '',
-    clientId: process.env.REDROID_FORGE_OIDC_CLIENT_ID || '',
-    clientSecret: process.env.REDROID_FORGE_OIDC_CLIENT_SECRET || '',
-    redirectUri: process.env.REDROID_FORGE_OIDC_REDIRECT_URI || '',
-    // Dotted path into the ID token/userinfo claims where role names live -- Keycloak's own
-    // default location (realm_access.roles) is a sane default, but this is NOT Keycloak-
-    // specific: an IdP that puts a flat array in `roles` just sets this to "roles" instead.
-    rolesClaimPath: process.env.REDROID_FORGE_OIDC_ROLES_CLAIM || 'realm_access.roles',
-    adminRole: process.env.REDROID_FORGE_OIDC_ADMIN_ROLE || 'redroid-forge-admin',
-    operatorRole: process.env.REDROID_FORGE_OIDC_OPERATOR_ROLE || 'redroid-forge-operator',
-    viewerRole: process.env.REDROID_FORGE_OIDC_VIEWER_ROLE || 'redroid-forge-viewer',
-  };
+const PROVIDER_ID_RE = /^[a-z0-9][a-z0-9-]{0,31}$/;
+
+// REDROID_FORGE_OIDC_REDIRECT_BASE_URL + "/api/auth/oidc/<id>/callback" is every provider's
+// redirect URI -- deriving it instead of asking for a full URL per provider is the whole reason
+// adding a provider is "one JSON object with 4 fields", not "register a callback URL by hand
+// with every IdP's console AND also tell this app about it separately, twice, trying to keep
+// them in sync".
+function redirectBaseUrl() {
+  return (process.env.REDROID_FORGE_OIDC_REDIRECT_BASE_URL || '').replace(/\/+$/, '');
+}
+
+// -> every syntactically valid provider from REDROID_FORGE_OIDC_PROVIDERS, silently dropping
+// anything malformed (same forgiving posture as jsonFileStore's readJsonArray) rather than
+// crashing the whole app over one bad entry -- logged, not silent, so a typo is still visible at
+// startup. Re-parsed on every call (cheap; this is not on any hot path) rather than cached, so a
+// restart is the only thing needed to pick up a config change, same as every other env var here.
+function listProviders() {
+  const raw = process.env.REDROID_FORGE_OIDC_PROVIDERS || '';
+  if (!raw.trim()) return [];
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (e) {
+    console.warn(`redroid-forge: REDROID_FORGE_OIDC_PROVIDERS is not valid JSON (${e.message}) -- no OIDC providers available.`);
+    return [];
+  }
+  if (!Array.isArray(parsed)) {
+    console.warn('redroid-forge: REDROID_FORGE_OIDC_PROVIDERS must be a JSON array -- no OIDC providers available.');
+    return [];
+  }
+  const base = redirectBaseUrl();
+  const seen = new Set();
+  const providers = [];
+  for (const entry of parsed) {
+    const { id, label, issuerUrl, clientId, clientSecret } = entry || {};
+    if (typeof id !== 'string' || !PROVIDER_ID_RE.test(id)) {
+      console.warn(`redroid-forge: skipping an OIDC provider with an invalid "id" (${JSON.stringify(id)}) -- must be lowercase letters/digits/"-", 1-32 chars.`);
+      continue;
+    }
+    if (seen.has(id)) {
+      console.warn(`redroid-forge: skipping a duplicate OIDC provider id "${id}".`);
+      continue;
+    }
+    if (typeof label !== 'string' || !label || typeof issuerUrl !== 'string' || !issuerUrl || typeof clientId !== 'string' || !clientId) {
+      console.warn(`redroid-forge: skipping OIDC provider "${id}" -- "label", "issuerUrl" and "clientId" are all required.`);
+      continue;
+    }
+    if (!base) {
+      console.warn(`redroid-forge: skipping OIDC provider "${id}" -- REDROID_FORGE_OIDC_REDIRECT_BASE_URL is not set.`);
+      continue;
+    }
+    seen.add(id);
+    providers.push({
+      id,
+      label,
+      issuerUrl,
+      clientId,
+      clientSecret: typeof clientSecret === 'string' && clientSecret ? clientSecret : '',
+      redirectUri: `${base}/api/auth/oidc/${id}/callback`,
+    });
+  }
+  return providers;
+}
+
+function getProvider(id) {
+  return listProviders().find((p) => p.id === id);
 }
 
 function isEnabled() {
-  const c = config();
-  return !!(c.issuerUrl && c.clientId && c.redirectUri);
+  return listProviders().length > 0;
 }
 
-function getByPath(obj, dottedPath) {
-  return dottedPath.split('.').reduce((acc, key) => (acc && typeof acc === 'object' ? acc[key] : undefined), obj);
-}
-
-// -> 'admin' | 'operator' | 'viewer'. Deliberately defaults to the LEAST privileged role when
-// the claim is missing or matches none of the three configured role names -- unlike a missing
-// local-account role (which cannot happen, createUser validates it), an IdP's claims are data
-// from outside this project, and defaulting to viewer is the safe failure direction (never
-// silently admin). Pure, independent of any live IdP -- unit-tested without one.
-function mapRole(claims) {
-  const c = config();
-  const raw = getByPath(claims || {}, c.rolesClaimPath);
-  const roles = Array.isArray(raw) ? raw : [];
-  if (roles.includes(c.adminRole)) return 'admin';
-  if (roles.includes(c.operatorRole)) return 'operator';
-  if (roles.includes(c.viewerRole)) return 'viewer';
-  return 'viewer';
-}
-
-let cachedClient = null;
-async function getClient() {
-  if (cachedClient) return cachedClient;
-  const c = config();
-  const issuer = await Issuer.discover(c.issuerUrl);
-  cachedClient = new issuer.Client({
-    client_id: c.clientId,
-    ...(c.clientSecret ? { client_secret: c.clientSecret } : { token_endpoint_auth_method: 'none' }),
-    redirect_uris: [c.redirectUri],
+// One cached openid-client per provider id -- discovery is a real network round trip, not
+// something to repeat on every login attempt. Keyed by id, not by config contents: a changed
+// env var only takes effect after a restart anyway (see listProviders' own comment), so there is
+// no "stale cache" case to defend against here beyond what a restart already clears.
+const cachedClients = new Map();
+async function getClient(providerId) {
+  if (cachedClients.has(providerId)) return cachedClients.get(providerId);
+  const p = getProvider(providerId);
+  if (!p) throw Object.assign(new Error(`Unknown OIDC provider "${providerId}"`), { httpStatus: 404 });
+  const issuer = await Issuer.discover(p.issuerUrl);
+  const client = new issuer.Client({
+    client_id: p.clientId,
+    ...(p.clientSecret ? { client_secret: p.clientSecret } : { token_endpoint_auth_method: 'none' }),
+    redirect_uris: [p.redirectUri],
     response_types: ['code'],
   });
-  return cachedClient;
+  cachedClients.set(providerId, client);
+  return client;
 }
 
 // In-memory only (not persisted, not a new session-cookie concern) -- a login flow lives for
 // at most a couple of minutes end to end, and if the process restarts mid-flow the user just
-// retries the login link. Swept lazily on each read.
+// retries the login link. Swept lazily on each read. Keyed by `state` regardless of provider
+// (state values come from a CSPRNG, collisions across providers are not a real concern) --
+// `providerId` is still stored on the entry as a defense-in-depth cross-check in handleCallback,
+// so a callback hitting the wrong provider's route can never succeed even in theory.
 const pending = new Map();
 const PENDING_TTL_MS = 5 * 60 * 1000;
 
-function startLogin() {
+function startLogin(providerId) {
   const state = generators.state();
-  const entry = { state, codeVerifier: generators.codeVerifier(), nonce: generators.nonce(), createdAt: Date.now() };
+  const entry = {
+    state, providerId, codeVerifier: generators.codeVerifier(), nonce: generators.nonce(), createdAt: Date.now(),
+  };
   pending.set(state, entry);
   for (const [key, value] of pending) if (Date.now() - value.createdAt > PENDING_TTL_MS) pending.delete(key);
   return entry;
 }
 
-// -> the URL to redirect the browser to. The `state` embedded in it is also the lookup key
-// `handleCallback` uses to find the matching PKCE verifier/nonce -- see its own comment for why
-// that lookup is the actual CSRF defense, with no separate cookie needed for it.
-async function getAuthorizationUrl() {
-  const client = await getClient();
-  const c = config();
-  const { state, codeVerifier, nonce } = startLogin();
+// -> the URL to redirect the browser to, for whichever provider the person picked on the login
+// screen. The `state` embedded in it is also the lookup key `handleCallback` uses to find the
+// matching PKCE verifier/nonce -- see its own comment for why that lookup is the actual CSRF
+// defense, with no separate cookie needed for it.
+async function getAuthorizationUrl(providerId) {
+  const p = getProvider(providerId);
+  if (!p) throw Object.assign(new Error(`Unknown OIDC provider "${providerId}"`), { httpStatus: 404 });
+  const client = await getClient(providerId);
+  const { state, codeVerifier, nonce } = startLogin(providerId);
   const code_challenge = generators.codeChallenge(codeVerifier);
   return client.authorizationUrl({
     scope: 'openid profile',
     state,
     nonce,
-    ...(c.clientSecret ? {} : { code_challenge, code_challenge_method: 'S256' }),
+    ...(p.clientSecret ? {} : { code_challenge, code_challenge_method: 'S256' }),
   });
 }
 
-// `params`: client.callbackParams()-shaped object (query/body from the IdP's redirect) -- its
-// own `state` field is the lookup key into `pending`. Finding (and single-use consuming) an
-// entry there IS the CSRF defense: the state value is unguessable and was only ever disclosed
-// to the real browser via the real IdP redirect, so a forged callback has nothing to look up.
-// openid-client's own `client.callback()` independently re-validates state/nonce/PKCE against
-// what it stored in `checks` below -- this is defense in depth, not a redundant reimplementation
-// of what it already does.
-// -> {id, username, role} on success. Throws on anything invalid (bad/expired/replayed state,
-// bad code, token validation failure) -- the route turns that into a redirect back to a login
-// error, not a 500.
-async function handleCallback(params) {
-  const c = config();
+// `providerId`: from the callback route's own URL (".../oidc/:providerId/callback"), checked
+// against what `startLogin` recorded for this `state` -- a callback cannot be replayed against a
+// different provider's route than the one the login actually started from. `params`:
+// client.callbackParams()-shaped object (query/body from the IdP's redirect) -- its own `state`
+// field is the lookup key into `pending`. Finding (and single-use consuming) an entry there IS
+// the CSRF defense: the state value is unguessable and was only ever disclosed to the real
+// browser via the real IdP redirect, so a forged callback has nothing to look up. openid-client's
+// own `client.callback()` independently re-validates state/nonce/PKCE against what it stored in
+// `checks` below -- this is defense in depth, not a redundant reimplementation of what it already
+// does.
+// -> {id, username, providerId, providerLabel} on success -- identity only, deliberately no
+// role (see the module comment above; the caller is responsible for turning `id` into a role via
+// roleAssignments.js). `id` is `${providerId}:${sub}`, never the bare `sub` (see the module
+// comment on why). Throws on anything invalid (bad/expired/replayed state, provider mismatch, bad
+// code, token validation failure) -- the route turns that into a redirect back to a login error,
+// not a 500.
+async function handleCallback(providerId, params) {
+  const p = getProvider(providerId);
+  if (!p) throw Object.assign(new Error(`Unknown OIDC provider "${providerId}"`), { httpStatus: 404 });
   const entry = pending.get(params.state);
   pending.delete(params.state);
-  if (!entry) {
-    throw Object.assign(new Error('OIDC login state mismatch or expired -- please try logging in again.'), { httpStatus: 400 });
+  if (!entry || entry.providerId !== providerId) {
+    throw Object.assign(new Error('OIDC login state mismatch, expired, or wrong provider -- please try logging in again.'), { httpStatus: 400 });
   }
-  const client = await getClient();
-  const tokenSet = await client.callback(c.redirectUri, params, {
+  const client = await getClient(providerId);
+  const tokenSet = await client.callback(p.redirectUri, params, {
     state: entry.state,
     nonce: entry.nonce,
-    ...(c.clientSecret ? {} : { code_verifier: entry.codeVerifier }),
+    ...(p.clientSecret ? {} : { code_verifier: entry.codeVerifier }),
   });
   const claims = tokenSet.claims();
-  const role = mapRole(claims);
-  if (!isValidRole(role)) throw new Error('unreachable: mapRole always returns a valid role');
-  return { id: claims.sub, username: claims.preferred_username || claims.email || claims.sub, role };
+  return {
+    id: `${providerId}:${claims.sub}`,
+    username: claims.preferred_username || claims.email || claims.sub,
+    providerId,
+    providerLabel: p.label,
+  };
 }
 
 module.exports = {
-  isEnabled, config, mapRole, getAuthorizationUrl, handleCallback,
+  listProviders, getProvider, isEnabled, getAuthorizationUrl, handleCallback,
 };

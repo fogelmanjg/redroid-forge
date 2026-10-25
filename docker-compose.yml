@@ -56,18 +56,38 @@ services:
       - REDROID_FORGE_AUTH=${REDROID_FORGE_AUTH:-none}
       - REDROID_FORGE_LOCAL_ADMIN_USER=${REDROID_FORGE_LOCAL_ADMIN_USER:-}
       - REDROID_FORGE_LOCAL_ADMIN_PASSWORD=${REDROID_FORGE_LOCAL_ADMIN_PASSWORD:-}
-      # Generic OIDC (NOT Keycloak-specific -- backend/src/lib/oidc.js) -- only read when
-      # REDROID_FORGE_AUTH=oidc. ROLES_CLAIM/*_ROLE map whatever the IdP calls its roles onto
-      # this app's own admin/operator/viewer; the defaults below match Keycloak's own
-      # convention (realm_access.roles) but are not Keycloak-specific in any other way.
-      - REDROID_FORGE_OIDC_ISSUER_URL=${REDROID_FORGE_OIDC_ISSUER_URL:-}
-      - REDROID_FORGE_OIDC_CLIENT_ID=${REDROID_FORGE_OIDC_CLIENT_ID:-}
-      - REDROID_FORGE_OIDC_CLIENT_SECRET=${REDROID_FORGE_OIDC_CLIENT_SECRET:-}
-      - REDROID_FORGE_OIDC_REDIRECT_URI=${REDROID_FORGE_OIDC_REDIRECT_URI:-}
-      - REDROID_FORGE_OIDC_ROLES_CLAIM=${REDROID_FORGE_OIDC_ROLES_CLAIM:-realm_access.roles}
-      - REDROID_FORGE_OIDC_ADMIN_ROLE=${REDROID_FORGE_OIDC_ADMIN_ROLE:-redroid-forge-admin}
-      - REDROID_FORGE_OIDC_OPERATOR_ROLE=${REDROID_FORGE_OIDC_OPERATOR_ROLE:-redroid-forge-operator}
-      - REDROID_FORGE_OIDC_VIEWER_ROLE=${REDROID_FORGE_OIDC_VIEWER_ROLE:-redroid-forge-viewer}
+      # Generic, MULTI-PROVIDER OIDC (NOT Keycloak-specific -- backend/src/lib/oidc.js) -- only
+      # read when REDROID_FORGE_AUTH=oidc. Any number of trust sources at once (Google, your own
+      # Keycloak, Plenum, another federation's IdP, ...): the login screen lists every provider
+      # configured here, the person picks one, and ONLY that one is ever asked to vouch for them
+      # -- redesigned 25/10/2026 from a single fixed provider.
+      #
+      # REDROID_FORGE_OIDC_PROVIDERS is a JSON array, one object per source:
+      #   [{"id":"google","label":"Google","issuerUrl":"https://accounts.google.com","clientId":"..."},
+      #    {"id":"keycloak","label":"My Keycloak","issuerUrl":"https://idp.example/realms/x","clientId":"...","clientSecret":"..."}]
+      # "id" must be lowercase letters/digits/"-" (1-32 chars) -- it becomes part of that
+      # provider's callback URL and of every one of its identities' external id
+      # (`${id}:${sub}`, see oidc.js's own comment on why the `sub` alone is not enough).
+      # "clientSecret" is optional (omit it for a public/PKCE-only client). A malformed entry is
+      # just dropped (logged, not fatal) -- the rest of the array still works.
+      #
+      # REDROID_FORGE_OIDC_REDIRECT_BASE_URL (e.g. "https://redroid-forge.example") is this app's
+      # own externally-reachable base URL -- every provider's redirect URI is derived from it
+      # (base + "/api/auth/oidc/<id>/callback"), so adding a provider never means registering a
+      # second callback URL by hand to keep in sync with this file.
+      #
+      # Identity ONLY: no provider is ever asked for a role claim -- every identity that logs in
+      # starts out with NO role (backend/src/lib/roleAssignments.js, admin-only "Identities"
+      # panel) until an admin grants one. BOOTSTRAP_ADMIN_ID is that first admin's own full
+      # external id (`${providerId}:${sub}`, as it appears in data/role-assignments.json after
+      # their first login) -- the only way an instance with no existing admin could otherwise
+      # approve anyone at all, same bootstrap problem REDROID_FORGE_LOCAL_ADMIN_USER/_PASSWORD
+      # solves for "local" mode. Leave it empty once a real admin exists; it is re-checked on
+      # every login, not just once, which also lets you log in once to find your own id in that
+      # file, set this, and log in again to self-promote without restarting in between.
+      - REDROID_FORGE_OIDC_PROVIDERS=${REDROID_FORGE_OIDC_PROVIDERS:-}
+      - REDROID_FORGE_OIDC_REDIRECT_BASE_URL=${REDROID_FORGE_OIDC_REDIRECT_BASE_URL:-}
+      - REDROID_FORGE_OIDC_BOOTSTRAP_ADMIN_ID=${REDROID_FORGE_OIDC_BOOTSTRAP_ADMIN_ID:-}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - /lib/modules:/lib/modules:ro

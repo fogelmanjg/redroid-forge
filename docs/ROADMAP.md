@@ -627,13 +627,53 @@ a viewer account against the real running container — admin saw every pre-exis
 before this phase, so ownerless) while operator/viewer saw none of them; the operator created its own
 throwaway instance and could see/stop/delete it, the viewer could not see it at all (404, not 403) nor
 create one of its own (403); `none` mode re-confirmed behaviorally identical to before this phase.
+**Redesigned 25/10/2026 — OIDC is identity-only, roles are never read from the IdP.** The original design
+in step 3 above ("maps OIDC roles/claims onto the permission model") conflated two things kept separate
+on purpose from here on: proving WHO someone is (the IdP's actual job) and deciding WHAT they can do here
+(this project's own job). User-driven redesign, same motivation as this project's own federation plans
+below (Phase 8) — identity and permissions are meant to end up as two separable concerns, possibly
+resolved by two different systems, not one IdP token doing both. `oidc.js`'s `handleCallback` now returns
+only `{id, username}` (the `sub`/`preferred_username`), nothing role-shaped — `mapRole`, `rolesClaimPath`
+and the three `*_ROLE` env vars are gone. A new `roleAssignments.js` is the actual "permissions backend"
+for OIDC identities: a local table (`data/role-assignments.json`), keyed by the external id, admin-managed
+through a new "Identities" panel (parallel to the local-mode "Users" one). **A brand new identity that has
+never logged in before starts with NO role (pending) and cannot log in until an admin assigns one** —
+deliberate, confirmed with the user: nobody gets in just by having an account on the IdP.
+`REDROID_FORGE_OIDC_BOOTSTRAP_ADMIN_ID` solves the obvious chicken-and-egg (nobody could ever approve the
+very first admin otherwise) the same way `REDROID_FORGE_LOCAL_ADMIN_USER/_PASSWORD` does for `local` mode,
+except re-checked on every login rather than once, so logging in once to discover your own `sub` in the
+data file, setting the var, and logging in again works without a restart in between. **Forward-looking
+seam, not built yet:** `roleAssignments.resolveRole()` is the one function a later integration would need
+to change to delegate to a real separate permissions service (e.g. Plenum, see Phase 8's own "reusing
+Plenum's roles") instead of this local table — `oidc.js`, `auth.js` and the routes would not need to
+change at all. Verified: unit tests only (`oidc.test.js`, `roleAssignments.test.js`) — no live IdP in this
+environment, same gap as the paragraph below.
+
+**Redesigned again, same day (25/10/2026) — OIDC is also multi-provider now.** User's own framing: "ask
+Keycloak, ask Google, ask Plenum, ask Rio Negro's federation, whichever one actually vouches for this
+person right now" — any number of trust sources configured at once, picked by the person logging in, not
+one fixed provider baked into a handful of singular env vars. `REDROID_FORGE_OIDC_PROVIDERS` replaces
+`REDROID_FORGE_OIDC_ISSUER_URL`/`_CLIENT_ID`/`_CLIENT_SECRET`/`_REDIRECT_URI` with a JSON array, one object
+per source (`id`/`label`/`issuerUrl`/`clientId`/optional `clientSecret`); `REDROID_FORGE_OIDC_REDIRECT_BASE_URL`
+derives every provider's own callback URL from its `id`, so adding a provider is one JSON object, never a
+second place to register/keep a callback URL in sync by hand. The login screen fetches
+`GET /api/auth/oidc/providers` (public) and shows one "Log in with X" link per configured source.
+Because the same `sub` is only unique WITHIN one issuer's own namespace, every identity's external id is
+now the composite `${providerId}:${sub}`, never the bare `sub` — `roleAssignments.js`'s rows gained
+`providerId`/`providerLabel` (purely informational, shown in the admin "Identities" panel) but its actual
+key, bootstrap-admin matching, and everything else about role resolution is unchanged, still per full
+composite id. ⚠ Breaking, same deployment this applies to as the identity-only redesign above (none yet,
+no live IdP ever configured in this project) — `REDROID_FORGE_OIDC_BOOTSTRAP_ADMIN_ID` now has to be the
+full composite id, not a bare `sub`.
+
 **Known gap, not yet verified:** `oidc` mode's live callback against a real IdP — no IdP was available in
-this environment, so only its pure parts (role-claim mapping, PKCE/state bookkeeping) are unit-tested;
-worth a real pass against an actual Keycloak/Authentik instance before relying on it. **Also a deliberate,
-undocumented-until-now migration gap:** an instance created before this phase (or under `none` mode) has
-no `ownerId`, so once `local`/`oidc` is turned on, only admin can see or manage it — there is no "reassign
-owner" feature yet; turning on auth on an existing fleet currently means admin either keeps using it as
-admin or there is no way for a non-admin account to take any of the earlier instances over.
+this environment, so only its pure parts (enablement detection, PKCE/state bookkeeping, and now role
+assignment in isolation) are unit-tested; worth a real pass against an actual Keycloak/Authentik instance
+before relying on it. **Also a deliberate, undocumented-until-now migration gap:** an instance created
+before this phase (or under `none` mode) has no `ownerId`, so once `local`/`oidc` is turned on, only admin
+can see or manage it — there is no "reassign owner" feature yet; turning on auth on an existing fleet
+currently means admin either keeps using it as admin or there is no way for a non-admin account to take
+any of the earlier instances over.
 
 ## Phase 8 — Federation mode: `jg-dashboard` and Plenum as consumers
 

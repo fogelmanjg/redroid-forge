@@ -1,6 +1,9 @@
-// Coverage of the parts of src/lib/oidc.js that do not need a live IdP: role-claim mapping and
-// enablement detection. getAuthorizationUrl/handleCallback need a real OIDC issuer to discover
-// against and are NOT covered here -- see docs/ROADMAP.md Phase 7's note on that gap.
+// Coverage of the parts of src/lib/oidc.js that do not need a live IdP: parsing
+// REDROID_FORGE_OIDC_PROVIDERS and deriving each provider's redirect URI. getAuthorizationUrl/
+// handleCallback need a real OIDC issuer to discover against and are NOT covered here -- see
+// docs/ROADMAP.md Phase 7's note on that gap. Role mapping used to live here too (mapRole) until
+// the 25/10/2026 redesign moved role resolution out of this module entirely -- see
+// roleAssignments.test.js for that coverage now.
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
@@ -14,57 +17,73 @@ function withEnv(vars, fn) {
   }
 }
 
-// oidc.js reads env vars once per call (config() is called fresh each time, not cached), so
-// re-requiring between tests is not needed -- but isolate require() cache just in case anything
-// about openid-client itself is sensitive to load order across other suites.
 delete require.cache[require.resolve('../src/lib/oidc')];
 const oidc = require('../src/lib/oidc');
 
-test('isEnabled: false unless issuer, client id and redirect uri are all set', () => {
-  withEnv({ REDROID_FORGE_OIDC_ISSUER_URL: '', REDROID_FORGE_OIDC_CLIENT_ID: '', REDROID_FORGE_OIDC_REDIRECT_URI: '' }, () => {
+const BASE_ENV = { REDROID_FORGE_OIDC_REDIRECT_BASE_URL: 'http://localhost:8099' };
+
+test('isEnabled/listProviders: empty or unset -> no providers, disabled', () => {
+  withEnv({ ...BASE_ENV, REDROID_FORGE_OIDC_PROVIDERS: '' }, () => {
+    assert.deepEqual(oidc.listProviders(), []);
     assert.equal(oidc.isEnabled(), false);
   });
+});
+
+test('listProviders: derives each provider\'s redirectUri from the base url + its own id', () => {
   withEnv({
-    REDROID_FORGE_OIDC_ISSUER_URL: 'https://idp.example/realms/x',
-    REDROID_FORGE_OIDC_CLIENT_ID: 'redroid-forge',
-    REDROID_FORGE_OIDC_REDIRECT_URI: 'http://localhost:8099/api/auth/oidc/callback',
+    ...BASE_ENV,
+    REDROID_FORGE_OIDC_PROVIDERS: JSON.stringify([
+      { id: 'google', label: 'Google', issuerUrl: 'https://accounts.google.com', clientId: 'g-client' },
+      { id: 'keycloak', label: 'My Keycloak', issuerUrl: 'https://idp.example/realms/x', clientId: 'kc-client', clientSecret: 's3cr3t' },
+    ]),
   }, () => {
+    const providers = oidc.listProviders();
+    assert.equal(providers.length, 2);
+    assert.equal(providers[0].redirectUri, 'http://localhost:8099/api/auth/oidc/google/callback');
+    assert.equal(providers[1].redirectUri, 'http://localhost:8099/api/auth/oidc/keycloak/callback');
+    assert.equal(providers[1].clientSecret, 's3cr3t');
+    assert.equal(providers[0].clientSecret, '');
     assert.equal(oidc.isEnabled(), true);
+    assert.ok(oidc.getProvider('google'));
+    assert.equal(oidc.getProvider('nonexistent'), undefined);
   });
 });
 
-test('mapRole: Keycloak-style default claim path (realm_access.roles)', () => {
-  withEnv({}, () => {
-    assert.equal(oidc.mapRole({ realm_access: { roles: ['redroid-forge-admin', 'offline_access'] } }), 'admin');
-    assert.equal(oidc.mapRole({ realm_access: { roles: ['redroid-forge-operator'] } }), 'operator');
-    assert.equal(oidc.mapRole({ realm_access: { roles: ['redroid-forge-viewer'] } }), 'viewer');
-  });
-});
-
-test('mapRole: missing claim, empty roles, or none of the three configured names -> viewer (safe default, never admin)', () => {
-  withEnv({}, () => {
-    assert.equal(oidc.mapRole({}), 'viewer');
-    assert.equal(oidc.mapRole({ realm_access: { roles: [] } }), 'viewer');
-    assert.equal(oidc.mapRole({ realm_access: { roles: ['some-other-app-role'] } }), 'viewer');
-    assert.equal(oidc.mapRole(null), 'viewer');
-  });
-});
-
-test('mapRole: admin takes priority if a claim somehow lists more than one of the three roles', () => {
-  withEnv({}, () => {
-    assert.equal(oidc.mapRole({ realm_access: { roles: ['redroid-forge-admin', 'redroid-forge-viewer'] } }), 'admin');
-  });
-});
-
-test('mapRole: configurable claim path and role names (not Keycloak-specific)', () => {
+test('listProviders: drops an invalid id, a duplicate id, and an entry missing required fields -- keeps the rest', () => {
   withEnv({
-    REDROID_FORGE_OIDC_ROLES_CLAIM: 'roles',
-    REDROID_FORGE_OIDC_ADMIN_ROLE: 'forge-admin',
-    REDROID_FORGE_OIDC_OPERATOR_ROLE: 'forge-op',
-    REDROID_FORGE_OIDC_VIEWER_ROLE: 'forge-view',
+    ...BASE_ENV,
+    REDROID_FORGE_OIDC_PROVIDERS: JSON.stringify([
+      { id: 'Bad ID!', label: 'x', issuerUrl: 'https://a.example', clientId: 'a' },
+      { id: 'ok', label: 'Ok Provider', issuerUrl: 'https://b.example', clientId: 'b' },
+      { id: 'ok', label: 'Duplicate', issuerUrl: 'https://c.example', clientId: 'c' },
+      { id: 'missing-fields', label: 'No issuer' },
+    ]),
   }, () => {
-    assert.equal(oidc.mapRole({ roles: ['forge-admin'] }), 'admin');
-    assert.equal(oidc.mapRole({ roles: ['forge-op'] }), 'operator');
-    assert.equal(oidc.mapRole({ realm_access: { roles: ['redroid-forge-admin'] } }), 'viewer'); // wrong path now, falls to default
+    const providers = oidc.listProviders();
+    assert.equal(providers.length, 1);
+    assert.equal(providers[0].id, 'ok');
   });
+});
+
+test('listProviders: malformed JSON or a non-array -> empty, never throws', () => {
+  withEnv({ ...BASE_ENV, REDROID_FORGE_OIDC_PROVIDERS: 'not json' }, () => {
+    assert.deepEqual(oidc.listProviders(), []);
+  });
+  withEnv({ ...BASE_ENV, REDROID_FORGE_OIDC_PROVIDERS: '{"not":"an array"}' }, () => {
+    assert.deepEqual(oidc.listProviders(), []);
+  });
+});
+
+test('listProviders: every entry dropped if REDROID_FORGE_OIDC_REDIRECT_BASE_URL is not set', () => {
+  withEnv({
+    REDROID_FORGE_OIDC_REDIRECT_BASE_URL: '',
+    REDROID_FORGE_OIDC_PROVIDERS: JSON.stringify([{ id: 'google', label: 'Google', issuerUrl: 'https://accounts.google.com', clientId: 'g' }]),
+  }, () => {
+    assert.deepEqual(oidc.listProviders(), []);
+  });
+});
+
+test('module surface: config/mapRole no longer exist -- identity only, multi-provider', () => {
+  assert.equal('config' in oidc, false);
+  assert.equal('mapRole' in oidc, false);
 });
