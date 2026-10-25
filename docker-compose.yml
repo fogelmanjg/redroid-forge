@@ -41,6 +41,11 @@ services:
       # SAME path on both sides for exactly that reason (same trick as
       # REDROID_HWENC_ARTIFACTS_DIR above, just not optional).
       - REDROID_FORGE_BACKUPS_DIR=${REDROID_FORGE_BACKUPS_DIR:-${PWD}/backend/data/backups}
+      # Same reasoning and same trick as REDROID_FORGE_BACKUPS_DIR right above (read it first) --
+      # meminfoFix.js bind-mounts a generated file over /proc/meminfo in each capped instance via
+      # the Docker socket, so this also has to be a real HOST path, bound at the SAME path on
+      # both sides, not a container-internal one.
+      - REDROID_FORGE_MEMINFO_FIX_DIR=${REDROID_FORGE_MEMINFO_FIX_DIR:-${PWD}/backend/data/meminfo-fix}
       # Access control (docs/ROADMAP.md Phase 7) -- "none" (default) is today's behavior
       # unchanged, no login, everyone sees/does everything. "local" turns on the built-in
       # account store (backend/src/lib/userStore.js, data persisted under
@@ -68,6 +73,13 @@ services:
       - /lib/modules:/lib/modules:ro
       - /dev/binderfs:/dev/binderfs
       - /dev/vaapi-helper:/dev/vaapi-helper
+      # Read-only, same path, overriding the automatic private-cgroupns view Docker gives this
+      # container by default -- meminfoFix.js needs the HOST's real cgroup v2 tree (every sibling
+      # instance's own docker-<id>.scope/memory.current) to compute each instance's live
+      # MemFree/Cached, not just this container's own slice (confirmed live 24/10/2026: without
+      # this, `cat /proc/self/cgroup` inside here shows "0::/", a private namespace with no
+      # sibling containers visible at all, and every refresh tick silently no-ops).
+      - /sys/fs/cgroup:/sys/fs/cgroup:ro
       - ./backend/data:/app/backend/data
       # Optional bind (same source and destination path, integrate.js resolves
       # paths relative to REDROID_HWENC_ARTIFACTS_DIR above) -- if the
@@ -77,4 +89,5 @@ services:
       # Same trick, single file instead of a directory, for the virt_wifi.ko above.
       - ${REDROID_FORGE_VIRTWIFI_KO_PATH:-/dev/null}:${REDROID_FORGE_VIRTWIFI_KO_PATH:-/dev/null}:ro
       - ${REDROID_FORGE_BACKUPS_DIR:-${PWD}/backend/data/backups}:${REDROID_FORGE_BACKUPS_DIR:-${PWD}/backend/data/backups}
+      - ${REDROID_FORGE_MEMINFO_FIX_DIR:-${PWD}/backend/data/meminfo-fix}:${REDROID_FORGE_MEMINFO_FIX_DIR:-${PWD}/backend/data/meminfo-fix}
     restart: unless-stopped

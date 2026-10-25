@@ -13,4 +13,5 @@ backend/data/hwsim-wifi-overlay/
 backend/data/aurora-store/
 backend/data/db/
 backend/data/backups/
+backend/data/meminfo-fix/
 __pycache__/

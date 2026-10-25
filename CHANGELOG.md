@@ -23,6 +23,28 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
 
 ### Added
 
+- `meminfoFix.js`: Android inside a capped instance was always reading the HOST's full RAM from
+  `/proc/meminfo` (Linux never virtualizes that file per-container), never its real cgroup memory
+  limit -- so it never triggered its own proactive low-memory trimming, and the cgroup OOM killer
+  ended up doing that job abruptly instead once the real limit was hit. Confirmed as the root
+  cause of a real mid-game stutter on `jg-dashboard` v1's `pvz2-tv` production instance (3030/4096
+  MB actually used while `dumpsys meminfo` still reported the host's 63 GB and "status moderate").
+  Fix: a generated `/proc/meminfo`-shaped file, `MemTotal` fixed to the instance's memory cap and
+  `MemFree`/`MemAvailable`/`Cached` kept live by a 5 s tick that reads the container's own cgroup v2
+  `memory.current`/`memory.stat` on the host, laid over `/proc/meminfo` via a `mount --bind` run
+  from inside the container once Android has booted (a direct bind at container-create time gets
+  shadowed by Android's own boot-time `/proc` remount -- found live). Deliberately not a
+  module/contract (see the file's own comment): it is an unconditional correctness fix tied to
+  whether an instance has a memory cap at all, the same category as the Memory/MemorySwap pairing
+  already in `dockerRuntime.create()`, not a user-facing opt-in. Needs two new things the app
+  container did not have before: a real HOST path for its generated files (`REDROID_FORGE_MEMINFO_FIX_DIR`,
+  same reasoning as `REDROID_FORGE_BACKUPS_DIR`) and read-only visibility into the HOST's real
+  cgroup v2 tree (`/sys/fs/cgroup`, which Docker's default private cgroup namespace otherwise hides
+  behind this container's own single-slice view). Live-verified end to end against a real 4096
+  MB-capped instance on this host: before, `dumpsys meminfo` reported "Total RAM: 63,646,788K"
+  (status moderate, unconditionally); after, "Total RAM: 4,194,304K" with `MemFree`/`Cached`
+  tracking the instance's actual real-time cgroup usage and `status` correctly reflecting it.
+
 - `aurora-store` module: Aurora Store (GPLv3), a client for Google Play's real catalog/download
   backend, installed after boot (stage 6 only, no `/system` write) with no files for the user to
   provide -- unlike `gapps`/`arm-translation`, this project downloads the pinned 4.8.3 release

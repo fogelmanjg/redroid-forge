@@ -2,6 +2,7 @@ const express = require('express');
 const runtime = require('../lib/dockerRuntime');
 const binder = require('../lib/binder');
 const hwsimWifi = require('../lib/hwsimWifi');
+const meminfoFix = require('../lib/meminfoFix');
 const androidIdentity = require('../lib/androidIdentity');
 const deviceProfile = require('../lib/deviceProfile');
 const store = require('../lib/store');
@@ -269,7 +270,7 @@ router.post('/', async (req, res) => {
     const adbPort = portAllocator.nextPort();
     const slot = binder.nextFreeSlot({ inUse: await binder.slotsInUseOnHost(runtime.docker).catch(() => []) });
     const volumeName = `redroid-forge-${name}`;
-    const binds = [...binder.binderBinds(slot), `${volumeName}:/data`];
+    const binds = [...binder.binderBinds(slot), `${volumeName}:/data`, ...meminfoFix.prepareBinds(name, resources.memoryMb)];
 
     const cmd = [
       `androidboot.redroid_width=${display.width}`,
@@ -346,6 +347,8 @@ router.post('/', async (req, res) => {
     await moduleRunner.ensureHostInfraReady(requiredModuleIds);
     await runtime.start(containerId);
     scheduleWifiFixes(instance);
+    meminfoFix.scheduleRefresh(instance);
+    meminfoFix.scheduleBindMount(instance);
     // Stage 6: fire-and-forget post-boot fixups (the same pattern as
     // scheduleWifiFixes), they do not block the response.
     moduleRunner.scheduleRuntimeFixups(requiredModuleIds, containerId);
@@ -374,6 +377,8 @@ router.post('/:id/start', async (req, res) => {
     await runtime.start(instance.containerId);
     const reconciled = await reconcileDeviceProfile(instance);
     scheduleWifiFixes(reconciled);
+    meminfoFix.scheduleRefresh(reconciled);
+    meminfoFix.scheduleBindMount(reconciled);
     moduleRunner.scheduleRuntimeFixups(requiredModuleIds, reconciled.containerId);
     moduleScheduler.start(reconciled.id, reconciled.containerId, requiredModuleIds);
     res.json(await withRuntimeStatus(reconciled));
@@ -388,6 +393,7 @@ router.post('/:id/stop', async (req, res) => {
   try {
     permissions.assertCan(req.user, 'start-stop', instance);
     moduleScheduler.stop(instance.id);
+    meminfoFix.release(instance.id);
     await releaseWifiFixes(instance);
     await runtime.stop(instance.containerId);
     res.json(await withRuntimeStatus(instance));
@@ -405,12 +411,15 @@ router.post('/:id/restart', async (req, res) => {
     const requiredModuleIds = requiredModuleIdsFor(instance);
     await moduleRunner.ensureHostInfraReady(requiredModuleIds);
     moduleScheduler.stop(instance.id); // cleared and rescheduled below -- never double-ticking across a restart
+    meminfoFix.release(instance.id);
     // Docker's own restart = stop + start under the hood -- the same netns teardown a plain
     // stop() does, so the phys have to be released here too (before, not after).
     await releaseWifiFixes(instance);
     await runtime.restart(instance.containerId);
     const reconciled = await reconcileDeviceProfile(instance);
     scheduleWifiFixes(reconciled);
+    meminfoFix.scheduleRefresh(reconciled);
+    meminfoFix.scheduleBindMount(reconciled);
     moduleRunner.scheduleRuntimeFixups(requiredModuleIds, reconciled.containerId);
     moduleScheduler.start(reconciled.id, reconciled.containerId, requiredModuleIds);
     res.json(await withRuntimeStatus(reconciled));
@@ -498,6 +507,13 @@ router.post('/:id/android-id/registered', (req, res) => {
 // at create time, a real recreate), Docker's own Update API supports changing Memory/CpusetCpus
 // on a container that already exists. Only the fields given are touched: {} changes nothing
 // (not a way to "clear" a limit once set -- not asked for, not built).
+//
+// meminfoFix needs no wiring here: if a memory cap already existed, its refresh tick re-reads
+// `instance.memoryMb` fresh from the store on every run (see meminfoFix.refresh), so a new value
+// here takes effect on the tick right after this handler's store.upsert(). The one gap this
+// does NOT cover: an instance created with NO cap at all has no /proc/meminfo bind-mount to
+// begin with (Docker cannot attach a new mount to a running container) -- setting a cap here for
+// the first time only gets the fix from the next recreate/display change onward.
 router.post('/:id/resources', async (req, res) => {
   const instance = store.get(req.params.id);
   if (!instance) return res.status(404).json({ error: 'Instancia no encontrada' });
@@ -569,6 +585,7 @@ router.post('/:id/display', async (req, res) => {
     // start()/stop() do, it would throw "No such container: null".
     if (instance.containerId) {
       await releaseWifiFixes(instance);
+      meminfoFix.release(instance.id);
       await runtime.remove(instance.containerId, { force: true });
       // Persisted right away, before create() is even attempted: if create() itself fails
       // below (a real possibility -- missing image, no free binder slot, ...), the stored
@@ -578,7 +595,11 @@ router.post('/:id/display', async (req, res) => {
       store.upsert({ ...instance });
     }
 
-    const binds = [...binder.binderBinds(instance.binderSlot), `${instance.volumeName}:/data`];
+    const binds = [
+      ...binder.binderBinds(instance.binderSlot),
+      `${instance.volumeName}:/data`,
+      ...meminfoFix.prepareBinds(instance.name, instance.memoryMb),
+    ];
     const cmd = [
       `androidboot.redroid_width=${display.width}`,
       `androidboot.redroid_height=${display.height}`,
@@ -631,6 +652,8 @@ router.post('/:id/display', async (req, res) => {
       await runtime.start(containerId);
       updated = await reconcileDeviceProfile(updated);
       scheduleWifiFixes(updated);
+      meminfoFix.scheduleRefresh(updated);
+      meminfoFix.scheduleBindMount(updated);
       moduleRunner.scheduleRuntimeFixups(requiredModuleIds, containerId);
       moduleScheduler.start(updated.id, containerId, requiredModuleIds);
     }
@@ -739,9 +762,11 @@ router.delete('/:id', async (req, res) => {
   try {
     permissions.assertCan(req.user, 'delete', instance);
     moduleScheduler.stop(instance.id);
+    meminfoFix.release(instance.id);
     await releaseWifiFixes(instance);
     await runtime.remove(instance.containerId, { force: true });
     if (instance.volumeName) await runtime.removeVolume(instance.volumeName);
+    meminfoFix.cleanup(instance.name);
     store.remove(instance.id);
     res.status(204).end();
   } catch (e) {
