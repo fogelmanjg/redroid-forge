@@ -20,7 +20,17 @@ function readValidated(file) {
 // An unreadable snapshot is a real error (the release itself is broken) and
 // propagates; an unreadable/invalid downloaded copy does NOT bring anything
 // down: it is ignored with a warning and the snapshot is used.
-function loadCurrent({ snapshotPath = SNAPSHOT_PATH, cachePath = CACHE_PATH } = {}) {
+//
+// `cachePath`'s default reads REDROID_FORGE_DB_CACHE_FILE at CALL time (not a frozen
+// module-level constant) so a test can point it at an empty temp path right before hitting a
+// route that calls loadCurrent() with no args of its own (routes/db.js does exactly that) --
+// without this, a route-level test has no way to isolate itself from this HOST's own real
+// data/db/database.json, which a real install updates in place as it runs (see
+// knownDbUpdate.js) and so is never a stable fixture to assert numbers against.
+function loadCurrent({
+  snapshotPath = SNAPSHOT_PATH,
+  cachePath = process.env.REDROID_FORGE_DB_CACHE_FILE || CACHE_PATH,
+} = {}) {
   const warnings = [];
   const snapshot = readValidated(snapshotPath);
   let cached = null;

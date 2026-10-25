@@ -126,6 +126,14 @@ const NO_KEYS = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'nokeys-')), 'ke
 fs.writeFileSync(NO_KEYS, JSON.stringify({ keys: [] }));
 process.env.REDROID_FORGE_DB_TRUSTED_KEYS_FILE = NO_KEYS;
 
+// Same reasoning, for the SAME real-host-state problem: a dev machine that has actually run
+// this app for real (not just its tests) has its own data/db/database.json, updated in place by
+// knownDbUpdate.js whenever a newer serial gets fetched -- a real file, not a fixture, that would
+// otherwise silently outrank the committed db/snapshot.json these route tests assert exact
+// numbers against. Pointed at a path that is never written, so loadCurrent() always falls back
+// to the snapshot alone here, same as a brand new install with no cache yet.
+process.env.REDROID_FORGE_DB_CACHE_FILE = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'nodbcache-')), 'database.json');
+
 async function withServer(fn) {
   const app = express();
   app.use('/api/db', require('../src/routes/db'));

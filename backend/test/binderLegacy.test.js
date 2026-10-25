@@ -71,8 +71,10 @@ test('reservedSlots: reads a comma-separated list and ignores what is not a numb
 });
 
 test('nextFreeSlot binderfs: skips the slots reserved by another orchestrator', () => {
-  const slot = nextFreeSlot({ legacy: false, reserved: [1, 2, 3, 4] });
-  assert.strictEqual(slot, 5);
+  withInstances([], () => {
+    const slot = nextFreeSlot({ legacy: false, reserved: [1, 2, 3, 4] });
+    assert.strictEqual(slot, 5);
+  });
 });
 
 test('nextFreeSlot legacy: it also respects the reserved ones', () => {
@@ -151,7 +153,9 @@ test('nextFreeSlot skips a slot whose nodes are root-only and takes the next usa
   const present = new Set(legacyDevicesParam(4).split(',').map((n) => `/dev/${n}`));
   const exists = (p) => present.has(p);
   const rootOnly = (p) => !/(binder|hwbinder|vndbinder)1$/.test(p); // slot 1 is root-only, the others are 0666
-  assert.strictEqual(nextFreeSlot({ legacy: true, exists, accessible: rootOnly, reserved: [] }), 2);
+  withInstances([], () => {
+    assert.strictEqual(nextFreeSlot({ legacy: true, exists, accessible: rootOnly, reserved: [] }), 2);
+  });
 });
 
 test('nextFreeSlot: when the only free slots are root-only it says how to fix it, not "no free slot"', () => {
@@ -201,7 +205,9 @@ test('nextFreeSlot skips the slots that a running container of the host already 
   const free = (inUse) => binder.nextFreeSlot({
     legacy: true, exists, reserved: new Set(), accessible: () => true, inUse,
   });
-  assert.strictEqual(free([]), 1);
-  assert.strictEqual(free([1]), 2);
-  assert.strictEqual(free([1, 2, 4]), 3);
+  withInstances([], () => {
+    assert.strictEqual(free([]), 1);
+    assert.strictEqual(free([1]), 2);
+    assert.strictEqual(free([1, 2, 4]), 3);
+  });
 });
