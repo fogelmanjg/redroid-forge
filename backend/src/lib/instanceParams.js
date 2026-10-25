@@ -127,7 +127,28 @@ function parseBindHosts(body = {}, fallback = DEFAULT_BIND_HOSTS) {
   return out;
 }
 
+// How many distinct cores a `cpusetCpus` string claims -- "4,13" -> 2, "4-7" -> 4, "4-7,13" -> 5
+// (same expansion the frontend's own `parseCoreSet` does for its checkbox grid, see
+// frontend/app.js, mirrored here because quota math (docs/ROADMAP.md Phase 7's operator
+// vCPU/RAM quotas) needs it server-side too). A string that fails CPUSET_RE should never reach
+// here (parseResources already rejected it); garbage past that (overlapping/backwards ranges) is
+// deduped by the Set, never thrown -- Docker is still the real topology check, this is only ever
+// used for counting, never for validating.
+function countCpus(cpusetCpus) {
+  if (!cpusetCpus) return 0;
+  const set = new Set();
+  for (const part of cpusetCpus.split(',')) {
+    const range = part.match(/^(\d+)-(\d+)$/);
+    if (range) {
+      for (let i = Number(range[1]); i <= Number(range[2]); i++) set.add(i);
+    } else if (/^\d+$/.test(part)) {
+      set.add(Number(part));
+    }
+  }
+  return set.size;
+}
+
 module.exports = {
   parseDisplay, DEFAULTS, LIMITS, parseResources, MEMORY_MB_LIMITS, CPUSET_RE, parseGpuMode, GPU_MODES,
-  parseBindHosts, DEFAULT_BIND_HOSTS, IP_SHAPE_RE,
+  parseBindHosts, DEFAULT_BIND_HOSTS, IP_SHAPE_RE, countCpus,
 };

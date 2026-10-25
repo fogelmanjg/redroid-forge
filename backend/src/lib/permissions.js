@@ -12,7 +12,13 @@ const ROLES = ['admin', 'operator', 'viewer'];
 // Per-instance capabilities (every one of these also needs an instance to check ownership
 // against, except where noted). `manage-settings` is NOT in this list -- it is global, not
 // per-instance, checked separately via canManageSettings().
-const CAPABILITIES = ['view', 'start-stop', 'create', 'delete', 'configure', 'backup-restore'];
+//
+// `transfer-ownership` (25/10/2026): editing an instance's `ownerId` list (who can see/use it --
+// see `ownerIds()` below) and attributing/reassigning its `createdId` (who the quota,
+// src/lib/quotas.js, counts against) -- two different questions sharing one capability because
+// both are only ever exercised by someone who already has access to the instance (see
+// routes/instances.js's PUT /:id/owners and /:id/created-by), same as `configure`.
+const CAPABILITIES = ['view', 'start-stop', 'create', 'delete', 'configure', 'backup-restore', 'transfer-ownership'];
 
 // What each role can do, before ownership is even considered. `create` has no owner yet (the
 // instance being created *becomes* owned by whoever creates it) -- it is really "can this role
@@ -22,6 +28,18 @@ const ROLE_CAPABILITIES = {
   operator: new Set(CAPABILITIES),
   viewer: new Set(['view', 'start-stop']),
 };
+
+// `instance.ownerId` is a list (25/10/2026 -- an instance can be shared by several people at
+// once, e.g. a household's shared TV instance) but is tolerated in its pre-migration shape too
+// (a bare string, or missing) so this module never has to assume `store.js`'s own self-healing
+// migration already ran on whatever object a caller hands it (tests build plain instance
+// literals directly, never through the store).
+function ownerIds(instance) {
+  if (!instance) return [];
+  const o = instance.ownerId;
+  if (Array.isArray(o)) return o;
+  return o ? [o] : [];
+}
 
 // Which roles bypass the ownership check entirely (see every instance, act on every instance
 // their role's capabilities allow) -- only admin. operator/viewer are always scoped to "own".
@@ -42,7 +60,7 @@ function can(user, capability, instance) {
   if (capability === 'create') return true;
   if (OWNERSHIP_BYPASS_ROLES.has(user.role)) return true;
   if (!instance) return true; // nothing to scope against yet -- caller checks again once it has one
-  return instance.ownerId === user.id;
+  return ownerIds(instance).includes(user.id);
 }
 
 // manage-settings (global backup folder, local user management) -- admin only, not part of the
@@ -57,7 +75,7 @@ function canManageSettings(user) {
 function visibleInstances(user, instances) {
   if (!user || !isValidRole(user.role)) return [];
   if (OWNERSHIP_BYPASS_ROLES.has(user.role)) return instances;
-  return instances.filter((i) => i.ownerId === user.id);
+  return instances.filter((i) => ownerIds(i).includes(user.id));
 }
 
 function httpError(message, httpStatus) {
@@ -80,5 +98,5 @@ function assertCan(user, capability, instance) {
 }
 
 module.exports = {
-  ROLES, CAPABILITIES, ROLE_CAPABILITIES, isValidRole, can, canManageSettings, visibleInstances, assertCan,
+  ROLES, CAPABILITIES, ROLE_CAPABILITIES, isValidRole, can, canManageSettings, visibleInstances, assertCan, ownerIds,
 };

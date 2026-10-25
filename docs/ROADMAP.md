@@ -669,11 +669,47 @@ full composite id, not a bare `sub`.
 **Known gap, not yet verified:** `oidc` mode's live callback against a real IdP — no IdP was available in
 this environment, so only its pure parts (enablement detection, PKCE/state bookkeeping, and now role
 assignment in isolation) are unit-tested; worth a real pass against an actual Keycloak/Authentik instance
-before relying on it. **Also a deliberate, undocumented-until-now migration gap:** an instance created
-before this phase (or under `none` mode) has no `ownerId`, so once `local`/`oidc` is turned on, only admin
-can see or manage it — there is no "reassign owner" feature yet; turning on auth on an existing fleet
-currently means admin either keeps using it as admin or there is no way for a non-admin account to take
-any of the earlier instances over.
+before relying on it.
+
+**Redesigned again, same day (25/10/2026) — `ownerId` is a list, `createdId` is new, and operators get
+resource quotas.** User's own motivating example: a household's shared TV instance of a game, meant to be
+usable by more than one person at once ("romina y yo", later possibly a third person) — the old single
+`ownerId` could not express that at all. Resolves the "reassign owner" gap this same paragraph used to
+describe as unsolved.
+
+- **`ownerId`** is now an array — every id in it can see/use the instance, scoped by their own role's
+  capabilities exactly as before (`permissions.js`'s `ownerIds()` normalizes a legacy bare string or a
+  missing field to an array too, so nothing from before this breaks). Always at least one id: an edit that
+  would empty the list is rejected outright (`PUT /api/instances/:id/owners`, full replace, "transfer-
+  ownership" capability) — there is no way to leave an instance ownerless or lock everyone out of it by
+  mistake.
+- **`createdId`** is a deliberately DIFFERENT question from `ownerId`: who the instance's resource usage
+  counts against, for the quota below — "`createId` dice a quien le cuenta la cuota, `ownerId` quien lo
+  puede usar" (the user's own framing). Set once at creation (the creator), mutable only through
+  attribution (`PUT /api/instances/:id/created-by`): an operator can only "atribuírselo" to THEMSELVES, and
+  only on an instance they already have access to (same ownership-scoped capability) — they can never
+  attribute it to a third party, which would let them dump their own usage onto someone else's quota
+  without that person's own action. Admin has no such restriction (admin already bypasses quotas
+  entirely) — including attributing an instance to themselves as a deliberate "rescue", which exempts it
+  from every quota from then on.
+- **Operator resource quotas** (`backend/src/lib/quotas.js`) — two independent, both-optional ceilings,
+  whichever is reached first blocks the request: a PER-OPERATOR cap (`backend/data/quotas.json`, admin-
+  managed per person from the Users/Identities tab) and a shared POOL cap across every operator at once
+  (`settings.json`'s `operatorPoolMaxVcpus`/`operatorPoolMaxMemoryMb`, one value, admin-managed from
+  Settings). Neither configured = unlimited, same as every optional limit elsewhere in this project.
+  Checked live on create and on `POST /:id/resources` (live resize), never as a running counter — always
+  the real sum of `cpusetCpus`/`memoryMb` across every other instance sharing the same `createdId` (or,
+  for the pool, every instance whose `createdId` currently holds the operator role at all), read fresh
+  from the store every time. vCPU counting had to grow a small backend-side helper
+  (`instanceParams.countCpus`) mirroring the frontend's existing `parseCoreSet`, because `cpusetCpus`
+  already accepted ranges (`"4-7"`), not just flat comma lists — confirmed in the actual validation regex,
+  not assumed. A new `GET /api/auth/directory` (any logged-in user, not just admin) exists purely so an
+  operator sharing an instance has a way to pick a target by username, without needing admin's own
+  account-management view. **Verified:** unit tests only (`permissions.test.js`, `quotas.test.js`,
+  `store.test.js`'s migration coverage, `instanceParams.test.js`'s `countCpus`) — the new routes
+  (`/owners`, `/created-by`, `/api/quotas`, `/auth/directory`) have no route-level test, consistent with
+  every other route in this project (verified live by hand against real Docker, not supertest); that live
+  pass has not happened yet for this specific feature.
 
 ## Phase 8 — Federation mode: `jg-dashboard` and Plenum as consumers
 

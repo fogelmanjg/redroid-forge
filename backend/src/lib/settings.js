@@ -21,6 +21,12 @@ const DEFAULTS = {
   // why this, not the env var, wins once it is set, and why either way it needs a restart to
   // actually take effect).
   appBindHost: null,
+  // Shared ceiling across every "operator" at once (docs/ROADMAP.md Phase 7, 25/10/2026) -- the
+  // other half of src/lib/quotas.js's quota model, which also supports a per-operator limit
+  // (that one keyed by user id, so it lives in its own store, not here). null = unlimited, same
+  // as every other optional field in this file.
+  operatorPoolMaxVcpus: null,
+  operatorPoolMaxMemoryMb: null,
 };
 
 function get(file = SETTINGS_FILE) {

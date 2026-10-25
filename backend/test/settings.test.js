@@ -45,3 +45,13 @@ test('appBindHost: null by default, persists once set, clears back to null', () 
   const cleared = settings.update({ appBindHost: null }, file);
   assert.strictEqual(cleared.appBindHost, null);
 });
+
+test('operatorPoolMaxVcpus/operatorPoolMaxMemoryMb: null by default, persist once set (src/lib/quotas.js\'s shared pool)', () => {
+  const file = tmpFile();
+  assert.strictEqual(settings.get(file).operatorPoolMaxVcpus, null);
+  assert.strictEqual(settings.get(file).operatorPoolMaxMemoryMb, null);
+  const after = settings.update({ operatorPoolMaxVcpus: 10, operatorPoolMaxMemoryMb: 32768 }, file);
+  assert.strictEqual(after.operatorPoolMaxVcpus, 10);
+  assert.strictEqual(after.operatorPoolMaxMemoryMb, 32768);
+  assert.strictEqual(settings.get(file).operatorPoolMaxVcpus, 10);
+});

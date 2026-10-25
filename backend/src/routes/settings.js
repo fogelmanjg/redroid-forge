@@ -14,7 +14,7 @@ router.get('/', (req, res) => {
 // of it scoped to any one instance's ownership.
 router.put('/', (req, res) => {
   if (!permissions.canManageSettings(req.user)) return res.status(403).json({ error: 'Admin only' });
-  const { backupDir, networkInterfaceOverrides, appBindHost } = req.body || {};
+  const { backupDir, networkInterfaceOverrides, appBindHost, operatorPoolMaxVcpus, operatorPoolMaxMemoryMb } = req.body || {};
   if (backupDir !== undefined && (typeof backupDir !== 'string' || backupDir.trim() === '')) {
     return res.status(400).json({ error: 'backupDir must be a non-empty string' });
   }
@@ -33,10 +33,19 @@ router.put('/', (req, res) => {
   if (appBindHost !== undefined && appBindHost !== null && appBindHost !== '' && !IP_SHAPE_RE.test(appBindHost)) {
     return res.status(400).json({ error: 'appBindHost must be an IP address, or null/empty to clear it' });
   }
+  // Shared ceiling across every operator at once (src/lib/quotas.js) -- null/empty = unlimited,
+  // same convention as appBindHost just above.
+  for (const [key, value] of [['operatorPoolMaxVcpus', operatorPoolMaxVcpus], ['operatorPoolMaxMemoryMb', operatorPoolMaxMemoryMb]]) {
+    if (value !== undefined && value !== null && value !== '' && !(Number.isInteger(value) && value > 0)) {
+      return res.status(400).json({ error: `${key} must be a positive integer, or null/empty to leave it unlimited` });
+    }
+  }
   const patch = {};
   if (backupDir !== undefined) patch.backupDir = backupDir.trim();
   if (networkInterfaceOverrides !== undefined) patch.networkInterfaceOverrides = networkInterfaceOverrides;
   if (appBindHost !== undefined) patch.appBindHost = appBindHost || null;
+  if (operatorPoolMaxVcpus !== undefined) patch.operatorPoolMaxVcpus = operatorPoolMaxVcpus || null;
+  if (operatorPoolMaxMemoryMb !== undefined) patch.operatorPoolMaxMemoryMb = operatorPoolMaxMemoryMb || null;
   res.json(settings.update(patch));
 });
 

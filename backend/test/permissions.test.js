@@ -3,7 +3,9 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { can, canManageSettings, visibleInstances, isValidRole, assertCan } = require('../src/lib/permissions');
+const {
+  can, canManageSettings, visibleInstances, isValidRole, assertCan, ownerIds,
+} = require('../src/lib/permissions');
 
 const admin = { id: 'u-admin', role: 'admin' };
 const operatorA = { id: 'u-op-a', role: 'operator' };
@@ -95,4 +97,31 @@ test('assertCan: passes silently (no throw) when allowed', () => {
   assert.doesNotThrow(() => assertCan(admin, 'delete', ownedByB));
   assert.doesNotThrow(() => assertCan(operatorA, 'configure', ownedByA));
   assert.doesNotThrow(() => assertCan(operatorA, 'create'));
+});
+
+// `ownerId` is a list now (docs/ROADMAP.md Phase 7, 25/10/2026) -- an instance can be shared by
+// several people at once, e.g. a household's shared TV instance.
+test('ownerIds: normalizes every shape (array, bare string, missing) to an array', () => {
+  assert.deepEqual(ownerIds({ ownerId: ['a', 'b'] }), ['a', 'b']);
+  assert.deepEqual(ownerIds({ ownerId: 'a' }), ['a']);
+  assert.deepEqual(ownerIds({ ownerId: null }), []);
+  assert.deepEqual(ownerIds({}), []);
+  assert.deepEqual(ownerIds(undefined), []);
+});
+
+test('can/visibleInstances: a multi-owner instance is visible to EVERY id in the list, not just the first', () => {
+  const shared = { id: 'i4', ownerId: ['u-op-a', 'u-view-a'] };
+  assert.equal(can(operatorA, 'configure', shared), true);
+  assert.equal(can(viewerA, 'view', shared), true);
+  assert.equal(can(viewerA, 'configure', shared), false); // in the list, but viewer role still lacks this capability
+  assert.equal(can(operatorB, 'view', shared), false); // not in the list at all
+  assert.deepEqual(visibleInstances(viewerA, [shared, ownedByB]), [shared]);
+});
+
+test('can: "transfer-ownership" -- admin and operator have it (scoped to their own instances), viewer never does', () => {
+  assert.equal(can(admin, 'transfer-ownership', ownedByB), true);
+  assert.equal(can(operatorA, 'transfer-ownership', ownedByA), true);
+  assert.equal(can(operatorA, 'transfer-ownership', ownedByB), false); // not an owner of this one
+  const ownedByViewer = { id: 'i3', ownerId: 'u-view-a' };
+  assert.equal(can(viewerA, 'transfer-ownership', ownedByViewer), false);
 });

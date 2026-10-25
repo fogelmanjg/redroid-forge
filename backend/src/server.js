@@ -22,6 +22,7 @@ app.use('/api/images', require('./routes/images'));
 app.use('/api/modules', require('./routes/modules'));
 app.use('/api/db', require('./routes/db'));
 app.use('/api/settings', require('./routes/settings'));
+app.use('/api/quotas', require('./routes/quotas'));
 app.use('/api/backups', require('./routes/backups'));
 app.use('/api/network', require('./routes/network'));
 

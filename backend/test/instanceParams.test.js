@@ -3,7 +3,9 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { parseResources, parseGpuMode, parseBindHosts, DEFAULT_BIND_HOSTS } = require('../src/lib/instanceParams');
+const {
+  parseResources, parseGpuMode, parseBindHosts, DEFAULT_BIND_HOSTS, countCpus,
+} = require('../src/lib/instanceParams');
 
 test('parseResources: empty body -> no limit at all, same behavior as before this existed', () => {
   assert.deepEqual(parseResources({}), {});
@@ -81,4 +83,22 @@ test('parseBindHosts: rejects an empty array, a non-array, and non-IP-shaped ent
   assert.throws(() => parseBindHosts({ bindHosts: [5] }), /bindHosts/);
   assert.throws(() => parseBindHosts({ bindHosts: ['not an address'] }), /bindHosts/);
   assert.throws(() => parseBindHosts({ bindHosts: ['127.0.0.1; rm -rf /'] }), /bindHosts/);
+});
+
+test('countCpus: empty/falsy -> 0', () => {
+  assert.equal(countCpus(''), 0);
+  assert.equal(countCpus(null), 0);
+  assert.equal(countCpus(undefined), 0);
+});
+
+test('countCpus: a flat comma list counts each distinct core once', () => {
+  assert.equal(countCpus('4'), 1);
+  assert.equal(countCpus('4,13'), 2);
+  assert.equal(countCpus('4,13,4'), 2); // a repeated core is not double-counted
+});
+
+test('countCpus: a range expands to every core in it, inclusive', () => {
+  assert.equal(countCpus('4-7'), 4);
+  assert.equal(countCpus('4-7,13'), 5);
+  assert.equal(countCpus('0-1,4-7,13'), 7);
 });

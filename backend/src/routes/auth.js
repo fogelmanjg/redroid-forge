@@ -33,6 +33,26 @@ router.post('/logout', (req, res) => {
   res.json({ ok: true });
 });
 
+// Minimal id+username directory (docs/ROADMAP.md Phase 7, 25/10/2026) -- any logged-in user, not
+// just admin, unlike /users and /identities below. Needed so an operator sharing an instance
+// (PUT /api/instances/:id/owners, "transfer-ownership") has a way to find who to share it WITH
+// by username, without needing admin's own account-management view -- no role, no provider, no
+// passwordHash, nothing beyond what is already shown on screen elsewhere (every username). OIDC
+// identities that have never been granted a role are left out: sharing an instance with someone
+// who cannot even log in yet would just be confusing, not useful.
+router.get('/directory', (req, res) => {
+  if (!req.user) return res.status(401).json({ error: 'Not logged in' });
+  if (auth.AUTH_MODE === 'local') {
+    return res.json(userStore.listUsers().map((u) => ({ id: u.id, username: u.username })));
+  }
+  if (auth.AUTH_MODE === 'oidc') {
+    return res.json(
+      roleAssignments.listAssignments().filter((a) => a.role).map((a) => ({ id: a.externalId, username: a.username })),
+    );
+  }
+  return res.json([]);
+});
+
 router.post('/login', (req, res) => {
   if (auth.AUTH_MODE !== 'local') return res.status(404).json({ error: 'REDROID_FORGE_AUTH is not "local"' });
   const { username, password } = req.body || {};

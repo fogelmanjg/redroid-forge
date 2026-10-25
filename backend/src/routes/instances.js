@@ -17,6 +17,7 @@ const instanceParams = require('../lib/instanceParams');
 const backup = require('../lib/backup');
 const settings = require('../lib/settings');
 const permissions = require('../lib/permissions');
+const quotas = require('../lib/quotas');
 const catalog = require('../../images.json');
 
 const router = express.Router();
@@ -259,9 +260,21 @@ router.post('/', async (req, res) => {
     if (typeof name !== 'string' || !/^[a-z0-9][a-z0-9-]{0,39}$/.test(name)) {
       throw httpError('"name" must be lowercase letters, digits and hyphens (1-40 characters, not starting with a hyphen)', 400);
     }
-    if (store.readAll().some((i) => i.name === name)) {
+    const allInstances = store.readAll();
+    if (allInstances.some((i) => i.name === name)) {
       throw httpError(`An instance named "${name}" already exists`, 409);
     }
+    // docs/ROADMAP.md Phase 7's operator quotas -- checked BEFORE touching Docker at all, same
+    // reasoning as the name-collision check just above it.
+    quotas.assertWithinQuota({
+      actorRole: req.user.role,
+      createdId: req.user.id,
+      instances: allInstances,
+      thisVcpus: instanceParams.countCpus(resources.cpusetCpus),
+      thisMemoryMb: resources.memoryMb || 0,
+      operatorIdSet: quotas.operatorIds(),
+      pool: settings.get(),
+    });
     const img = await resolveImageAndGate(imageId, modules, gpuModeChoice.gpuMode);
     // Which modules this image requires (moduleGate.js) -- it is persisted on the
     // instance (see requiredModuleIdsFor()) so that start/restart do not depend on
@@ -335,7 +348,8 @@ router.post('/', async (req, res) => {
       memoryMb: resources.memoryMb || null,
       cpusetCpus: resources.cpusetCpus || null,
       bindHosts,
-      ownerId: req.user.id,
+      ownerId: [req.user.id],
+      createdId: req.user.id,
       androidId: null,
       androidIdRegisteredAt: null,
       createdAt: new Date().toISOString(),
@@ -520,12 +534,77 @@ router.post('/:id/resources', async (req, res) => {
   try {
     permissions.assertCan(req.user, 'configure', instance);
     const resources = instanceParams.parseResources(req.body);
+    // Quota is checked against the instance's OWN `createdId`, not the actor making this
+    // request -- they can differ once ownership/attribution has been transferred (see PUT
+    // /:id/owners and /:id/created-by below), and the quota always follows createdId.
+    quotas.assertWithinQuota({
+      actorRole: req.user.role,
+      createdId: instance.createdId,
+      instances: store.readAll(),
+      excludeInstanceId: instance.id,
+      thisVcpus: instanceParams.countCpus(resources.cpusetCpus !== undefined ? resources.cpusetCpus : instance.cpusetCpus),
+      thisMemoryMb: (resources.memoryMb !== undefined ? resources.memoryMb : instance.memoryMb) || 0,
+      operatorIdSet: quotas.operatorIds(),
+      pool: settings.get(),
+    });
     await runtime.updateResources(instance.containerId, resources);
     const updated = store.upsert({
       ...instance,
       memoryMb: resources.memoryMb !== undefined ? resources.memoryMb : instance.memoryMb,
       cpusetCpus: resources.cpusetCpus !== undefined ? resources.cpusetCpus : instance.cpusetCpus,
     });
+    res.json(await withRuntimeStatus(updated));
+  } catch (e) {
+    sendError(res, e);
+  }
+});
+
+// `ownerId` (docs/ROADMAP.md Phase 7, 25/10/2026) is now a list, not a single id -- who can
+// SEE/USE this instance, e.g. a household's shared TV instance owned by more than one person at
+// once. Full replace, not add/remove (same "PUT the whole thing" shape as roleAssignments'
+// setRole) -- the caller already has the current list from GET /api/instances if it wants to
+// edit it incrementally. Always at least one id: this is the only thing a non-admin could use to
+// lock themselves (and everyone else) out of an instance entirely, so it is rejected outright
+// rather than silently keeping the old list.
+router.put('/:id/owners', async (req, res) => {
+  const instance = store.get(req.params.id);
+  if (!instance) return res.status(404).json({ error: 'Instancia no encontrada' });
+  try {
+    permissions.assertCan(req.user, 'transfer-ownership', instance);
+    const { ownerIds } = req.body || {};
+    if (!Array.isArray(ownerIds) || ownerIds.length === 0 || ownerIds.some((id) => typeof id !== 'string' || !id)) {
+      throw httpError('"ownerIds" must be a non-empty array of ids', 400);
+    }
+    const deduped = [...new Set(ownerIds)];
+    const updated = store.upsert({ ...instance, ownerId: deduped });
+    res.json(await withRuntimeStatus(updated));
+  } catch (e) {
+    sendError(res, e);
+  }
+});
+
+// `createdId` says who the quota (src/lib/quotas.js) counts this instance against -- a
+// deliberately different question from `ownerId` (who can see/use it). An operator can only
+// "atribuirse" it to THEMSELVES, and only on an instance they already have access to
+// (`transfer-ownership` is ownership-scoped, same as `configure`) -- they can never reassign an
+// instance's quota attribution to a third party, which would let one operator dump their own
+// usage onto someone else's quota without that person's own action. Admin has no such
+// restriction (already bypasses quotas entirely, so handing an instance's attribution to any
+// operator is just bookkeeping, not a way to dodge anything) -- including the "rescue" case of
+// attributing it to themselves, which exempts it from every quota from then on.
+router.put('/:id/created-by', async (req, res) => {
+  const instance = store.get(req.params.id);
+  if (!instance) return res.status(404).json({ error: 'Instancia no encontrada' });
+  try {
+    permissions.assertCan(req.user, 'transfer-ownership', instance);
+    const { createdId } = req.body || {};
+    if (typeof createdId !== 'string' || !createdId) {
+      throw httpError('"createdId" is required', 400);
+    }
+    if (req.user.role !== 'admin' && createdId !== req.user.id) {
+      throw httpError('Only an admin can attribute this instance\'s quota to someone other than themselves', 403);
+    }
+    const updated = store.upsert({ ...instance, createdId });
     res.json(await withRuntimeStatus(updated));
   } catch (e) {
     sendError(res, e);

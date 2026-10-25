@@ -23,6 +23,17 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
 
 ### Added
 
+- `ownerId` (who can see/use an instance) is now a list, not a single id -- an instance can be shared by
+  more than one account at once (e.g. a household's shared TV instance). A new `createdId` tracks a
+  DIFFERENT thing: who its resource usage counts against for the new operator quota below -- it can be
+  attributed to yourself (if you already have access to the instance) or, for admin, to anyone. New
+  `PUT /api/instances/:id/owners` and `PUT /api/instances/:id/created-by` manage both, and a new "Owners"
+  panel in the instance table exposes them. Operators now get optional resource quotas
+  (`backend/src/lib/quotas.js`): a per-operator cap (Users/Identities tab) and a shared pool cap across
+  every operator at once (Settings tab) -- either, both, or neither, whichever is reached first blocks a
+  create or a live resize. A new `GET /api/auth/directory` lets any logged-in user (not just admin) look
+  up an id by username, needed to pick who to share an instance with.
+
 - `oidc` auth mode is now identity-only AND multi-provider. Identity-only: no provider is ever asked for
   a role claim any more (the old `REDROID_FORGE_OIDC_ROLES_CLAIM`/`_ADMIN_ROLE`/`_OPERATOR_ROLE`/
   `_VIEWER_ROLE` are gone). A new `backend/src/lib/roleAssignments.js` is the actual permissions backend
