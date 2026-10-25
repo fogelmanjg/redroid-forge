@@ -42,6 +42,37 @@ navegables con `ls`/`cat` como cualquier carpeta del host. `docker import`
 toma un `.tar` y lo convierte en la primera capa; `docker commit` congela el
 estado actual de un contenedor como una capa nueva encima.
 
+## Por qué correr muchas instancias cuesta menos RAM que N × una sola
+
+Consecuencia directa de que la etapa 1 sea la *única* base de la que este proyecto arranca (ver el
+principio de base más arriba), y de que cada personalización por instancia (GApps, traducción ARM,
+hwenc, el fix de gralloc, wifi falso) se aplica como inyección en caliente en etapa 4/6, nunca como
+una imagen derivada horneada: la capa de solo lectura de cada instancia es exactamente el mismo
+directorio en el disco del host, sin importar qué módulos tenga activados. El page cache del kernel
+solo guarda una copia física de una página leída de un archivo dado — así que los archivos de la
+imagen base (el system image de Android, sus librerías, los binarios de redroid) se cachean una sola
+vez y los reutiliza cada instancia que los lee, no una vez por instancia. Es el comportamiento normal
+de page cache/OverlayFS de Linux, no algo que el código de este proyecto haga o tenga que activar.
+
+**Confirmado en vivo el 24/10/2026**, comparando dos instancias reales de `jg-dashboard` v1 que
+coincidían en usar la misma imagen (`android-redroid:11-gapps`, otro proyecto, incluido acá solo
+porque dio un segundo dato real): su `/proc/<pid>/mountinfo` mostraba exactamente los mismos dos
+paths de lowerdir bajo `.../snapshots/<id>/fs` para las capas base, solo la capa de diff de arriba
+de cada contenedor era distinta — 2.34 GB de directorios idénticos en disco de una imagen de 3.53 GB.
+Revisado de la misma forma contra la base propia de `redroid-forge`, `android-15-official` (la única
+imagen que usa este proyecto, ~2.94 GB en disco): cualquier cantidad de instancias armadas desde
+ella, con cualquier combinación de módulos, monta esos mismos 2.94 GB de solo lectura — KSM (revisado
+en el mismo host: `/sys/kernel/mm/ksm/*`) no fue el mecanismo y aportó casi nada (unos cientos de
+páginas compartidas, insignificante) — es puro reparto de OverlayFS/page cache, que solo necesita que
+las instancias compartan la misma imagen base, algo que este proyecto ya garantiza al no hornear
+nunca una imagen por combinación.
+
+**Implicancia práctica:** el costo marginal de RAM de una instancia más de redroid-forge no es "otra
+copia del footprint de la imagen base" — es más cercano a solo el `/data`, el heap y lo que sea
+genuinamente propio de esa instancia. Esto mejora, no empeora, a medida que corren más instancias
+juntas en el mismo host, siempre que todas sigan viniendo de la misma base compartida (nunca derivar
+una imagen por combinación para algo que no sea 100% software libre, según el principio de base).
+
 ## Las 6 etapas
 
 ### 1. Imagen redroid estándar

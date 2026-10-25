@@ -34,6 +34,36 @@ is nothing binary/opaque about it — they are ordinary files, browsable with `l
 folder. `docker import` takes a `.tar` and turns it into the first layer; `docker commit` freezes a
 container's current state as a new layer on top.
 
+## Why running many instances costs less RAM than N × one instance
+
+A direct consequence of stage 1 being the *only* base this project ever starts from (see the base
+principle above), and of every per-instance customization (GApps, ARM translation, hwenc, the
+gralloc fix, fake WiFi) being applied as stage 4/6 runtime injection rather than a baked derived
+image: every instance's read-only layer is the exact same directory on the host's disk, no matter
+which modules it has enabled. The kernel's page cache only ever holds one physical copy of a page
+read from a given file — so the base image's files (the Android system image, its libraries, the
+redroid binaries) are cached once and reused by every instance reading them, not once per instance.
+This is the normal Linux page-cache/OverlayFS behavior, not something this project's code does or
+has to opt into.
+
+**Confirmed live on 24/10/2026**, comparing two real `jg-dashboard` v1 instances that happened to
+share an image (`android-redroid:11-gapps`, a different project, included here only because it gave
+a second real data point): their `/proc/<pid>/mountinfo` showed the exact same two lowerdir paths
+under `.../snapshots/<id>/fs` for the base layers, only the per-container top diff layer differed —
+2.34 GB of identical on-disk directories out of a 3.53 GB image. Checked the same way for
+`redroid-forge`'s own `android-15-official` base (the only image this project uses, ~2.94 GB on
+disk): any number of instances built from it, with any combination of modules, mount that same
+2.94 GB read-only — KSM (checked on the same host: `/sys/kernel/mm/ksm/*`) was not the mechanism and
+barely contributed anything (a few hundred shared pages, negligible) — this is plain OverlayFS/page
+cache sharing, which only requires instances to share the same base image, something this project
+already guarantees by never baking per-combination images.
+
+**Practical implication:** the marginal RAM cost of one more redroid-forge instance is not "another
+copy of the base image's footprint" — it is closer to just that instance's own `/data`, heap, and
+anything genuinely unique to it. This gets better, not worse, as more instances run side by side on
+the same host, as long as they all keep coming from the single shared base (never derive a
+per-combination image for anything that is not 100% free, per the base principle).
+
 ## The 6 stages
 
 ### 1. Standard redroid image
