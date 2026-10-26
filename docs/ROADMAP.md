@@ -789,30 +789,87 @@ dashboard.
 **Gate:** both operate real instances exclusively through `redroid-forge` during a run-in period, with no
 regressions, authenticating through each host's own existing identity provider.
 
-## Phase 9 — Advanced: optional port-knocking companion (research first)
+## Phase 9 — Advanced: port-knocking for ADB/scrcpy access (design agreed 26/10/2026, not built yet)
 
-**Difficulty: Medium-High, and explicitly research-first** — `(to) investigate`, not commit to, per the
-original ask.
+**Difficulty: Medium-High.** Originally framed as "research first" (`(to) investigate`, not commit to) --
+see the reality check below, still valid background, now resolved into a concrete design.
 
-**Reality check before committing to this:** classic port knocking (a fixed port sequence) is obscurity,
-not real security — a patient observer can still find it. A real version (`fwknop`, Single Packet
-Authorization with actual crypto) is stronger, but it needs to manipulate `iptables` **on the host**, which
-from inside a container means either `NET_ADMIN` or running the daemon outside the container entirely —
-real tension with "lives in one container, no host setup". For anyone already using Tailscale (or any
-private overlay network) for exposure, picking that interface in Phase 6 already gets most of the same
-outcome — nothing outside the private network can even see the port — with none of this complexity. Worth
-having for the sysop who genuinely wants it on a raw LAN/public interface; not worth defaulting toward.
+**Reality check (original framing, still the right starting point):** classic port knocking (a fixed port
+sequence) is obscurity, not real security -- a patient observer can still find it. A real version
+(`fwknop`, Single Packet Authorization with actual crypto) is stronger, but normally needs to manipulate
+`iptables` **on the host**, which from inside a typical container means either `NET_ADMIN` or running the
+daemon outside the container entirely. For anyone already using Tailscale (or any private overlay
+network) for exposure, picking that interface in Phase 6 already gets most of the same outcome -- nothing
+outside the private network can even see the port -- with none of this complexity; this phase is for the
+sysop who genuinely needs a raw LAN/public interface too.
 
-**Steps:**
-1. Design as a **separate, optional companion** (its own `docker-compose` profile/container), never baked
-   into the main image — the simple default stays simple regardless of whether this exists.
-2. `redroid-forge`'s UI detects and configures it when present (which instances/interfaces it guards), but
-   never requires it.
-3. Document the host prerequisites clearly — this is the one piece in this whole theme that genuinely
-   needs host-level changes, unlike everything in Phases 6-8.
+**Key realization that resolved the "separate companion" tension:** `redroid-forge` already runs
+`--privileged --network host` (needed for everything else it does -- binder, cgroups, the Docker socket).
+It is therefore *already* in the same network namespace as the host's real `iptables` -- the `NET_ADMIN`
+problem the original framing worried about does not actually apply here. `fwknopd` can run as one more
+supervised process inside the existing container (same pattern as the hwenc/hwdec VA-API daemon), with no
+separate companion, no extra host install.
 
-**Gate:** an instance exposed on a non-localhost interface can optionally require a valid SPA knock before
-the port responds at all, with zero effect on every instance that does not opt in.
+**Second realization that simplified the model further:** this project's whole access-control layer
+(Phase 7) is exactly the "prior authenticated channel" that classic SPA exists to substitute for when
+there is none. So the knock here is never sent by the device that will actually run adb/scrcpy -- it is
+sent by `redroid-forge`'s own backend, on behalf of an already-logged-in, already role-checked user,
+the moment they click "open access" in the UI. SPA's crypto still does real work (the port stays
+genuinely closed/invisible until that happens, and `fwknopd`'s own timeout-based rule cleanup is more
+robust than a hand-rolled timer that would leak an open rule if the Node process restarted mid-window) --
+it is just never the end user's own job to knock.
+
+**Agreed design:**
+- One `fwknopd` instance, one shared key, one static `access.conf` stanza: `SOURCE: 127.0.0.1` (the
+  backend is the only client that ever knocks, always from localhost), `OPEN_PORTS` covering the whole
+  configured ADB port range. No per-instance stanza -- legitimacy was already decided by Phase 7's auth
+  before the knock is even sent, the knock itself is just the mechanism.
+- **Per instance AND per bound interface**, not a single instance-level toggle: a new field alongside
+  today's `bindHosts` (e.g. `knockRequiredHosts`, a subset of it) lets each interface decide
+  independently. User's own example: instance `5580` reachable over Tailscale with no knock at all, and
+  over the internet-facing interface only behind one -- same instance, two different rule scopes (each
+  Docker `PortBindings` entry is already a distinct `HostIp:port`, see `dockerRuntime.js`, so the
+  DROP/ACCEPT rules scope cleanly to `-d <that interface's IP>` without touching the others).
+- Default-DROP for any interface marked as requiring a knock, from the moment it is marked that way.
+- **A connection that is already open survives past the knock window, unconditionally; only a NEW
+  connection attempt needs a fresh knock.** This needs one deliberate, permanent exception rule per
+  guarded interface+port -- `-m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT` -- since `fwknopd`'s own
+  generated rules are plain, non-conntrack-aware ACCEPTs; without this exception, every packet of an
+  already-open session (not just the handshake) would need to keep matching the (expiring) knock rule,
+  silently killing an in-progress adb/scrcpy session the instant the window elapsed. Confirmed with the
+  user this is the wanted behavior, explicitly: the window is "how long you have to start a connection",
+  never "how long the connection lasts" -- reconnecting after a disconnect needs a new knock, nothing
+  about a live session times out.
+- Knock window default: **1 minute** to successfully connect. Configurable per request, **no cap enforced
+  by the app** (explicit user decision -- "a riesgo del administrador") -- requesting more than the
+  default shows a warning message (never a block) that a longer window leaves the port answering for
+  longer before anything connects, independent of how long a session that does connect then lasts.
+- Target IP: pre-filled from the HTTP request's own source IP (the browser session asking to open
+  access), always editable by hand. This works well specifically for the case this phase is actually for
+  (gating the internet-facing interface): the device browsing the UI and the device that will run
+  scrcpy are very often behind the *same* home NAT/public IP even when they are not the same device,
+  so the common case needs no typing at all. Known future gap, not a blocker now: if `redroid-forge`
+  itself ever sits behind a reverse proxy (e.g. Plenum's Caddy, already used this session for the OIDC
+  work), the detected IP would need to come from a trusted `X-Forwarded-For` instead of the raw socket
+  address.
+- UI: a toggle per bound interface in the instance's existing "Network" panel ("requires a knock", off by
+  default); when on, a small control to request access (IP pre-filled/editable, minutes pre-filled at 1)
+  and the current state (closed / open until HH:MM).
+
+**Steps (not started):**
+1. `fwknopd` as a supervised process inside the existing container + the static `access.conf` stanza +
+   generated/stored shared key (same pattern as other generated secrets in this project).
+2. `knockRequiredHosts` field + migration (additive, same pattern as `ownerId`'s own migration) +
+   the DROP/ACCEPT/ESTABLISHED-exception rule management, keyed by interface IP + port, independent of
+   container recreation (the rules are host-level and keyed by an IP:port that stays stable).
+3. `POST /api/instances/:id/adb-access` (role+ownership gated like every other instance route) that shells
+   out to the real `fwknop` client binary against the local `fwknopd`; `GET` for current state.
+4. Network panel UI: per-interface toggle + request-access control + state display.
+
+**Gate:** an instance's internet-facing interface (but not its Tailscale one, if also bound) can require a
+knock before its ADB port responds to anything new, triggered from the UI by an already-authenticated
+user, with an already-open session surviving the window's expiry and zero effect on any interface that
+does not opt in.
 
 ## Phase 10 — Removal of the old code + public polish
 
