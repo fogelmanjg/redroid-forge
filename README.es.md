@@ -22,7 +22,7 @@ sin depender de ninguna otra infraestructura.
 > [`CHANGELOG.md`](CHANGELOG.md) (releases etiquetados, política de versionado; solo en inglés) para
 > el panorama completo. Lo que hay hoy corresponde a las **Fases 0 a 7** del roadmap — todo lo de
 > la tabla de Features más abajo — con la Fase 8 (federación con `jg-dashboard`/Plenum) como
-> próximo paso. Ver [`CHANGELOG.md`](CHANGELOG.md) para el detalle, tag `v0.1.0`.
+> próximo paso. Ver [`CHANGELOG.md`](CHANGELOG.md) para el detalle, tag `v0.2.0`.
 
 ## Features
 
@@ -41,7 +41,7 @@ oficial significa validado con evidencia en hardware real, no una garantía.
 | | 📝 planeado | Magisk (el manifest existe, falta la integración real). |
 | **Watchdogs definidos por el usuario** | ✅ piloto | Scripts periódicos por instancia (pause/resume/status desde la UI, sin cron para editar a mano) — CIFI (la lógica de reconexión de un juego puntual) ya portado y corriendo como primer caso; el mecanismo es genérico para sumar más. |
 | **Backup y restore** | ✅ | Backup/restore de toda la instancia (tar.gz vía un contenedor descartable), reset opcional del Android ID, un aviso (nunca un bloqueo) al restaurar sobre una instancia con módulos/versión de GApps distinta. |
-| **Control de acceso** | ✅ | Tres roles (admin/operator/viewer) con ownership por instancia. Pluggable: `none` (default, comportamiento sin fricción de siempre), `local` (cuentas propias), `oidc` (cualquier cantidad de identity providers a la vez — Keycloak, Google, Plenum, otra federación, ... — la persona elige con cuál loguearse; los roles se asignan acá, nunca se leen del proveedor). |
+| **Control de acceso** | ✅ | Tres roles (admin/operator/viewer) con ownership por instancia. Pluggable: `none` (default, sin fricción), `local` (cuentas propias), `oidc` (cualquier cantidad de identity providers a la vez — Keycloak, Google, Plenum, otra federación, ... — roles asignados acá, nunca leídos del proveedor), `both` (local y OIDC en la misma pantalla de login). Una cuenta local también puede entrarse por una identidad OIDC vinculada (opt-in, probado logueándose de ambos lados a la vez — nunca por matchear un email declarado). Un asistente crea el primer admin en caliente desde modo `none`, y un guard de auto-bloqueo evita que `local`/`both` se conviertan en una puerta cerrada para siempre. |
 | **Control de exposición de red** | ✅ | La app y cada instancia bindean a `127.0.0.1` solamente, por defecto — redroid en sí no tiene ningún control de acceso propio. Se puede optar por cualquier interfaz específica (o todas) por instancia y para la app en sí, desde la UI; las interfaces internas de Docker/contenedores (`docker0`, `br-*`, `veth*`, ...) quedan filtradas de ese selector por defecto, con override de admin. |
 | **Doctor** | ✅ | Diagnóstico del host con el comando exacto para arreglar lo que falta — solo diagnostica, nunca ejecuta nada solo. |
 | **Visualización de pantalla** | ✅ | Scripts de conexión scrcpy (`connect.sh`/`connect.ps1`), un puerto para ver desde un dispositivo Android mismo, sin visor web embebido por diseño (ver abajo). |
@@ -208,8 +208,8 @@ atajos que vale la pena conocer, sin el manual completo.
 backend/src/server.js    Express, sirve /api/* y el frontend estático
 backend/src/lib/          dockerRuntime, binder, hwsimWifi, androidIdentity, doctor, store,
                            portAllocator, moduleManifests, moduleAcceptance, moduleGate, hwAccel,
-                           knownDb*, permissions, userStore, session, oidc, auth,
-                           networkInterfaceFilter, settings
+                           knownDb*, permissions, userStore, session, oidc, auth, accountLinks,
+                           roleAssignments, quotas, networkInterfaceFilter, settings
 backend/src/routes/       instances, doctor, images, modules, db, settings, backups, network, auth
 backend/src/modules/      manifests/*.json (contrato de cada módulo, sección 5 de REQUIREMENTS.md)
                            + una carpeta por módulo real (hwenc/, hwdec/, gapps/,

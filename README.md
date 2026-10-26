@@ -20,7 +20,7 @@ without depending on any other infrastructure.
 > [`docs/ROADMAP.md`](docs/ROADMAP.md) (in what order) and [`CHANGELOG.md`](CHANGELOG.md) (tagged
 > releases, SemVer policy) for the full picture. What exists today covers **Phases 0 through 7**
 > of the roadmap — everything in the Features table below — with Phase 8 (federation with
-> `jg-dashboard`/Plenum) next. See [`CHANGELOG.md`](CHANGELOG.md) for the detail, tag `v0.1.0`.
+> `jg-dashboard`/Plenum) next. See [`CHANGELOG.md`](CHANGELOG.md) for the detail, tag `v0.2.0`.
 
 ## Features
 
@@ -39,7 +39,7 @@ means validated with evidence on real hardware, not a guarantee.
 | | 📝 planned | Magisk (manifest exists, no real integration yet). |
 | **User-defined watchdogs** | ✅ pilot | Periodic per-instance scripts (pause/resume/status from the UI, no cron to hand-edit) — CIFI (a specific game's reconnection logic) ported and running as the first one; the mechanism is generic for more. |
 | **Backup & restore** | ✅ | Whole-instance backup/restore (tar.gz via a throwaway container), optional Android ID reset, a warning (never a block) when restoring onto an instance with different modules/GApps version. |
-| **Access control** | ✅ | Three roles (admin/operator/viewer) with per-instance ownership. Pluggable: `none` (default, today's zero-friction behavior), `local` (built-in accounts), `oidc` (any number of standard identity providers at once — Keycloak, Google, Plenum, another federation, ... — the person picks which at login; roles are assigned here, never read from the provider). |
+| **Access control** | ✅ | Three roles (admin/operator/viewer) with per-instance ownership. Pluggable: `none` (default, zero-friction), `local` (built-in accounts), `oidc` (any number of standard identity providers at once — Keycloak, Google, Plenum, another federation, ... — roles assigned here, never read from the provider), `both` (local accounts and OIDC on the same login screen). A local account can also be reached through a linked OIDC identity (opt-in, proven by logging into both at once — never by matching a claimed email). A setup wizard creates the first admin live from `none` mode, and a self-lockout guard keeps `local`/`both` from ever becoming a permanently closed door. |
 | **Network exposure control** | ✅ | The app and every instance bind to `127.0.0.1` only, by default — `redroid` itself has no access control of its own. Opt into any specific interface (or all of them) per instance and for the app itself, from the UI; Docker/container-internal interfaces (`docker0`, `br-*`, `veth*`, ...) are filtered out of that picker by default, with an admin override. |
 | **Doctor** | ✅ | Host diagnostics with the exact command to fix what's missing — it only diagnoses, never runs anything on its own. |
 | **Screen viewing** | ✅ | scrcpy connector scripts (`connect.sh`/`connect.ps1`), a port for viewing from an Android device itself, no bundled web viewer by design (see below). |
@@ -204,8 +204,8 @@ the shortcuts worth knowing, without the full manual.
 backend/src/server.js    Express, serves /api/* and the static frontend
 backend/src/lib/          dockerRuntime, binder, hwsimWifi, androidIdentity, doctor, store,
                            portAllocator, moduleManifests, moduleAcceptance, moduleGate, hwAccel,
-                           knownDb*, permissions, userStore, session, oidc, auth,
-                           networkInterfaceFilter, settings
+                           knownDb*, permissions, userStore, session, oidc, auth, accountLinks,
+                           roleAssignments, quotas, networkInterfaceFilter, settings
 backend/src/routes/       instances, doctor, images, modules, db, settings, backups, network, auth
 backend/src/modules/      manifests/*.json (each module's contract, section 5 of REQUIREMENTS.md)
                            + one folder per real module (hwenc/, hwdec/, gapps/,

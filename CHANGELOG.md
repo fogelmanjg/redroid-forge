@@ -21,7 +21,51 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-26
+
+First live pass of `oidc` mode against a real IdP, plus everything it led to.
+
+### Fixed
+
+- The `oidc` callback route passed `oidc.handleCallback()`'s `{id, ...}` straight into
+  `roleAssignments.upsertSeen()`, which expects `{externalId, ...}` -- `externalId` was always
+  `undefined`, so `undefined === undefined` silently collapsed every distinct OIDC identity onto
+  the single first-ever-created row, and `REDROID_FORGE_OIDC_BOOTSTRAP_ADMIN_ID` could never match
+  anything real. Only found by actually driving a login through a real IdP for the first time --
+  the unit tests call `upsertSeen` directly with the correct shape, so they never exercised this
+  call site. Fixed by mapping the fields explicitly at the call site.
+
 ### Added
+
+- `REDROID_FORGE_AUTH=both`: local accounts and OIDC providers on the same login screen at once --
+  e.g. an admin who wants a password-based account for themselves (no IdP dependency to go down)
+  while everyone else logs in through a real identity provider.
+- A unified Identities panel/API (`GET /api/auth/identities`) merging local accounts and OIDC
+  identities into one table (`source: 'local'|'oidc'`), plus a completed local account-management
+  API that did not exist before: `email`, password reset, and role change on an existing local
+  account (previously create/delete only).
+- Explicit account linking (`backend/src/lib/accountLinks.js`): a local account's login can be
+  reached through one or more OIDC identities too, from `PUT/DELETE /api/auth/me/links/*` (self-
+  service) or the admin-only Identities panel (view/revoke only). A link is only ever created
+  while already logged in as the local account being linked TO, by then completing a real login
+  with the OIDC provider being linked -- proving control of both sides at once is the only thing
+  this project treats as proof that they are "the same person". A claimed or even IdP-asserted
+  email is deliberately never enough on its own: it is a claim, not proof, and claims can be
+  reused, recycled or spoofed. Once linked, logging in via that external id mints a session AS the
+  local account (same id, same role) and never touches `roleAssignments.js` for it again.
+- A first-run setup wizard: while `REDROID_FORGE_AUTH=none`, the Identities tab (now reachable in
+  `none` mode too) lets you create the first local admin live, with no restart needed
+  (`POST /api/auth/setup/admin`), then shows the exact `.env` line and restart command to actually
+  turn security on -- including the real path to that `.env` file, via a new display-only
+  `REDROID_FORGE_REPO_DIR` env var set from `docker-compose.yml`'s own `${PWD}` -- and polls
+  `GET /api/auth/me` until the mode actually changes, so the login that follows doubles as an end-
+  to-end check that the whole chain worked.
+- A self-lockout guard: `local`/`both` with no local account yet and
+  `REDROID_FORGE_LOCAL_ADMIN_USER`/`_PASSWORD` not set used to mean a permanently locked login
+  screen, since the setup wizard above only shows itself in `none` mode. `auth.js` now computes,
+  once at startup, whether anything configured could actually let someone in; if not, it runs as
+  `none` for that boot instead (or stays `both` if an OIDC provider alone still has a working login
+  button) -- logged loudly, and it self-heals the instant a restart sees a real way in.
 
 - `ownerId` (who can see/use an instance) is now a list, not a single id -- an instance can be shared by
   more than one account at once (e.g. a household's shared TV instance). A new `createdId` tracks a
