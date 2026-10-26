@@ -16,7 +16,6 @@
       <button class="tab-btn" data-tab="doctor" data-i18n="nav.doctor">Doctor</button>
       <button class="tab-btn" data-tab="help" data-i18n="nav.help">Help</button>
       <button class="tab-btn" data-tab="settings" data-i18n="nav.settings">Settings</button>
-      <button class="tab-btn" id="nav-users-btn" data-tab="users" data-i18n="nav.users" hidden>Users</button>
       <button class="tab-btn" id="nav-identities-btn" data-tab="identities" data-i18n="nav.identities" hidden>Identities</button>
     </nav>
     <span id="current-user-info" class="muted" hidden></span>
@@ -117,18 +116,10 @@ gunzip -c image.tar.gz | docker load</pre>
       </form>
     </section>
 
-    <section id="tab-users" class="tab">
-      <p class="tab-intro" data-i18n="users.intro"></p>
-      <div class="toolbar">
-        <button id="btn-new-user" data-i18n="users.new">+ New user</button>
-        <button id="btn-refresh-users" data-i18n="common.refresh">Refresh</button>
-      </div>
-      <ul id="users-list" class="doctor-list"></ul>
-    </section>
-
     <section id="tab-identities" class="tab">
       <p class="tab-intro" data-i18n="identities.intro"></p>
       <div class="toolbar">
+        <button id="btn-new-user" data-i18n="identities.new" hidden>+ New local user</button>
         <button id="btn-refresh-identities" data-i18n="common.refresh">Refresh</button>
       </div>
       <ul id="identities-list" class="doctor-list"></ul>
@@ -230,10 +221,11 @@ gunzip -c image.tar.gz | docker load</pre>
 
   <dialog id="new-user-dialog">
     <form id="new-user-form" method="dialog">
-      <h2 data-i18n="users.newTitle">New user</h2>
+      <h2 data-i18n="identities.newTitle">New local user</h2>
       <label><span data-i18n="auth.username">Username</span> <input name="username" required pattern="[a-z0-9][a-z0-9_-]{0,31}" /></label>
       <label><span data-i18n="auth.password">Password</span> <input type="password" name="password" required minlength="8" autocomplete="new-password" /></label>
-      <label><span data-i18n="users.role">Role</span>
+      <label><span data-i18n="identities.email">Email</span> <input type="email" name="email" data-i18n-placeholder="identities.emailPlaceholder" /></label>
+      <label><span data-i18n="identities.role">Role</span>
         <select name="role">
           <option value="admin">admin</option>
           <option value="operator" selected>operator</option>
@@ -242,7 +234,7 @@ gunzip -c image.tar.gz | docker load</pre>
       </label>
       <div class="dialog-actions">
         <button type="button" id="btn-cancel-new-user" data-i18n="common.cancel">Cancel</button>
-        <button type="submit" data-i18n="users.create">Create</button>
+        <button type="submit" data-i18n="identities.create">Create</button>
       </div>
     </form>
   </dialog>

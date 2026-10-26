@@ -4,12 +4,23 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
+// auth.js's self-lockout guard (26/10/2026, see test/auth.lockout.test.js for its own direct
+// coverage) downgrades "local"/"both" to "none" at require time when no local account exists
+// AND these two are unset -- every test below wants the mode it actually asked for, regardless
+// of whatever happens to be in the real backend/data/users.json on whatever machine runs this
+// suite, so set them here unconditionally rather than depending on that file's live content.
 function freshAuth(mode) {
-  const prev = process.env.REDROID_FORGE_AUTH;
+  const prev = {
+    REDROID_FORGE_AUTH: process.env.REDROID_FORGE_AUTH,
+    REDROID_FORGE_LOCAL_ADMIN_USER: process.env.REDROID_FORGE_LOCAL_ADMIN_USER,
+    REDROID_FORGE_LOCAL_ADMIN_PASSWORD: process.env.REDROID_FORGE_LOCAL_ADMIN_PASSWORD,
+  };
   process.env.REDROID_FORGE_AUTH = mode;
+  process.env.REDROID_FORGE_LOCAL_ADMIN_USER = 'test-admin';
+  process.env.REDROID_FORGE_LOCAL_ADMIN_PASSWORD = 'test-password';
   delete require.cache[require.resolve('../src/lib/auth')];
   const auth = require('../src/lib/auth');
-  process.env.REDROID_FORGE_AUTH = prev;
+  for (const [k, v] of Object.entries(prev)) { if (v === undefined) delete process.env[k]; else process.env[k] = v; }
   return auth;
 }
 
@@ -94,4 +105,31 @@ test('clearSessionCookie: calls res.clearCookie with the session cookie name', (
   const res = mockRes();
   auth.clearSessionCookie(res);
   assert.equal(res._calls.cookieCleared, require('../src/lib/session').COOKIE_NAME);
+});
+
+test('"both" mode: LOCAL_ENABLED and OIDC_ENABLED are both true, and sessions work the same as either single mode', () => {
+  const auth = freshAuth('both');
+  assert.equal(auth.LOCAL_ENABLED, true);
+  assert.equal(auth.OIDC_ENABLED, true);
+  const req = { headers: {} };
+  auth.attachUser(req, {}, () => {});
+  assert.equal(req.user, undefined);
+});
+
+test('"local" mode: LOCAL_ENABLED true, OIDC_ENABLED false', () => {
+  const auth = freshAuth('local');
+  assert.equal(auth.LOCAL_ENABLED, true);
+  assert.equal(auth.OIDC_ENABLED, false);
+});
+
+test('"oidc" mode: OIDC_ENABLED true, LOCAL_ENABLED false', () => {
+  const auth = freshAuth('oidc');
+  assert.equal(auth.LOCAL_ENABLED, false);
+  assert.equal(auth.OIDC_ENABLED, true);
+});
+
+test('"none" mode: neither LOCAL_ENABLED nor OIDC_ENABLED', () => {
+  const auth = freshAuth('none');
+  assert.equal(auth.LOCAL_ENABLED, false);
+  assert.equal(auth.OIDC_ENABLED, false);
 });

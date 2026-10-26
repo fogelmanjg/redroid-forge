@@ -26,7 +26,7 @@ app.use('/api/quotas', require('./routes/quotas'));
 app.use('/api/backups', require('./routes/backups'));
 app.use('/api/network', require('./routes/network'));
 
-if (auth.AUTH_MODE === 'local') require('./lib/userStore').ensureBootstrapAdmin();
+if (auth.LOCAL_ENABLED) require('./lib/userStore').ensureBootstrapAdmin();
 
 const PORT = process.env.PORT || 8080;
 // Localhost-only by default (docs/ROADMAP.md Phase 6): this app's own API/UI can

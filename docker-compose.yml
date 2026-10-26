@@ -13,6 +13,13 @@ services:
     network_mode: host
     environment:
       - PORT=${PORT:-8080}
+      # Display-only (26/10/2026, setup wizard) -- the directory `docker compose` was run from
+      # is where .env and this very file live, by Compose's own convention (same assumption the
+      # BACKUPS_DIR/MEMINFO_FIX_DIR defaults further down already make). The running container
+      # has no other way to know this host path, and the setup wizard needs it to tell whoever
+      # is clicking through it exactly which .env to edit, instead of a vague "find your .env
+      # somewhere".
+      - REDROID_FORGE_REPO_DIR=${PWD}
       # Localhost-only by default (docs/ROADMAP.md Phase 6) -- there is no auth yet (Phase 7),
       # so whoever can reach this is able to create/delete/operate every instance. Set to
       # 0.0.0.0 or a specific interface address only once that risk is actually wanted.

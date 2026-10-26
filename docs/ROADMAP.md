@@ -669,7 +669,54 @@ full composite id, not a bare `sub`.
 **Known gap, not yet verified:** `oidc` mode's live callback against a real IdP — no IdP was available in
 this environment, so only its pure parts (enablement detection, PKCE/state bookkeeping, and now role
 assignment in isolation) are unit-tested; worth a real pass against an actual Keycloak/Authentik instance
-before relying on it.
+before relying on it. **✅ Closed 26/10/2026, see below.**
+
+**Live e2e pass against a real IdP, plus five follow-on features (26/10/2026).** A throwaway Keycloak
+(`redroid-forge-test` realm) stood in for "a real IdP" — this drove the first-ever actual callback
+through `oidc.js` end to end, which immediately surfaced a real bug unit tests never could: the callback
+route passed `oidc.handleCallback()`'s `{id, ...}` straight into `roleAssignments.upsertSeen()`, which
+expects `{externalId, ...}` — `externalId` was always `undefined`, so `undefined === undefined` silently
+collapsed every distinct OIDC identity onto the single first-ever-created row, and
+`REDROID_FORGE_OIDC_BOOTSTRAP_ADMIN_ID` could never match anything real. Fixed by mapping the fields
+explicitly at the call site. Confirmed live: login → "pending" (no role) → admin approval → re-login →
+admin UI, exactly as designed.
+
+That same live pass led to five more pieces, all user-driven mid-session:
+
+- **`both` mode** — local accounts and OIDC providers on the same login screen at once (`auth.js`'s
+  `LOCAL_ENABLED`/`OIDC_ENABLED`, derived from mode instead of a single string compare everywhere).
+- **Unified Identities panel** — one table/API (`GET /api/auth/identities`) merging local accounts and
+  OIDC identities (`source: 'local'|'oidc'`), plus a completed local ABM that did not exist before
+  (`email`, `resetPassword`, `setRole` on `userStore.js` — previously create/delete only).
+- **Explicit account linking** (`backend/src/lib/accountLinks.js`) — lets one person reach the same
+  local account through several OIDC identities too. Design question the user raised first and wanted
+  settled before building anything: should a self-claimed/IdP-claimed email ever be trusted to mean "same
+  person" as an existing local account? No — an email is a claim, not proof, and claims can be reused,
+  recycled or spoofed. The only safe proof of sameness is the person being logged in as BOTH sides at
+  once, so a link can only ever be created from `/api/auth/me/links/:providerId/start` while already
+  authenticated as the local account being linked TO — never derived from matching any field after the
+  fact. Once linked, logging in via that external id mints a session AS the local account (same id, same
+  role), bypassing `roleAssignments.js` entirely for that identity.
+- **First-run setup wizard** — `none` mode previously had no in-app way to even create the first admin
+  before flipping `REDROID_FORGE_AUTH`; `POST /api/auth/setup/admin` creates one live (no restart needed,
+  `userStore.js` was always mode-agnostic), the Identities tab (now shown in `none` mode too, since the
+  synthetic admin-bypass user already satisfies `isAdmin()`) shows the exact `.env` line and restart
+  command (`REDROID_FORGE_REPO_DIR`, a new display-only env var threaded through from `docker-compose.yml`'s
+  own `${PWD}`, so the instructions name a real path instead of a vague "find your .env somewhere"), and
+  polls `GET /api/auth/me` until the mode actually flips — the subsequent login IS the end-to-end
+  validation.
+- **Self-lockout guard** — the wizard above only shows itself in `none` mode, so setting `local`/`both`
+  with zero local users and no `REDROID_FORGE_LOCAL_ADMIN_USER`/`_PASSWORD` used to mean a permanently
+  locked login screen with no way back in short of editing `data/users.json` by hand. `auth.js` now
+  downgrades to `none` (or leaves `both` alone when an OIDC provider is configured — that half still has
+  a working login button) whenever it computes, once at require time, that nothing configured could ever
+  actually let someone in. Self-heals the instant a restart sees a real way in.
+
+**Verified:** live, end to end, for every item above (the live-IdP OIDC flow, `both` mode, account
+linking round-tripped through a real second login, the wizard's full create → instructions → poll →
+restart → login cycle, and the lockout guard actually tripping and un-tripping on a real restart) — not
+just unit tests, same discipline as every other phase. Unit coverage: 411/411 passing
+(`accountLinks.test.js` new, `auth.lockout.test.js` new, `userStore`/`quotas`/`auth` tests extended).
 
 **Redesigned again, same day (25/10/2026) — `ownerId` is a list, `createdId` is new, and operators get
 resource quotas.** User's own motivating example: a household's shared TV instance of a game, meant to be

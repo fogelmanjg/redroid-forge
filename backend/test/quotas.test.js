@@ -211,3 +211,23 @@ test('operatorIds: "oidc" mode -> every identity with role operator, by external
     assert.deepEqual(ids, new Set(['google:123']));
   });
 });
+
+test('operatorIds: "both" mode -> the union of local operators and OIDC operators', () => {
+  const usersFile = tmpFile('users.json');
+  const roleAssignmentsFile = tmpFile('role-assignments.json');
+  withEnv({ REDROID_FORGE_AUTH: 'both' }, () => {
+    delete require.cache[require.resolve('../src/lib/auth')];
+    delete require.cache[require.resolve('../src/lib/quotas')];
+    delete require.cache[require.resolve('../src/lib/userStore')];
+    delete require.cache[require.resolve('../src/lib/roleAssignments')];
+    const freshQuotas = require('../src/lib/quotas');
+    const userStore = require('../src/lib/userStore');
+    const roleAssignments = require('../src/lib/roleAssignments');
+    const op1 = userStore.createUser({ username: 'op1', password: 'password123', role: 'operator' }, usersFile);
+    userStore.createUser({ username: 'adm1', password: 'password123', role: 'admin' }, usersFile);
+    roleAssignments.upsertSeen({ externalId: 'google:123', username: 'alice' }, roleAssignmentsFile);
+    roleAssignments.setRole('google:123', 'operator', roleAssignmentsFile);
+    const ids = freshQuotas.operatorIds({ usersFile, roleAssignmentsFile });
+    assert.deepEqual(ids, new Set([op1.id, 'google:123']));
+  });
+});

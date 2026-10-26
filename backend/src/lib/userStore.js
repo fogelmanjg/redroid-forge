@@ -47,8 +47,18 @@ function findById(id, file = STORE_FILE) {
   return readJsonArray(file).find((u) => u.id === id);
 }
 
+// `email` is purely informational (never used for login or sent anything to) -- so an admin
+// managing several local accounts can tell them apart beyond just a username. Optional, no
+// format check beyond "a string" -- this is not the identity-providing field OIDC's `claims.sub`
+// is, there is nothing here that needs to be unique or verified.
+function normalizeEmail(email) {
+  if (email === undefined || email === null || email === '') return null;
+  if (typeof email !== 'string') throw httpError('"email" must be a string', 400);
+  return email;
+}
+
 // -> the created user (without passwordHash). Throws Error with httpStatus 400/409.
-function createUser({ username, password, role }, file = STORE_FILE) {
+function createUser({ username, password, role, email }, file = STORE_FILE) {
   if (typeof username !== 'string' || !USERNAME_RE.test(username)) {
     throw httpError('"username" must be lowercase letters, digits, "-" and "_" (1-32 characters)', 400);
   }
@@ -63,7 +73,12 @@ function createUser({ username, password, role }, file = STORE_FILE) {
     throw httpError(`A user named "${username}" already exists`, 409);
   }
   const user = {
-    id: crypto.randomUUID(), username, role, passwordHash: hashPassword(password), createdAt: new Date().toISOString(),
+    id: crypto.randomUUID(),
+    username,
+    role,
+    email: normalizeEmail(email),
+    passwordHash: hashPassword(password),
+    createdAt: new Date().toISOString(),
   };
   all.push(user);
   writeJsonArray(file, all);
@@ -74,6 +89,47 @@ function createUser({ username, password, role }, file = STORE_FILE) {
 function deleteUser(id, file = STORE_FILE) {
   const all = readJsonArray(file);
   writeJsonArray(file, all.filter((u) => u.id !== id));
+}
+
+// Three single-field updates (role/password/email) rather than one generic "patch" -- matches
+// the existing per-field route convention (see roleAssignments.setRole) and keeps each one's own
+// validation obvious at the call site. All three throw httpStatus 404 if `id` does not exist, so
+// routes/auth.js never has to check existence itself first.
+function requireUser(all, id) {
+  const user = all.find((u) => u.id === id);
+  if (!user) throw httpError(`No local user with id "${id}"`, 404);
+  return user;
+}
+
+function setRole(id, role, file = STORE_FILE) {
+  if (!isValidRole(role)) throw httpError('"role" must be one of: admin, operator, viewer', 400);
+  const all = readJsonArray(file);
+  const user = requireUser(all, id);
+  user.role = role;
+  writeJsonArray(file, all);
+  const { passwordHash, ...safe } = user;
+  return safe;
+}
+
+function resetPassword(id, password, file = STORE_FILE) {
+  if (typeof password !== 'string' || password.length < 8) {
+    throw httpError('"password" must be at least 8 characters', 400);
+  }
+  const all = readJsonArray(file);
+  const user = requireUser(all, id);
+  user.passwordHash = hashPassword(password);
+  writeJsonArray(file, all);
+  const { passwordHash, ...safe } = user;
+  return safe;
+}
+
+function setEmail(id, email, file = STORE_FILE) {
+  const all = readJsonArray(file);
+  const user = requireUser(all, id);
+  user.email = normalizeEmail(email);
+  writeJsonArray(file, all);
+  const { passwordHash, ...safe } = user;
+  return safe;
 }
 
 // -> {id, username, role} on success, null on a wrong username/password. Never throws for
@@ -108,5 +164,6 @@ function ensureBootstrapAdmin(file = STORE_FILE) {
 
 module.exports = {
   listUsers, findByUsername, findById, createUser, deleteUser, verifyCredentials, ensureBootstrapAdmin,
+  setRole, resetPassword, setEmail,
   hashPassword, verifyPasswordHash, USERNAME_RE,
 };

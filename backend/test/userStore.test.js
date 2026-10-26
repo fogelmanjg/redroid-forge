@@ -124,3 +124,39 @@ test('deleteUser: removes it, no error if it does not exist', () => {
   assert.equal(userStore.listUsers(file).length, 0);
   assert.doesNotThrow(() => userStore.deleteUser('not-an-id', file));
 });
+
+test('createUser: email is optional, stored and returned, never required', () => {
+  const file = tmpFile();
+  const withEmail = userStore.createUser({ username: 'alice', password: 'longenough', role: 'viewer', email: 'alice@example.invalid' }, file);
+  assert.equal(withEmail.email, 'alice@example.invalid');
+  const withoutEmail = userStore.createUser({ username: 'bob', password: 'longenough', role: 'viewer' }, file);
+  assert.equal(withoutEmail.email, null);
+});
+
+test('setRole: updates role, rejects an invalid one, 404s on an unknown id', () => {
+  const file = tmpFile();
+  const user = userStore.createUser({ username: 'alice', password: 'longenough', role: 'viewer' }, file);
+  const updated = userStore.setRole(user.id, 'operator', file);
+  assert.equal(updated.role, 'operator');
+  assert.equal(userStore.findById(user.id, file).role, 'operator');
+  assert.throws(() => userStore.setRole(user.id, 'superadmin', file), /role/);
+  assert.throws(() => userStore.setRole('not-an-id', 'admin', file), (e) => e.httpStatus === 404);
+});
+
+test('resetPassword: changes the hash so the new password verifies and the old one does not', () => {
+  const file = tmpFile();
+  const user = userStore.createUser({ username: 'alice', password: 'originalpass', role: 'viewer' }, file);
+  userStore.resetPassword(user.id, 'brandnewpass', file);
+  assert.equal(userStore.verifyCredentials('alice', 'originalpass', file), null);
+  assert.equal(userStore.verifyCredentials('alice', 'brandnewpass', file).username, 'alice');
+  assert.throws(() => userStore.resetPassword(user.id, 'short', file), /8 characters/);
+  assert.throws(() => userStore.resetPassword('not-an-id', 'longenough', file), (e) => e.httpStatus === 404);
+});
+
+test('setEmail: updates it, accepts null to clear it, 404s on an unknown id', () => {
+  const file = tmpFile();
+  const user = userStore.createUser({ username: 'alice', password: 'longenough', role: 'viewer', email: 'a@example.invalid' }, file);
+  assert.equal(userStore.setEmail(user.id, 'b@example.invalid', file).email, 'b@example.invalid');
+  assert.equal(userStore.setEmail(user.id, null, file).email, null);
+  assert.throws(() => userStore.setEmail('not-an-id', 'x@example.invalid', file), (e) => e.httpStatus === 404);
+});

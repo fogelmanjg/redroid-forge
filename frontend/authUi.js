@@ -12,6 +12,7 @@ const AuthUi = (() => {
   function isAdmin() { return !!state.user && state.user.role === 'admin'; }
   function currentUser() { return state.user; }
   function authMode() { return state.authMode; }
+  function localEnabled() { return state.authMode === 'local' || state.authMode === 'both'; }
   function canManageSettingsFn() { return state.canManageSettings; }
 
   async function fetchMe() {
@@ -53,10 +54,13 @@ const AuthUi = (() => {
     const dialog = document.querySelector('#login-dialog');
     const localForm = document.querySelector('#login-form-local');
     const oidcBlock = document.querySelector('#login-oidc');
-    const isLocal = state.authMode === 'local';
-    localForm.hidden = !isLocal;
-    oidcBlock.hidden = isLocal;
-    if (!isLocal) renderOidcProviders();
+    // "both" (26/10/2026): show BOTH at once, not either/or -- a person picks whichever login
+    // method applies to them, same screen.
+    const showLocal = state.authMode === 'local' || state.authMode === 'both';
+    const showOidc = state.authMode === 'oidc' || state.authMode === 'both';
+    localForm.hidden = !showLocal;
+    oidcBlock.hidden = !showOidc;
+    if (showOidc) renderOidcProviders();
     if (!dialog.open) dialog.showModal();
   }
 
@@ -115,13 +119,12 @@ const AuthUi = (() => {
     });
   }
 
-  // Header chrome (username/role, logout button, Users/Identities nav tabs) -- only meaningful
-  // once `ready` has resolved, called from app.js's own boot sequence rather than here, so it
-  // runs after I18n.apply() (the labels need translated text already applied once).
+  // Header chrome (username/role, logout button, Identities nav tab) -- only meaningful once
+  // `ready` has resolved, called from app.js's own boot sequence rather than here, so it runs
+  // after I18n.apply() (the labels need translated text already applied once).
   function renderHeaderChrome() {
     const info = document.querySelector('#current-user-info');
     const logoutBtn = document.querySelector('#btn-logout');
-    const usersNavBtn = document.querySelector('#nav-users-btn');
     const identitiesNavBtn = document.querySelector('#nav-identities-btn');
     if (state.authMode === 'none') {
       info.hidden = true;
@@ -131,11 +134,14 @@ const AuthUi = (() => {
       info.textContent = `${state.user.username || state.user.id} (${state.user.role})`;
       logoutBtn.hidden = false;
     }
-    usersNavBtn.hidden = !(state.authMode === 'local' && isAdmin());
-    // "oidc" mode's role management (roleAssignments.js) -- see routes/auth.js's /identities
-    // routes, admin only, separate from /users because OIDC identities are never created here,
-    // only approved once they already exist from having logged in.
-    identitiesNavBtn.hidden = !(state.authMode === 'oidc' && isAdmin());
+    // One unified "Identities" tab (26/10/2026) covers local accounts and OIDC identities alike
+    // -- see routes/auth.js's GET /identities. Shown to any admin, in ANY mode including "none"
+    // (26/10/2026, setup wizard): "none" mode synthesizes a role:'admin' user with no real
+    // session (see GET /api/auth/me), so isAdmin() is already true there -- this is also exactly
+    // the audience the setup wizard (app.js's loadIdentities, rendered here instead of an
+    // identity list while authMode is "none") needs to reach, since nobody else can turn
+    // security on in the first place.
+    identitiesNavBtn.hidden = !isAdmin();
   }
 
   wireLoginForm();
@@ -143,6 +149,6 @@ const AuthUi = (() => {
   refreshAndGate();
 
   return {
-    ready, can, isAdmin, currentUser, authMode, canManageSettings: canManageSettingsFn, renderHeaderChrome,
+    ready, can, isAdmin, currentUser, authMode, localEnabled, canManageSettings: canManageSettingsFn, renderHeaderChrome,
   };
 })();

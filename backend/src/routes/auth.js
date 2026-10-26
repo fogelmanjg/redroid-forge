@@ -3,6 +3,7 @@ const auth = require('../lib/auth');
 const userStore = require('../lib/userStore');
 const oidc = require('../lib/oidc');
 const roleAssignments = require('../lib/roleAssignments');
+const accountLinks = require('../lib/accountLinks');
 const permissions = require('../lib/permissions');
 
 const router = express.Router();
@@ -42,19 +43,59 @@ router.post('/logout', (req, res) => {
 // who cannot even log in yet would just be confusing, not useful.
 router.get('/directory', (req, res) => {
   if (!req.user) return res.status(401).json({ error: 'Not logged in' });
-  if (auth.AUTH_MODE === 'local') {
-    return res.json(userStore.listUsers().map((u) => ({ id: u.id, username: u.username })));
+  const rows = [];
+  if (auth.LOCAL_ENABLED) {
+    for (const u of userStore.listUsers()) rows.push({ id: u.id, username: u.username });
   }
-  if (auth.AUTH_MODE === 'oidc') {
-    return res.json(
-      roleAssignments.listAssignments().filter((a) => a.role).map((a) => ({ id: a.externalId, username: a.username })),
-    );
+  if (auth.OIDC_ENABLED) {
+    for (const a of roleAssignments.listAssignments()) {
+      if (a.role) rows.push({ id: a.externalId, username: a.username });
+    }
   }
-  return res.json([]);
+  res.json(rows);
+});
+
+// First-run setup wizard (26/10/2026) -- turning on security today means hand-editing
+// REDROID_FORGE_AUTH in .env and restarting, with no in-app way to even create the first admin
+// account beforehand (the normal /identities routes below all 404 while AUTH_MODE is "none").
+// These two routes close only that gap: creating the local admin row can happen live, no
+// restart needed (userStore.js is a plain data layer, see its own comment -- it never gated on
+// auth mode itself, only the routes did). The mode flip itself still is NOT done here -- see the
+// module-level comment below on why self-recreating this container from inside itself (even
+// though it already holds the Docker socket for managing redroid instances) is not a risk worth
+// taking for a security-mode change; the frontend shows the exact .env line + restart command
+// instead, and polls GET /me to detect once a human has actually done it.
+//
+// No extra privilege boundary is added by either route: "none" mode already means whoever can
+// reach this app has full admin capability over every instance (see docker-compose.yml's own
+// comment on REDROID_FORGE_BIND_HOST) -- being able to also pre-create a pending local admin row
+// is not a new hole, it is the same posture.
+router.get('/setup/status', (req, res) => {
+  res.json({
+    authMode: auth.AUTH_MODE,
+    localUsernames: userStore.listUsers().map((u) => u.username),
+    // See docker-compose.yml's own comment on REDROID_FORGE_REPO_DIR -- null if whoever runs
+    // this container did not pass it through (e.g. a hand-rolled `docker run`, not this repo's
+    // compose file), the wizard just falls back to a vaguer instruction in that case.
+    repoDir: process.env.REDROID_FORGE_REPO_DIR || null,
+  });
+});
+
+router.post('/setup/admin', (req, res) => {
+  if (auth.AUTH_MODE !== 'none') {
+    return res.status(403).json({ error: 'Setup only applies while REDROID_FORGE_AUTH is "none" -- use the Identities panel once an admin is logged in.' });
+  }
+  try {
+    const { username, password } = req.body || {};
+    const user = userStore.createUser({ username, password, role: 'admin' });
+    res.status(201).json({ id: user.id, username: user.username, role: user.role });
+  } catch (e) {
+    sendError(res, e, 400);
+  }
 });
 
 router.post('/login', (req, res) => {
-  if (auth.AUTH_MODE !== 'local') return res.status(404).json({ error: 'REDROID_FORGE_AUTH is not "local"' });
+  if (!auth.LOCAL_ENABLED) return res.status(404).json({ error: 'REDROID_FORGE_AUTH has local accounts disabled' });
   const { username, password } = req.body || {};
   if (typeof username !== 'string' || typeof password !== 'string') {
     return res.status(400).json({ error: '"username" and "password" are required' });
@@ -71,12 +112,12 @@ router.post('/login', (req, res) => {
 // screen needs this to even know which "Log in with X" buttons to draw, before anyone is
 // authenticated.
 router.get('/oidc/providers', (req, res) => {
-  if (auth.AUTH_MODE !== 'oidc') return res.status(404).json({ error: 'REDROID_FORGE_AUTH is not "oidc"' });
+  if (!auth.OIDC_ENABLED) return res.status(404).json({ error: 'REDROID_FORGE_AUTH has OIDC disabled' });
   res.json(oidc.listProviders().map((p) => ({ id: p.id, label: p.label })));
 });
 
 router.get('/oidc/:providerId/login', async (req, res) => {
-  if (auth.AUTH_MODE !== 'oidc') return res.status(404).json({ error: 'REDROID_FORGE_AUTH is not "oidc"' });
+  if (!auth.OIDC_ENABLED) return res.status(404).json({ error: 'REDROID_FORGE_AUTH has OIDC disabled' });
   try {
     res.redirect(await oidc.getAuthorizationUrl(req.params.providerId));
   } catch (e) {
@@ -85,15 +126,79 @@ router.get('/oidc/:providerId/login', async (req, res) => {
 });
 
 router.get('/oidc/:providerId/callback', async (req, res) => {
-  if (auth.AUTH_MODE !== 'oidc') return res.status(404).json({ error: 'REDROID_FORGE_AUTH is not "oidc"' });
+  if (!auth.OIDC_ENABLED) return res.status(404).json({ error: 'REDROID_FORGE_AUTH has OIDC disabled' });
   try {
     // handleCallback only ever proves IDENTITY (see oidc.js's own comment on why) -- the role,
     // if any, comes from this project's own table, never from whichever provider the person
-    // picked. upsertSeen always records/refreshes the identity (so an admin can see and approve
-    // it) even when it is not granted anything yet; the session cookie is only ever set once a
-    // real role exists.
+    // picked.
     const identity = await oidc.handleCallback(req.params.providerId, req.query);
-    const seen = roleAssignments.upsertSeen(identity);
+
+    // Account linking (26/10/2026, see accountLinks.js) -- this callback is completing a "link
+    // another login method" request started from /me/links/:providerId/start while already
+    // logged in as a local account, not a fresh login. Record the link and leave the person's
+    // EXISTING session alone (they are already logged in as that local account; nothing about
+    // their session needs to change) rather than running the normal role-lookup flow below.
+    if (identity.linkLocalUserId) {
+      const localUser = userStore.findById(identity.linkLocalUserId);
+      if (!localUser) {
+        return res.status(400).send('Cannot link: the local account this was started from no longer exists.');
+      }
+      // An externalId that already has its OWN assigned role (not just a pending, never-
+      // approved one) is a separate identity an admin deliberately granted access to -- absorb
+      // it into a link only with an explicit unlink-then-relink, never silently here.
+      const existingAssignment = roleAssignments.findByExternalId(identity.id);
+      if (existingAssignment && existingAssignment.role) {
+        return res.status(409).send(
+          `"${identity.username}" already has its own role ("${existingAssignment.role}") as a separate identity -- `
+          + 'remove that role first (Identities panel) before linking it to a local account.',
+        );
+      }
+      try {
+        accountLinks.link({
+          externalId: identity.id, localUserId: identity.linkLocalUserId, username: identity.username,
+          providerId: identity.providerId, providerLabel: identity.providerLabel,
+        });
+      } catch (e) {
+        return res.status(e.httpStatus || 400).send(e.message);
+      }
+      // Superseded by the link now -- an unlinked, never-approved pending row left behind would
+      // just be confusing clutter in the Identities panel.
+      if (existingAssignment) roleAssignments.deleteAssignment(identity.id);
+      return res.redirect('/');
+    }
+
+    // Not a link -- a fresh login. A PREVIOUSLY linked identity logs in AS its anchor local
+    // account (same session id, so quotas/ownership/capabilities all key off the one stable
+    // identity) -- re-reading the local user fresh rather than trusting anything cached on the
+    // link record, so a role change made after linking still applies immediately.
+    const existingLink = accountLinks.findByExternalId(identity.id);
+    if (existingLink) {
+      const localUser = userStore.findById(existingLink.localUserId);
+      if (localUser) {
+        auth.setSessionCookie(res, { id: localUser.id, username: localUser.username, role: localUser.role });
+        return res.redirect('/');
+      }
+      // The linked local account was deleted since -- fall through to the normal unlinked flow
+      // below rather than erroring, same as any other never-approved identity.
+    }
+
+    // upsertSeen always records/refreshes the identity (so an admin can see and approve it)
+    // even when it is not granted anything yet; the session cookie is only ever set once a real
+    // role exists.
+    //
+    // oidc.js names this field `id` (its own identity-shaped contract); roleAssignments.js
+    // names the same value `externalId` (its own storage-shaped contract) -- map explicitly
+    // here rather than passing `identity` straight through, or every identity collapses onto
+    // a single stored row (externalId ends up undefined for all of them, and undefined ===
+    // undefined matches the first one ever created) and BOOTSTRAP_ADMIN_ID can never match
+    // anything real. Found live 26/10/2026 -- unit tests call upsertSeen directly with the
+    // correct shape, so they never exercised this call site.
+    const seen = roleAssignments.upsertSeen({
+      externalId: identity.id,
+      username: identity.username,
+      providerId: identity.providerId,
+      providerLabel: identity.providerLabel,
+    });
     if (!seen.role) {
       return res.status(403).send(
         'Login succeeded, but no role has been assigned to this account yet -- ask a redroid-forge admin to approve it.',
@@ -106,66 +211,169 @@ router.get('/oidc/:providerId/callback', async (req, res) => {
   }
 });
 
-// Local user management -- admin only, and only meaningful in "local" mode (there is nowhere
-// else to create an account: "oidc" accounts come from the IdP, "none" has no accounts at all).
-// This is the ONLY way to add a user beyond the bootstrap admin (userStore.ensureBootstrapAdmin)
-// -- there is no separate setup wizard.
-function requireLocalAdmin(req, res, next) {
-  if (auth.AUTH_MODE !== 'local') return res.status(404).json({ error: 'REDROID_FORGE_AUTH is not "local"' });
-  if (!permissions.canManageSettings(req.user)) return res.status(403).json({ error: 'Admin only' });
+// Self-service account linking (26/10/2026, see accountLinks.js) -- "link another login method
+// to MY account", available to ANY logged-in local user (not just admin), never admin-on-behalf-
+// of-someone-else: the whole point is the proof of sameness comes from the person demonstrating
+// control of BOTH sides in their own browser, right now. The anchor must be a local session --
+// linking only ever points an OIDC externalId AT a local account, never OIDC-to-OIDC (see the
+// module comment in accountLinks.js), so starting this from an OIDC-logged-in session would have
+// no local id to link to.
+function requireLocalSession(req, res, next) {
+  if (!req.user || findIdentitySource(req.user.id) !== 'local') {
+    return res.status(403).json({ error: 'Only a local account can link another login method to itself' });
+  }
   next();
 }
 
-router.get('/users', requireLocalAdmin, (req, res) => {
-  res.json(userStore.listUsers());
+router.get('/me/links', requireLocalSession, (req, res) => {
+  res.json(accountLinks.findByLocalUserId(req.user.id));
 });
 
-router.post('/users', requireLocalAdmin, (req, res) => {
+router.get('/me/links/:providerId/start', requireLocalSession, async (req, res) => {
+  if (!auth.OIDC_ENABLED) return res.status(404).json({ error: 'REDROID_FORGE_AUTH has OIDC disabled' });
   try {
-    const { username, password, role } = req.body || {};
-    res.status(201).json(userStore.createUser({ username, password, role }));
+    res.redirect(await oidc.getAuthorizationUrl(req.params.providerId, { linkLocalUserId: req.user.id }));
   } catch (e) {
-    sendError(res, e, 400);
+    sendError(res, e);
   }
 });
 
-router.delete('/users/:id', requireLocalAdmin, (req, res) => {
-  if (req.params.id === req.user.id) {
-    return res.status(400).json({ error: 'Cannot delete your own account while logged in as it' });
+router.delete('/me/links/:externalId', requireLocalSession, (req, res) => {
+  const existing = accountLinks.findByExternalId(req.params.externalId);
+  if (!existing || existing.localUserId !== req.user.id) {
+    return res.status(404).json({ error: 'No such linked identity on your account' });
   }
-  userStore.deleteUser(req.params.id);
+  accountLinks.unlink(req.params.externalId);
   res.status(204).end();
 });
 
-// OIDC identity/role management -- admin only, only meaningful in "oidc" mode (see
-// roleAssignments.js). Unlike /users, there is no "create" route here: an identity only ever
-// comes into existence by actually logging in once (upsertSeen, see /oidc/callback above) --
-// an admin approves/assigns a role to one that already showed up, never invents one from
-// scratch.
-function requireOidcAdmin(req, res, next) {
-  if (auth.AUTH_MODE !== 'oidc') return res.status(404).json({ error: 'REDROID_FORGE_AUTH is not "oidc"' });
+// Unified identity management (redesigned 26/10/2026) -- one admin-facing table covering BOTH
+// local accounts (userStore.js) and OIDC identities (roleAssignments.js), since from here on
+// they share the exact same role/quota concepts (permissions.js, quotas.js never cared which
+// backend produced a user id) and "both" mode means a single install can have rows from either
+// source at once. Each row is tagged `source: 'local' | 'oidc'` so the frontend can decide which
+// actions apply (password reset/email only make sense for `local`; `providerLabel` only exists
+// for `oidc`). There is still no "create" for an `oidc` row -- same reasoning as before, an
+// identity only comes into existence by actually logging in once (upsertSeen, see
+// /oidc/callback above); `POST /identities` below only ever creates a `local` one.
+function toLocalRow(u) {
+  return {
+    id: u.id, source: 'local', username: u.username, email: u.email ?? null, role: u.role,
+    providerId: null, providerLabel: null, createdAt: u.createdAt, lastSeenAt: null,
+  };
+}
+function toOidcRow(a) {
+  return {
+    id: a.externalId, source: 'oidc', username: a.username, email: null, role: a.role,
+    providerId: a.providerId, providerLabel: a.providerLabel, createdAt: a.createdAt, lastSeenAt: a.lastSeenAt,
+  };
+}
+function listIdentityRows() {
+  const rows = [];
+  if (auth.LOCAL_ENABLED) for (const u of userStore.listUsers()) rows.push(toLocalRow(u));
+  if (auth.OIDC_ENABLED) for (const a of roleAssignments.listAssignments()) rows.push(toOidcRow(a));
+  return rows;
+}
+// Which store actually has this id -- `null` if neither (lets every route below 404 the same
+// way instead of guessing from the id's shape, e.g. assuming a ":" means "oidc").
+function findIdentitySource(id) {
+  if (auth.LOCAL_ENABLED && userStore.findById(id)) return 'local';
+  if (auth.OIDC_ENABLED && roleAssignments.findByExternalId(id)) return 'oidc';
+  return null;
+}
+
+function requireIdentityAdmin(req, res, next) {
+  if (auth.AUTH_MODE === 'none') return res.status(404).json({ error: 'REDROID_FORGE_AUTH is "none" -- no accounts exist' });
   if (!permissions.canManageSettings(req.user)) return res.status(403).json({ error: 'Admin only' });
   next();
 }
 
-router.get('/identities', requireOidcAdmin, (req, res) => {
-  res.json(roleAssignments.listAssignments());
+router.get('/identities', requireIdentityAdmin, (req, res) => {
+  res.json(listIdentityRows());
 });
 
-router.put('/identities/:externalId/role', requireOidcAdmin, (req, res) => {
+// `local` only -- see the module comment above on why `oidc` rows can't be created here.
+router.post('/identities', requireIdentityAdmin, (req, res) => {
+  if (!auth.LOCAL_ENABLED) return res.status(404).json({ error: 'REDROID_FORGE_AUTH has local accounts disabled' });
   try {
-    const { role } = req.body || {};
-    res.json(roleAssignments.setRole(req.params.externalId, role === undefined ? null : role));
+    const { username, password, role, email } = req.body || {};
+    res.status(201).json(toLocalRow(userStore.createUser({ username, password, role, email })));
   } catch (e) {
     sendError(res, e, 400);
   }
 });
 
-router.delete('/identities/:externalId', requireOidcAdmin, (req, res) => {
-  if (req.params.externalId === req.user.id) {
+router.put('/identities/:id/role', requireIdentityAdmin, (req, res) => {
+  const source = findIdentitySource(req.params.id);
+  if (!source) return res.status(404).json({ error: `No identity with id "${req.params.id}"` });
+  try {
+    const { role } = req.body || {};
+    if (source === 'local') return res.json(toLocalRow(userStore.setRole(req.params.id, role)));
+    return res.json(toOidcRow(roleAssignments.setRole(req.params.id, role === undefined ? null : role)));
+  } catch (e) {
+    sendError(res, e, 400);
+  }
+});
+
+// `local` only -- an OIDC identity's password lives at the IdP, not here.
+router.put('/identities/:id/password', requireIdentityAdmin, (req, res) => {
+  if (findIdentitySource(req.params.id) !== 'local') {
+    return res.status(404).json({ error: 'Password reset only applies to a local account' });
+  }
+  try {
+    const { password } = req.body || {};
+    res.json(toLocalRow(userStore.resetPassword(req.params.id, password)));
+  } catch (e) {
+    sendError(res, e, 400);
+  }
+});
+
+// `local` only -- same reasoning as password above (an OIDC row has no field to edit here).
+router.put('/identities/:id/email', requireIdentityAdmin, (req, res) => {
+  if (findIdentitySource(req.params.id) !== 'local') {
+    return res.status(404).json({ error: 'Email only applies to a local account' });
+  }
+  try {
+    const { email } = req.body || {};
+    res.json(toLocalRow(userStore.setEmail(req.params.id, email)));
+  } catch (e) {
+    sendError(res, e, 400);
+  }
+});
+
+router.delete('/identities/:id', requireIdentityAdmin, (req, res) => {
+  if (req.params.id === req.user.id) {
     return res.status(400).json({ error: 'Cannot delete your own identity while logged in as it' });
   }
-  roleAssignments.deleteAssignment(req.params.externalId);
+  const source = findIdentitySource(req.params.id);
+  if (!source) return res.status(404).json({ error: `No identity with id "${req.params.id}"` });
+  if (source === 'local') {
+    // A deleted local account can't stay anyone's link anchor -- clear its links too, rather
+    // than leaving externalId rows that point at a local user id that no longer exists.
+    for (const l of accountLinks.findByLocalUserId(req.params.id)) accountLinks.unlink(l.externalId);
+    userStore.deleteUser(req.params.id);
+  } else {
+    roleAssignments.deleteAssignment(req.params.id);
+  }
+  res.status(204).end();
+});
+
+// Admin view of a local account's linked login methods -- same data as GET /me/links, just for
+// any account (support/security: "what else can log in as pepito"), admin-only, read + revoke
+// only -- there is still no admin-initiated "create a link", same reasoning as /me/links/start.
+router.get('/identities/:id/links', requireIdentityAdmin, (req, res) => {
+  if (findIdentitySource(req.params.id) !== 'local') {
+    return res.status(404).json({ error: 'Linked login methods only apply to a local account' });
+  }
+  res.json(accountLinks.findByLocalUserId(req.params.id));
+});
+
+router.delete('/identities/:id/links/:externalId', requireIdentityAdmin, (req, res) => {
+  const existing = accountLinks.findByExternalId(req.params.externalId);
+  if (!existing || existing.localUserId !== req.params.id) {
+    return res.status(404).json({ error: 'No such linked identity on that account' });
+  }
+  accountLinks.unlink(req.params.externalId);
   res.status(204).end();
 });
 

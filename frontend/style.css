@@ -83,6 +83,8 @@ th, td { text-align: left; padding: 0.5rem; border-bottom: 1px solid var(--borde
 
 .doctor-item .label { font-weight: 600; display: flex; align-items: center; gap: 0.5rem; }
 .doctor-item .detail { margin: 0.3rem 0 0; opacity: 0.85; font-size: 0.9rem; }
+
+.identity-links { margin-top: -0.4rem; padding-left: 1.2rem; font-size: 0.85rem; display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
 .doctor-item pre {
   background: rgba(127,127,127,0.12);
   padding: 0.6rem;

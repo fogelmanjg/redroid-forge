@@ -79,9 +79,10 @@ function deleteQuota(userId, file = STORE_FILE) {
 // than computed inside it, so that function stays a plain, easily-tested pure check.
 function operatorIds({ usersFile, roleAssignmentsFile } = {}) {
   const ids = new Set();
-  if (auth.AUTH_MODE === 'local') {
+  if (auth.LOCAL_ENABLED) {
     for (const u of userStore.listUsers(usersFile)) if (u.role === 'operator') ids.add(u.id);
-  } else if (auth.AUTH_MODE === 'oidc') {
+  }
+  if (auth.OIDC_ENABLED) {
     for (const a of roleAssignments.listAssignments(roleAssignmentsFile)) if (a.role === 'operator') ids.add(a.externalId);
   }
   return ids;

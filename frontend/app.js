@@ -10,7 +10,6 @@ function switchTab(name) {
   if (name === 'user-modules') loadUserModulesTab();
   if (name === 'doctor') loadDoctor();
   if (name === 'settings') loadSettings();
-  if (name === 'users') loadUsers();
   if (name === 'identities') loadIdentities();
 }
 
@@ -1569,7 +1568,7 @@ $('#settings-form').addEventListener('submit', async (ev) => {
 // quotas.js) -- shown only on operator rows (admin has no limit, viewer can never create/
 // configure an instance so a quota on one would never do anything). Fire-and-save on change,
 // same pattern as the Identities role <select> just below: no separate "Save" button, empty =
-// unlimited for that dimension. Shared by loadUsers() and loadIdentities(), since quotas are
+// unlimited for that dimension. Shared by the "+ New local user" dialog and loadIdentities(), since quotas are
 // keyed by user id regardless of which auth backend produced it.
 function appendQuotaFields(li, userId, role, quotasById) {
   if (role !== 'operator') return;
@@ -1608,65 +1607,172 @@ function appendQuotaFields(li, userId, role, quotasById) {
   li.appendChild(ramInput);
 }
 
-// Local user management (docs/ROADMAP.md Phase 7) -- admin + "local" auth mode only, same
-// pattern as the Doctor/Modules lists (ul#...-list rebuilt from scratch on every load).
-async function loadUsers() {
-  const list = $('#users-list');
-  list.innerHTML = `<li class="muted">${t('common.loading')}</li>`;
+// Unified identity management (docs/ROADMAP.md Phase 7, redesigned 26/10/2026) -- admin, any
+// auth mode other than "none". One table for both local accounts and OIDC identities (see
+// routes/auth.js's GET /identities -- each row carries `source: 'local'|'oidc'`), since they
+// share the exact same role/quota concepts underneath. Only `source: 'local'` rows get an email
+// field and a password-reset button; an OIDC row has neither (its password lives at the IdP,
+// its email if any comes from the IdP's own claims, not stored here) and has no "new" dialog --
+// it only exists once it has actually logged in (see routes/auth.js's /oidc/callback), an admin
+// only ever approves/changes/revokes one that already showed up.
+// Setup wizard (26/10/2026) -- "none" mode has no identities to manage, so loadIdentities()
+// renders this instead: create the first local admin NOW (live, no restart -- see
+// routes/auth.js's /setup/admin), then show the exact .env line + restart command and poll GET
+// /me until a human has actually done that restart, rather than trying to flip
+// REDROID_FORGE_AUTH and recreate this container from inside itself (see that route's own
+// comment on why that is not worth the risk). The poll is the "check it took effect"; the login
+// dialog that appears after the page reloads (authUi.js's normal gate, nothing special needed
+// here) is the actual end-to-end validation -- if that login works, the whole chain (admin
+// created + .env edited + container restarted) really worked.
+let setupPollInterval = null;
+async function renderSetupWizard(list) {
+  clearInterval(setupPollInterval);
+  setupPollInterval = null;
+  $('#tab-identities .tab-intro').textContent = t('setup.intro');
+  let status;
   try {
-    const [users, quotas] = await Promise.all([api('/auth/users'), api('/quotas')]);
-    const quotasById = new Map(quotas.map((q) => [q.userId, q]));
-    list.innerHTML = '';
-    if (users.length === 0) list.innerHTML = `<li class="muted">${t('users.none')}</li>`;
-    for (const u of users) {
-      const li = document.createElement('li');
-      const label = document.createElement('span');
-      label.textContent = `${u.username} (${u.role})`;
-      li.appendChild(label);
-      appendQuotaFields(li, u.id, u.role, quotasById);
-      const delBtn = document.createElement('button');
-      delBtn.type = 'button';
-      delBtn.className = 'secondary';
-      delBtn.textContent = t('users.delete');
-      delBtn.disabled = AuthUi.currentUser() && AuthUi.currentUser().id === u.id;
-      delBtn.addEventListener('click', async () => {
-        if (!confirm(t('users.deleteConfirm', { username: u.username }))) return;
-        try {
-          await api(`/auth/users/${u.id}`, { method: 'DELETE' });
-          loadUsers();
-        } catch (e) {
-          alert(e.message);
-        }
-      });
-      li.appendChild(delBtn);
-      list.appendChild(li);
-    }
+    status = await api('/auth/setup/status');
   } catch (e) {
     list.innerHTML = `<li class="fail-text">${t('common.error', { msg: e.message })}</li>`;
+    return;
   }
+  list.innerHTML = '';
+  const li = document.createElement('li');
+
+  if (status.localUsernames.length === 0) {
+    const form = document.createElement('form');
+    form.className = 'setup-form';
+    const userInput = document.createElement('input');
+    userInput.placeholder = t('setup.username');
+    userInput.required = true;
+    userInput.autocomplete = 'username';
+    const passInput = document.createElement('input');
+    passInput.type = 'password';
+    passInput.placeholder = t('setup.password');
+    passInput.required = true;
+    passInput.autocomplete = 'new-password';
+    const submitBtn = document.createElement('button');
+    submitBtn.type = 'submit';
+    submitBtn.textContent = t('setup.createAdmin');
+    const errorEl = document.createElement('p');
+    errorEl.className = 'fail-text';
+    errorEl.hidden = true;
+    form.append(userInput, passInput, submitBtn, errorEl);
+    form.addEventListener('submit', async (ev) => {
+      ev.preventDefault();
+      errorEl.hidden = true;
+      try {
+        await api('/auth/setup/admin', {
+          method: 'POST',
+          body: JSON.stringify({ username: userInput.value, password: passInput.value }),
+        });
+        renderSetupWizard(list);
+      } catch (e) {
+        errorEl.hidden = false;
+        errorEl.textContent = e.message;
+      }
+    });
+    li.appendChild(form);
+    list.appendChild(li);
+    return;
+  }
+
+  const created = document.createElement('p');
+  created.textContent = t('setup.adminCreated', { username: status.localUsernames.join(', ') });
+  li.appendChild(created);
+
+  const envPath = status.repoDir ? `${status.repoDir}/.env` : t('setup.envPathUnknown');
+  const envLine = 'REDROID_FORGE_AUTH=local';
+  const restartCmd = status.repoDir ? `cd ${status.repoDir} && docker compose up -d` : 'docker compose up -d';
+  const pathRow = document.createElement('p');
+  pathRow.append(`${t('setup.envPathLabel')} `, (() => { const c = document.createElement('code'); c.textContent = envPath; return c; })());
+  li.appendChild(pathRow);
+  for (const [labelKey, value] of [['setup.envLineLabel', envLine], ['setup.restartLabel', restartCmd]]) {
+    const row = document.createElement('p');
+    const code = document.createElement('code');
+    code.textContent = value;
+    const copyBtn = document.createElement('button');
+    copyBtn.type = 'button';
+    copyBtn.className = 'secondary';
+    copyBtn.textContent = t('common.copy');
+    copyBtn.addEventListener('click', () => navigator.clipboard.writeText(value).catch(() => {}));
+    row.append(`${t(labelKey)} `, code, ' ', copyBtn);
+    li.appendChild(row);
+  }
+
+  const waiting = document.createElement('p');
+  waiting.className = 'muted';
+  waiting.textContent = t('setup.waiting');
+  li.appendChild(waiting);
+  list.appendChild(li);
+
+  setupPollInterval = setInterval(async () => {
+    try {
+      const me = await fetch('/api/auth/me').then((r) => r.json());
+      if (me.authMode !== 'none') {
+        clearInterval(setupPollInterval);
+        waiting.className = '';
+        waiting.textContent = t('setup.activated');
+        const reloadBtn = document.createElement('button');
+        reloadBtn.type = 'button';
+        reloadBtn.textContent = t('setup.reloadNow');
+        reloadBtn.addEventListener('click', () => window.location.reload());
+        li.appendChild(reloadBtn);
+      }
+    } catch {
+      // a transient fetch failure here just means the next tick tries again -- the container
+      // may well be mid-restart right now, which is exactly the case this is waiting out.
+    }
+  }, 3000);
 }
 
-// OIDC identity/role management (docs/ROADMAP.md Phase 7, redesigned 25/10/2026) -- admin +
-// "oidc" auth mode only. Unlike loadUsers(), there is no "new" dialog: an identity only exists
-// here once it has actually logged in once (see routes/auth.js's /oidc/callback), an admin only
-// ever approves/changes/revokes one that already showed up.
 async function loadIdentities() {
   const list = $('#identities-list');
   list.innerHTML = `<li class="muted">${t('common.loading')}</li>`;
+  $('#btn-new-user').hidden = !AuthUi.localEnabled();
+  if (AuthUi.authMode() === 'none') return renderSetupWizard(list);
+  clearInterval(setupPollInterval);
+  setupPollInterval = null;
+  $('#tab-identities .tab-intro').textContent = t('identities.intro');
   try {
-    const [identities, quotas] = await Promise.all([api('/auth/identities'), api('/quotas')]);
+    const [identities, quotas, providers] = await Promise.all([
+      api('/auth/identities'), api('/quotas'), fetch('/api/auth/oidc/providers').then((r) => (r.ok ? r.json() : [])),
+    ]);
     const quotasById = new Map(quotas.map((q) => [q.userId, q]));
     list.innerHTML = '';
     if (identities.length === 0) list.innerHTML = `<li class="muted">${t('identities.none')}</li>`;
     for (const idn of identities) {
       const li = document.createElement('li');
       const label = document.createElement('span');
-      const who = `${idn.username} [${idn.providerLabel || idn.providerId || '?'}]`;
+      const sourceTag = idn.source === 'local' ? t('identities.source.local') : (idn.providerLabel || idn.providerId || '?');
+      const who = `${idn.username} [${sourceTag}]`;
       label.textContent = idn.role ? `${who} (${idn.role})` : `${who} — ${t('identities.pending')}`;
       li.appendChild(label);
 
+      if (idn.source === 'local') {
+        const emailInput = document.createElement('input');
+        emailInput.type = 'email';
+        emailInput.placeholder = t('identities.emailPlaceholder');
+        emailInput.value = idn.email || '';
+        emailInput.addEventListener('change', async () => {
+          try {
+            await api(`/auth/identities/${encodeURIComponent(idn.id)}/email`, {
+              method: 'PUT',
+              body: JSON.stringify({ email: emailInput.value || null }),
+            });
+          } catch (e) {
+            alert(e.message);
+            emailInput.value = idn.email || '';
+          }
+        });
+        li.appendChild(emailInput);
+      }
+
       const roleSelect = document.createElement('select');
-      for (const value of ['', 'viewer', 'operator', 'admin']) {
+      // A local row always has a role from creation -- '' (pending) only makes sense for an
+      // OIDC row that has never been approved yet.
+      const roleOptions = idn.source === 'local' ? ['viewer', 'operator', 'admin'] : ['', 'viewer', 'operator', 'admin'];
+      for (const value of roleOptions) {
         const opt = document.createElement('option');
         opt.value = value;
         opt.textContent = value || t('identities.pending');
@@ -1675,7 +1781,7 @@ async function loadIdentities() {
       roleSelect.value = idn.role || '';
       roleSelect.addEventListener('change', async () => {
         try {
-          await api(`/auth/identities/${encodeURIComponent(idn.externalId)}/role`, {
+          await api(`/auth/identities/${encodeURIComponent(idn.id)}/role`, {
             method: 'PUT',
             body: JSON.stringify({ role: roleSelect.value || null }),
           });
@@ -1686,17 +1792,37 @@ async function loadIdentities() {
         }
       });
       li.appendChild(roleSelect);
-      appendQuotaFields(li, idn.externalId, idn.role, quotasById);
+      appendQuotaFields(li, idn.id, idn.role, quotasById);
+
+      if (idn.source === 'local') {
+        const resetBtn = document.createElement('button');
+        resetBtn.type = 'button';
+        resetBtn.className = 'secondary';
+        resetBtn.textContent = t('identities.resetPassword');
+        resetBtn.addEventListener('click', async () => {
+          const password = prompt(t('identities.resetPasswordPrompt', { username: idn.username }));
+          if (!password) return;
+          try {
+            await api(`/auth/identities/${encodeURIComponent(idn.id)}/password`, {
+              method: 'PUT',
+              body: JSON.stringify({ password }),
+            });
+          } catch (e) {
+            alert(e.message);
+          }
+        });
+        li.appendChild(resetBtn);
+      }
 
       const delBtn = document.createElement('button');
       delBtn.type = 'button';
       delBtn.className = 'secondary';
       delBtn.textContent = t('identities.delete');
-      delBtn.disabled = AuthUi.currentUser() && AuthUi.currentUser().id === idn.externalId;
+      delBtn.disabled = AuthUi.currentUser() && AuthUi.currentUser().id === idn.id;
       delBtn.addEventListener('click', async () => {
         if (!confirm(t('identities.deleteConfirm', { username: idn.username }))) return;
         try {
-          await api(`/auth/identities/${encodeURIComponent(idn.externalId)}`, { method: 'DELETE' });
+          await api(`/auth/identities/${encodeURIComponent(idn.id)}`, { method: 'DELETE' });
           loadIdentities();
         } catch (e) {
           alert(e.message);
@@ -1704,6 +1830,57 @@ async function loadIdentities() {
       });
       li.appendChild(delBtn);
       list.appendChild(li);
+
+      // Linked login methods (26/10/2026, see routes/auth.js's accountLinks.js-backed routes)
+      // -- only a `local` row can be a link anchor. Adding a link is self-service only (own
+      // row, proven by actually logging into that provider right now, see /me/links/:id/start);
+      // an admin viewing someone else's row can still see/revoke, never add on their behalf.
+      if (idn.source === 'local') {
+        const isOwnRow = AuthUi.currentUser() && AuthUi.currentUser().id === idn.id;
+        const linksLi = document.createElement('li');
+        linksLi.className = 'identity-links';
+        try {
+          const links = await api(`/auth/identities/${encodeURIComponent(idn.id)}/links`);
+          for (const lnk of links) {
+            const tag = document.createElement('span');
+            tag.className = 'muted';
+            tag.textContent = `↳ ${lnk.username} [${lnk.providerLabel || lnk.providerId}]`;
+            linksLi.appendChild(tag);
+            const unlinkBtn = document.createElement('button');
+            unlinkBtn.type = 'button';
+            unlinkBtn.className = 'secondary';
+            unlinkBtn.textContent = t('identities.unlink');
+            unlinkBtn.addEventListener('click', async () => {
+              try {
+                await api(`/auth/identities/${encodeURIComponent(idn.id)}/links/${encodeURIComponent(lnk.externalId)}`, { method: 'DELETE' });
+                loadIdentities();
+              } catch (e) {
+                alert(e.message);
+              }
+            });
+            linksLi.appendChild(unlinkBtn);
+          }
+          if (isOwnRow) {
+            for (const p of providers) {
+              if (links.some((lnk) => lnk.providerId === p.id)) continue;
+              const linkA = document.createElement('a');
+              linkA.className = 'link-btn';
+              linkA.href = `/api/auth/me/links/${encodeURIComponent(p.id)}/start`;
+              linkA.textContent = t('identities.linkProvider', { provider: p.label });
+              linksLi.appendChild(linkA);
+            }
+          }
+          if (links.length === 0 && (!isOwnRow || providers.length === 0)) {
+            const none = document.createElement('span');
+            none.className = 'muted';
+            none.textContent = t('identities.noLinks');
+            linksLi.appendChild(none);
+          }
+        } catch (e) {
+          linksLi.innerHTML = `<span class="fail-text">${t('common.error', { msg: e.message })}</span>`;
+        }
+        list.appendChild(linksLi);
+      }
     }
   } catch (e) {
     list.innerHTML = `<li class="fail-text">${t('common.error', { msg: e.message })}</li>`;
@@ -1717,15 +1894,15 @@ $('#new-user-form').addEventListener('submit', async (ev) => {
   ev.preventDefault();
   const form = ev.target;
   try {
-    await api('/auth/users', {
+    await api('/auth/identities', {
       method: 'POST',
       body: JSON.stringify({
-        username: form.username.value, password: form.password.value, role: form.role.value,
+        username: form.username.value, password: form.password.value, role: form.role.value, email: form.email.value || null,
       }),
     });
     form.reset();
     newUserDialog.close();
-    loadUsers();
+    loadIdentities();
   } catch (e) {
     alert(e.message);
   }
@@ -1755,7 +1932,6 @@ async function loadDoctor() {
 $('#btn-refresh-instances').addEventListener('click', loadInstances);
 $('#btn-refresh-modules').addEventListener('click', loadModules);
 $('#btn-refresh-user-modules').addEventListener('click', loadUserModulesTab);
-$('#btn-refresh-users').addEventListener('click', loadUsers);
 $('#btn-refresh-identities').addEventListener('click', loadIdentities);
 $('#btn-run-doctor').addEventListener('click', loadDoctor);
 

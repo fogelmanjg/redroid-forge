@@ -131,10 +131,17 @@ async function getClient(providerId) {
 const pending = new Map();
 const PENDING_TTL_MS = 5 * 60 * 1000;
 
-function startLogin(providerId) {
+// `linkLocalUserId` (26/10/2026, account linking -- see accountLinks.js): set only when this
+// login was started from "link another login method" while already authenticated as a local
+// account, never from a fresh login-screen click. Carried through `pending` so
+// `handleCallback` can hand it back to the route -- the route is what actually decides whether
+// to create a link or run the normal role-lookup flow, this module just remembers which kind of
+// flow is in progress for this `state`.
+function startLogin(providerId, { linkLocalUserId } = {}) {
   const state = generators.state();
   const entry = {
     state, providerId, codeVerifier: generators.codeVerifier(), nonce: generators.nonce(), createdAt: Date.now(),
+    linkLocalUserId: linkLocalUserId || null,
   };
   pending.set(state, entry);
   for (const [key, value] of pending) if (Date.now() - value.createdAt > PENDING_TTL_MS) pending.delete(key);
@@ -145,11 +152,11 @@ function startLogin(providerId) {
 // screen. The `state` embedded in it is also the lookup key `handleCallback` uses to find the
 // matching PKCE verifier/nonce -- see its own comment for why that lookup is the actual CSRF
 // defense, with no separate cookie needed for it.
-async function getAuthorizationUrl(providerId) {
+async function getAuthorizationUrl(providerId, opts) {
   const p = getProvider(providerId);
   if (!p) throw Object.assign(new Error(`Unknown OIDC provider "${providerId}"`), { httpStatus: 404 });
   const client = await getClient(providerId);
-  const { state, codeVerifier, nonce } = startLogin(providerId);
+  const { state, codeVerifier, nonce } = startLogin(providerId, opts);
   const code_challenge = generators.codeChallenge(codeVerifier);
   return client.authorizationUrl({
     scope: 'openid profile',
@@ -169,9 +176,10 @@ async function getAuthorizationUrl(providerId) {
 // own `client.callback()` independently re-validates state/nonce/PKCE against what it stored in
 // `checks` below -- this is defense in depth, not a redundant reimplementation of what it already
 // does.
-// -> {id, username, providerId, providerLabel} on success -- identity only, deliberately no
-// role (see the module comment above; the caller is responsible for turning `id` into a role via
-// roleAssignments.js). `id` is `${providerId}:${sub}`, never the bare `sub` (see the module
+// -> {id, username, providerId, providerLabel, linkLocalUserId} on success -- identity only,
+// deliberately no role (see the module comment above; the caller is responsible for turning
+// `id` into a role via roleAssignments.js, or into a link via accountLinks.js when
+// `linkLocalUserId` is set). `id` is `${providerId}:${sub}`, never the bare `sub` (see the module
 // comment on why). Throws on anything invalid (bad/expired/replayed state, provider mismatch, bad
 // code, token validation failure) -- the route turns that into a redirect back to a login error,
 // not a 500.
@@ -195,6 +203,7 @@ async function handleCallback(providerId, params) {
     username: claims.preferred_username || claims.email || claims.sub,
     providerId,
     providerLabel: p.label,
+    linkLocalUserId: entry.linkLocalUserId || null,
   };
 }
 

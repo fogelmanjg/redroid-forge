@@ -6,12 +6,70 @@
 // oidc.js (oidc); this module only turns "a valid session cookie" into `req.user`.
 
 const session = require('./session');
+const userStore = require('./userStore');
+const oidc = require('./oidc');
 
-const VALID_MODES = ['none', 'local', 'oidc'];
-const AUTH_MODE = process.env.REDROID_FORGE_AUTH || 'none';
-if (!VALID_MODES.includes(AUTH_MODE)) {
-  throw new Error(`REDROID_FORGE_AUTH must be one of: ${VALID_MODES.join(', ')} (got "${JSON.stringify(AUTH_MODE)}")`);
+// "both" (26/10/2026): local accounts and OIDC providers accepted at the same login screen at
+// once -- e.g. an admin who wants a password-based account for themselves (no IdP dependency to
+// go down) while everyone else logs in through a real identity provider. Session cookies from
+// either path are identical (see setSessionCookie/attachUser below) -- "both" changes nothing
+// about how a session is verified, only which of the two login routes answer instead of 404,
+// and which rows the merged identities table (routes/auth.js's GET /identities) can contain.
+const VALID_MODES = ['none', 'local', 'oidc', 'both'];
+const RAW_AUTH_MODE = process.env.REDROID_FORGE_AUTH || 'none';
+if (!VALID_MODES.includes(RAW_AUTH_MODE)) {
+  throw new Error(`REDROID_FORGE_AUTH must be one of: ${VALID_MODES.join(', ')} (got "${JSON.stringify(RAW_AUTH_MODE)}")`);
 }
+
+// Self-lockout guard (26/10/2026) -- "local"/"both" with REDROID_FORGE_AUTH set but nobody who
+// could ever log in (no local user yet, and REDROID_FORGE_LOCAL_ADMIN_USER/_PASSWORD not set
+// either, so userStore.ensureBootstrapAdmin will also no-op) used to mean a permanently locked
+// login screen: the Identities setup wizard (routes/auth.js's /setup/* routes, app.js's
+// renderSetupWizard) only shows itself while AUTH_MODE is "none", so there would be no way back
+// in at all without editing data/users.json by hand. Downgrading to the mode that is actually
+// reachable, computed once here (same "restart to apply a config change" rule as every other
+// env var in this app -- see oidc.js's own comment on why that is fine), turns that dead end
+// back into exactly the normal "none -> wizard -> set the real mode -> restart" flow: running
+// unprotected for one more boot is no worse than the "none" default this app already shipped
+// with for its first several months, and it self-heals the instant someone restarts again.
+// `usersFile` is only ever passed by test/auth.lockout.test.js, to check this against an
+// isolated temp file instead of the real backend/data/users.json -- every real call site
+// (including the require-time check right below) omits it and gets userStore's own default.
+function localPathOpen(usersFile) {
+  if (userStore.listUsers(usersFile).length > 0) return true;
+  return !!(process.env.REDROID_FORGE_LOCAL_ADMIN_USER && process.env.REDROID_FORGE_LOCAL_ADMIN_PASSWORD);
+}
+// OIDC never locks itself out the same way -- a "log in with X" button is always clickable
+// regardless of whether anyone has been approved yet (see oidc.js's module comment and
+// roleAssignments.js's BOOTSTRAP_ADMIN_ID: the documented recovery is "log in once, find your
+// own id in the JSON file, set that env var, log in again"), so "both" with zero local users is
+// NOT a lockout as long as at least one provider is configured: the OIDC half of the login
+// screen still works, and once someone is an OIDC admin they can create a local account from the
+// (non-wizard, admin-only) Identities panel -- LOCAL_ENABLED stays true for exactly that, "both"
+// is only downgraded when NEITHER half has any way in at all.
+function oidcPathOpen() {
+  return oidc.listProviders().length > 0;
+}
+
+let AUTH_MODE = RAW_AUTH_MODE;
+if (RAW_AUTH_MODE === 'local' && !localPathOpen()) {
+  console.warn(
+    'redroid-forge: REDROID_FORGE_AUTH=local but no local account exists yet and '
+    + 'REDROID_FORGE_LOCAL_ADMIN_USER/_PASSWORD are not set -- running as "none" (no login) for '
+    + 'now so the Identities setup wizard is reachable. Create an admin there, then restart.',
+  );
+  AUTH_MODE = 'none';
+} else if (RAW_AUTH_MODE === 'both' && !localPathOpen() && !oidcPathOpen()) {
+  console.warn(
+    'redroid-forge: REDROID_FORGE_AUTH=both but neither a local account nor an OIDC provider is '
+    + 'usable yet -- running as "none" (no login) for now so the Identities setup wizard is '
+    + 'reachable. Create an admin there, then restart.',
+  );
+  AUTH_MODE = 'none';
+}
+
+const LOCAL_ENABLED = AUTH_MODE === 'local' || AUTH_MODE === 'both';
+const OIDC_ENABLED = AUTH_MODE === 'oidc' || AUTH_MODE === 'both';
 
 // The "zero auth, any user sees/does everything" default -- every request acts as this single
 // always-admin user, identical to this app's behavior before auth existed at all. No cookie
@@ -68,5 +126,6 @@ function requireAuth(req, res, next) {
 }
 
 module.exports = {
-  AUTH_MODE, attachUser, requireAuth, setSessionCookie, clearSessionCookie, readCookie,
+  AUTH_MODE, LOCAL_ENABLED, OIDC_ENABLED, attachUser, requireAuth, setSessionCookie, clearSessionCookie, readCookie,
+  localPathOpen, oidcPathOpen,
 };
