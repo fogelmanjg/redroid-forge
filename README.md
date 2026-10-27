@@ -16,7 +16,9 @@ without depending on any other infrastructure.
 > `redroid-hwenc`, `redroid-nvidia`, and what currently lives spread across
 > `jg-dashboard`/`plenum-redroid`). See [`docs/REQUIREMENTS.md`](docs/REQUIREMENTS.md) (what and
 > why), [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) (how the pieces fit together — base image,
-> modules, and at which point of an instance's lifecycle each one is touched) and
+> modules, and at which point of an instance's lifecycle each one is touched),
+> [`docs/MODULE-AUTHORING.md`](docs/MODULE-AUTHORING.md) (writing a module — native vs. own vs.
+> user module, the manifest schema, the 7-stage hook contract) and
 > [`docs/ROADMAP.md`](docs/ROADMAP.md) (in what order) and [`CHANGELOG.md`](CHANGELOG.md) (tagged
 > releases, SemVer policy) for the full picture. What exists today covers **Phases 0 through 7**
 > of the roadmap — everything in the Features table below — with Phase 8 (federation with
@@ -222,8 +224,8 @@ frontend/                 vanilla frontend (no build step); contracts.js = gener
 scripts/                 connect.sh / connect.ps1 -- scrcpy connector scripts for end users (not
                           backend/scripts/, which is dev/admin-time tooling)
 docs/                     REQUIREMENTS.md (what and why), ARCHITECTURE.md (how the pieces fit
-                          together), KNOWN-COMBINATIONS.md, ROADMAP.md (in what order) and
-                          SCRCPY-TIPS.md (client-side troubleshooting)
+                          together), MODULE-AUTHORING.md (writing a module), KNOWN-COMBINATIONS.md,
+                          ROADMAP.md (in what order) and SCRCPY-TIPS.md (client-side troubleshooting)
 CHANGELOG.md              tagged releases, SemVer policy (English only, same reasoning as ROADMAP.md)
 ```
 
