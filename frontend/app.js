@@ -752,79 +752,10 @@ function buildRestartEditRow(inst) {
   }
 
   if (knockChecks.length) {
-    const knockAccessWrap = document.createElement('div');
-
-    function renderKnockAccessControls(hosts) {
-      knockAccessWrap.innerHTML = '';
-      for (const host of hosts) {
-        const row = document.createElement('div');
-        row.className = 'display-edit-field';
-
-        const label = document.createElement('div');
-        label.textContent = t('instances.knock.openLabel', { address: host });
-        row.appendChild(label);
-
-        const ipInput = document.createElement('input');
-        ipInput.type = 'text';
-        ipInput.placeholder = t('instances.knock.ipPlaceholder');
-        row.appendChild(ipInput);
-
-        const minutesInput = document.createElement('input');
-        minutesInput.type = 'number';
-        minutesInput.min = '1';
-        minutesInput.value = '1';
-        minutesInput.style.width = '4em';
-        row.appendChild(minutesInput);
-        row.appendChild(document.createTextNode(t('instances.knock.minutesLabel')));
-
-        const openBtn = document.createElement('button');
-        openBtn.type = 'button';
-        openBtn.className = 'secondary';
-        openBtn.textContent = t('instances.knock.open');
-        row.appendChild(openBtn);
-
-        const stateLine = document.createElement('div');
-        row.appendChild(stateLine);
-
-        const warnLine = document.createElement('div');
-        warnLine.className = 'resources-warn resources-warn-error';
-        warnLine.style.display = 'none';
-        warnLine.textContent = t('instances.knock.longWindowWarn');
-        row.appendChild(warnLine);
-
-        const renderState = (state) => {
-          stateLine.textContent = (state && state.open)
-            ? t('instances.knock.stateOpenUntil', { time: new Date(state.openUntil).toLocaleTimeString() })
-            : t('instances.knock.stateClosed');
-        };
-
-        api(`/instances/${inst.id}/adb-access?hostIp=${encodeURIComponent(host)}`)
-          .then((state) => {
-            if (!ipInput.value && state.detectedSourceIp) ipInput.value = state.detectedSourceIp;
-            renderState(state);
-          })
-          .catch(() => {});
-
-        openBtn.addEventListener('click', async () => {
-          openBtn.disabled = true;
-          try {
-            const minutes = Number(minutesInput.value) || 1;
-            warnLine.style.display = minutes > 1 ? '' : 'none';
-            const body = { hostIp: host, minutes };
-            if (ipInput.value) body.sourceIp = ipInput.value;
-            const state = await api(`/instances/${inst.id}/adb-access`, { method: 'POST', body: JSON.stringify(body) });
-            renderState(state);
-          } catch (err) {
-            stateLine.textContent = err.message;
-          } finally {
-            openBtn.disabled = false;
-          }
-        });
-
-        knockAccessWrap.appendChild(row);
-      }
-    }
-
+    // Opening access itself is a routine, frequent action (every time someone wants to
+    // connect), not a configuration change -- it lives in its own top-level row
+    // (buildAdbAccessEditRow, next to the "Storage" button) instead of here. This panel only
+    // ever decides WHICH interfaces are gated at all, which is the rare, admin-y part.
     const knockSaveBtn = document.createElement('button');
     knockSaveBtn.type = 'button';
     knockSaveBtn.className = 'secondary';
@@ -834,15 +765,12 @@ function buildRestartEditRow(inst) {
       try {
         const knockRequiredHosts = knockChecks.filter(({ chk }) => chk.checked).map(({ address }) => address);
         await api(`/instances/${inst.id}/knock-hosts`, { method: 'PUT', body: JSON.stringify({ knockRequiredHosts }) });
-        inst.knockRequiredHosts = knockRequiredHosts;
-        renderKnockAccessControls(knockRequiredHosts);
       } finally {
         knockSaveBtn.disabled = false;
+        await loadInstances({ silent: true });
       }
     });
     panel.appendChild(knockSaveBtn);
-    panel.appendChild(knockAccessWrap);
-    renderKnockAccessControls([...currentKnockHosts]);
   }
 
   // --- Optional modules: gapps/arm-translation (hardcoded, same as the create form) plus
@@ -1034,6 +962,11 @@ function buildSupportCell(inst) {
 
 let openStorageId = null;
 const storageCache = {}; // inst.id -> { volumeName, mountpoint } | { error } -- fetched on demand (needs a live docker inspect, not already in the /instances payload), kept around so toggling closed and back open doesn't re-fetch.
+
+// Same toggle pattern as openStorageId, for the "open ADB access" row (docs/ROADMAP.md Phase
+// 9) -- a routine, frequent action (every time someone wants to connect), not a configuration
+// change, so it lives next to "Storage" rather than inside the Configure panel.
+let openAdbAccessId = null;
 
 // Stage-7 "user modules" (see loadUserModules's own comment -- CIFI today, discovered by
 // etapa rather than hardcoded) also need to be toggleable from the Configure panel, not only
@@ -1227,6 +1160,105 @@ function buildStorageEditRow(inst) {
   return tr;
 }
 
+// The actual "open access" controls (docs/ROADMAP.md Phase 9) -- which interfaces are gated at
+// all is decided in the Configure panel (rare, admin-y); this row is the frequent action of
+// actually opening one, one per `knockRequiredHosts` entry, same toggle pattern as
+// buildStorageEditRow (openAdbAccessId instead of openStorageId).
+function buildAdbAccessEditRow(inst) {
+  const tr = document.createElement('tr');
+  tr.className = 'edit-row';
+  const td = document.createElement('td');
+  td.colSpan = 1;
+  const panel = document.createElement('div');
+  panel.className = 'resources-edit-panel';
+
+  const header = document.createElement('div');
+  header.className = 'resources-edit-header';
+  header.textContent = t('instances.knock.header');
+  panel.appendChild(header);
+
+  for (const host of (inst.knockRequiredHosts || [])) {
+    const row = document.createElement('div');
+    row.className = 'display-edit-field';
+
+    const label = document.createElement('div');
+    label.textContent = t('instances.knock.openLabel', { address: host });
+    row.appendChild(label);
+
+    const ipInput = document.createElement('input');
+    ipInput.type = 'text';
+    ipInput.placeholder = t('instances.knock.ipPlaceholder');
+    row.appendChild(ipInput);
+
+    const minutesInput = document.createElement('input');
+    minutesInput.type = 'number';
+    minutesInput.min = '1';
+    minutesInput.value = '1';
+    minutesInput.style.width = '4em';
+    row.appendChild(minutesInput);
+    row.appendChild(document.createTextNode(t('instances.knock.minutesLabel')));
+
+    const openBtn = document.createElement('button');
+    openBtn.type = 'button';
+    openBtn.className = 'secondary';
+    openBtn.textContent = t('instances.knock.open');
+    row.appendChild(openBtn);
+
+    const stateLine = document.createElement('div');
+    row.appendChild(stateLine);
+
+    const warnLine = document.createElement('div');
+    warnLine.className = 'resources-warn resources-warn-error';
+    warnLine.style.display = 'none';
+    warnLine.textContent = t('instances.knock.longWindowWarn');
+    row.appendChild(warnLine);
+
+    const renderState = (state) => {
+      stateLine.textContent = (state && state.open)
+        ? t('instances.knock.stateOpenUntil', { time: new Date(state.openUntil).toLocaleTimeString() })
+        : t('instances.knock.stateClosed');
+    };
+
+    api(`/instances/${inst.id}/adb-access?hostIp=${encodeURIComponent(host)}`)
+      .then((state) => {
+        if (!ipInput.value && state.detectedSourceIp) ipInput.value = state.detectedSourceIp;
+        renderState(state);
+      })
+      .catch(() => {});
+
+    openBtn.addEventListener('click', async () => {
+      openBtn.disabled = true;
+      try {
+        const minutes = Number(minutesInput.value) || 1;
+        warnLine.style.display = minutes > 1 ? '' : 'none';
+        const body = { hostIp: host, minutes };
+        if (ipInput.value) body.sourceIp = ipInput.value;
+        const state = await api(`/instances/${inst.id}/adb-access`, { method: 'POST', body: JSON.stringify(body) });
+        renderState(state);
+      } catch (err) {
+        stateLine.textContent = err.message;
+      } finally {
+        openBtn.disabled = false;
+      }
+    });
+
+    panel.appendChild(row);
+  }
+
+  const closeBtn = document.createElement('button');
+  closeBtn.type = 'button';
+  closeBtn.textContent = t('common.cancel');
+  closeBtn.addEventListener('click', () => {
+    openAdbAccessId = null;
+    loadInstances({ silent: true });
+  });
+  panel.appendChild(closeBtn);
+
+  td.appendChild(panel);
+  tr.appendChild(td);
+  return tr;
+}
+
 // `silent`: the periodic refresh does not flash "Loading..." over the table.
 // Instances redesign (24/10/2026): each instance renders as a pair of rows, not a row of
 // columns -- see the CSS comment above .instance-primary/.instance-secondary. Row 1 (bigger
@@ -1408,6 +1440,18 @@ async function loadInstances({ silent = false } = {}) {
       });
       buttons.appendChild(storageBtn);
 
+      if ((inst.knockRequiredHosts || []).length > 0) {
+        const adbAccessBtn = document.createElement('button');
+        adbAccessBtn.type = 'button';
+        adbAccessBtn.className = 'secondary';
+        adbAccessBtn.textContent = t('instances.knock.toggle');
+        adbAccessBtn.addEventListener('click', () => {
+          openAdbAccessId = openAdbAccessId === inst.id ? null : inst.id;
+          loadInstances({ silent: true });
+        });
+        buttons.appendChild(adbAccessBtn);
+      }
+
       // Only the actions that make sense for the current state (see instanceState.js).
       const mk = (label, action) => {
         const b = document.createElement('button');
@@ -1457,6 +1501,7 @@ async function loadInstances({ silent = false } = {}) {
       if (openRestartId === inst.id) rows.appendChild(buildRestartEditRow(inst));
       if (openOwnersId === inst.id) rows.appendChild(buildOwnersEditRow(inst, directoryCache));
       if (openStorageId === inst.id) rows.appendChild(buildStorageEditRow(inst));
+      if (openAdbAccessId === inst.id) rows.appendChild(buildAdbAccessEditRow(inst));
     }
     tbody.replaceChildren(rows);
   } catch (e) {
@@ -2316,6 +2361,6 @@ AuthUi.ready.then(() => {
   setInterval(() => {
     const onInstances = $('.tab-btn.active')?.dataset.tab === 'instances';
     const dialogOpen = $$('dialog').some((d) => d.open);
-    if (onInstances && !dialogOpen && openNoRestartId === null && openRestartId === null && openOwnersId === null && openStorageId === null && !document.hidden) loadInstances({ silent: true });
+    if (onInstances && !dialogOpen && openNoRestartId === null && openRestartId === null && openOwnersId === null && openStorageId === null && openAdbAccessId === null && !document.hidden) loadInstances({ silent: true });
   }, 4000);
 });
