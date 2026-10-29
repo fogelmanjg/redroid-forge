@@ -183,7 +183,8 @@ header nav { flex: 1; }
 
 /* Known-combinations verdict for THIS instance's actual base image + modules
    (backend/src/lib/instanceSupport.js, GET /api/instances already includes it per row).
-   Colored like status-dot/.*-text above: oficial=ok, comunidad=warn, sin-soporte=fail. */
+   Colored like status-dot/.*-text above: oficial=ok, piezas-validadas=accent (its own
+   in-between tier, see KNOWN-COMBINATIONS.md section 3), comunidad=warn, sin-soporte=fail. */
 .support-chip {
   display: inline-block;
   font-size: 0.8rem;
@@ -193,6 +194,7 @@ header nav { flex: 1; }
   cursor: default;
 }
 .support-chip.oficial { border-color: var(--ok); color: var(--ok); }
+.support-chip.piezas-validadas { border-color: var(--accent); color: var(--accent); }
 .support-chip.comunidad { border-color: var(--warn); color: var(--warn); }
 .support-chip.sin-soporte { border-color: var(--fail); color: var(--fail); }
 tr.edit-row > td { background: rgba(58, 109, 240, 0.06); padding: 0.8rem 1rem; }

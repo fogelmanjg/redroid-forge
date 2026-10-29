@@ -176,11 +176,22 @@ muestra.
 
 ```
 resolver({ baseDigest, gappsId, magiskId, modulos, hostGpuVendor }) -> {
-  nivel: "oficial" | "comunidad" | "sin-soporte",
+  nivel: "oficial" | "piezas-validadas" | "comunidad" | "sin-soporte",
   combinacion: <id> | null,
   motivos: [ "…" ]          // en lenguaje de usuario, nunca vacío si nivel != oficial
 }
 ```
+
+**`piezas-validadas` (decidido 29/10/2026).** Un cuarto nivel, entre `oficial` y `comunidad`,
+encontrado necesario la primera vez que este resolutor se chequeó contra las instancias reales de
+un host real: las 3 caían en la regla 4 de abajo ("cada pieza conocida, sin combinación exacta"),
+pero esa bolsa mezclaba sin distinguir dos situaciones muy distintas — *cada pieza tiene evidencia
+real propia en algún lado, solo que nunca combinada*, contra *alguna pieza nunca funcionó de verdad
+en este hardware*. La segunda es una afirmación mucho más débil y merecía su propia etiqueta, más
+modesta; la primera merecía una más fuerte que el `comunidad` llano. No hace falta dato nuevo: se
+deriva solo de recorrer `combinaciones` de otra forma, nunca se escribe como valor de
+`combinacion.soporte` (ese campo sigue siendo `"oficial" | "comunidad"`, sin cambios — es un
+veredicto que produce el *resolutor*, no algo que una combinación declare de sí misma).
 
 Reglas, en orden:
 
@@ -195,8 +206,23 @@ Reglas, en orden:
    - validada solo en **otro vendor** → `comunidad`, motivo "validada en AMD,
      tu host es Intel";
    - sin validación `ok` → `comunidad`.
-4. Todo conocido por separado pero **sin combinación exacta** → `comunidad`,
-   motivo "cada pieza es conocida pero esta combinación no se validó junta".
+4. No hay combinación exacta. Se chequea cada pieza pedida (paquete GApps,
+   paquete Magisk, cada módulo **en la versión de manifest exacta pedida**) por
+   separado: ¿hay *alguna* combinación (cualquiera, no necesariamente la
+   pedida) que incluya esa pieza y tenga una validación `ok` para el vendor
+   del host?
+   - **Todas las piezas pasan ese chequeo** → `piezas-validadas`, motivo
+     "cada pieza individual tiene su propia validación ok en este hardware,
+     pero esta combinación exacta nunca se probó junta". Un módulo en una
+     versión que nunca se validó en ningún lado **no cuenta**, aunque una
+     versión más vieja del mismo módulo sí — la versión es parte de la
+     identidad de la pieza, la misma granularidad que ya usa el match de
+     combinación exacta de la regla 3.
+   - **Alguna pieza no pasa** (nunca se validó en ningún lado, o solo en otro
+     vendor) → `comunidad`, motivo "cada pieza es conocida pero esta
+     combinación no se validó junta". Es también el resultado para una base
+     pelada sin nada más pedido — no se chequeó nada en realidad, así que no
+     se promueve.
 5. `base.estado == "reemplazada"` degrada a `comunidad` con motivo
    "hay una base más nueva validada".
 

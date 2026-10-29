@@ -948,14 +948,24 @@ function buildSupportCell(inst) {
     chip.textContent = t('instances.soporte.unknown');
     return chip;
   }
-  const niveles = { oficial: 'instances.soporte.oficial', comunidad: 'instances.soporte.comunidad', 'sin-soporte': 'instances.soporte.sinSoporte' };
+  const niveles = {
+    oficial: 'instances.soporte.oficial',
+    'piezas-validadas': 'instances.soporte.piezasValidadas',
+    comunidad: 'instances.soporte.comunidad',
+    'sin-soporte': 'instances.soporte.sinSoporte',
+  };
+  const hints = {
+    'piezas-validadas': 'instances.soporte.hintPiezasValidadas',
+    comunidad: 'instances.soporte.hintComunidad',
+    'sin-soporte': 'instances.soporte.hintSinSoporte',
+  };
   chip.classList.add(soporte.nivel);
   chip.textContent = t(niveles[soporte.nivel] || soporte.nivel);
   if (soporte.nivel === 'oficial') {
     chip.title = t('instances.soporte.hintOficial', { combo: soporte.combinacion || '' });
   } else {
     const reasons = (soporte.motivos || []).join('; ');
-    chip.title = t(soporte.nivel === 'comunidad' ? 'instances.soporte.hintComunidad' : 'instances.soporte.hintSinSoporte', { reasons });
+    chip.title = t(hints[soporte.nivel] || 'instances.soporte.hintSinSoporte', { reasons });
   }
   return chip;
 }

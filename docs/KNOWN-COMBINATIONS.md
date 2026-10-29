@@ -194,11 +194,21 @@ that the backend stores on the instance and the UI displays.
 
 ```
 resolver({ baseDigest, gappsId, magiskId, modulos, hostGpuVendor }) -> {
-  nivel: "oficial" | "comunidad" | "sin-soporte",
+  nivel: "oficial" | "piezas-validadas" | "comunidad" | "sin-soporte",
   combinacion: <id> | null,
   motivos: [ "…" ]          // in user language, never empty if nivel != oficial
 }
 ```
+
+**`piezas-validadas` (decided 29/10/2026).** A fourth level, between `oficial` and `comunidad`, found
+necessary the first time this resolver was checked against a real host's real instances: every one of
+them landed in rule 4 below ("every piece known, no exact combination"), but that bucket was quietly
+mixing two very different situations — *every piece has its own real evidence somewhere, just never
+combined*, versus *some piece has never actually worked on this hardware at all*. The second is a much
+weaker claim and deserved its own, more modest label; the first deserved one stronger than plain
+`comunidad`. No new data needed: it is derived purely from scanning `combinaciones` differently, never
+written as a `combinacion.soporte` value itself (that field stays `"oficial" | "comunidad"`, unchanged —
+this is a verdict the *resolver* produces, not something any one combination declares about itself).
 
 Rules, in order:
 
@@ -212,8 +222,19 @@ Rules, in order:
    - validated only on **another vendor** → `comunidad`, reason "validated on AMD, your host is
      Intel";
    - with no `ok` validation → `comunidad`.
-4. Everything known separately but **no exact combination** → `comunidad`, reason "every piece is
-   known but this combination was not validated together".
+4. No exact combination exists. Check each requested piece (GApps package, Magisk package, each
+   module **at the exact manifest version requested**) on its own: does *some* combination (any one,
+   not necessarily the one requested) include that piece and have an `ok` validation for the host's
+   vendor?
+   - **Every piece passes that check** → `piezas-validadas`, reason "every individual piece has its
+     own ok validation on this hardware, but this exact combination was never tried together". A
+     module at a version that was never itself validated anywhere does **not** count, even if an
+     older version of the same module was — the version is part of the piece's identity, same
+     granularity the exact-combination match in rule 3 already uses.
+   - **At least one piece fails it** (never validated anywhere, on any vendor, or only on a different
+     one) → `comunidad`, reason "every piece is known but this combination was not validated
+     together". This is also the outcome for a bare base with nothing else requested — nothing was
+     actually checked, so nothing is promoted.
 5. `base.estado == "reemplazada"` downgrades to `comunidad` with the reason "there is a newer
    validated base".
 

@@ -64,6 +64,35 @@ test('resolve: module version different from the validated one -> comunidad', ()
   assert.strictEqual(k.resolve(snapshot, { baseDigest: DIGEST, modulos: { hwenc: HWENC - 1 } }).nivel, 'comunidad');
 });
 
+// 29/10/2026: a third tier between 'comunidad' and 'oficial' -- every piece has its own 'ok'
+// validation somewhere in the database, just never together as the exact mix requested.
+test('resolve: every piece individually ok elsewhere, combination never tried together -> piezas-validadas', () => {
+  const r = k.resolve(snapshot, {
+    baseDigest: DIGEST, gappsId: 'gapps-sdk35-r09-x86_64', modulos: { hwenc: HWENC }, hostGpuVendor: 'amd',
+  });
+  assert.strictEqual(r.nivel, 'piezas-validadas');
+  assert.strictEqual(r.combinacion, null);
+});
+
+test('resolve: one piece never validated anywhere -> stays comunidad, not promoted', () => {
+  const r = k.resolve(snapshot, {
+    baseDigest: DIGEST, gappsId: 'gapps-sdk35-r09-x86_64', modulos: { 'modulo-jamas-validado': 1 }, hostGpuVendor: 'amd',
+  });
+  assert.strictEqual(r.nivel, 'comunidad');
+});
+
+test('resolve: piece only validated on a different vendor -> stays comunidad for this host', () => {
+  const r = k.resolve(snapshot, {
+    baseDigest: DIGEST, gappsId: 'gapps-sdk35-r09-x86_64', modulos: { hwenc: HWENC }, hostGpuVendor: 'nvidia',
+  });
+  assert.strictEqual(r.nivel, 'comunidad');
+});
+
+test('resolve: no pieces requested at all (bare base) -> never promoted vacuously', () => {
+  const r = k.resolve(snapshot, { baseDigest: DIGEST, modulos: {}, hostGpuVendor: 'amd' });
+  assert.strictEqual(r.nivel, 'comunidad');
+});
+
 test('resolve: unknown GApps package -> sin-soporte', () => {
   const r = k.resolve(snapshot, { ...base, gappsId: 'gapps-raro' });
   assert.strictEqual(r.nivel, 'sin-soporte');

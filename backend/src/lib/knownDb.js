@@ -165,6 +165,22 @@ const sameModules = (a, b) => {
   return ka.length === kb.length && ka.every((k) => b[k] === a[k]);
 };
 
+// Whether SOME combination (not necessarily the exact one requested) vouches for this one
+// piece on its own: it matches `pieceMatches` and has at least one `ok` validation for the
+// host's vendor (any vendor at all, if the vendor is not known -- same leniency the exact-combo
+// path below already has). Used only to tell apart the two different situations that used to be
+// the same undifferentiated "comunidad" bucket below (decided 29/10/2026, see KNOWN-COMBINATIONS.md
+// section 3): "every piece has real evidence behind it somewhere, only the exact mix was never
+// tried together" vs. "at least one piece has never actually worked on this hardware at all".
+function pieceOkElsewhere(db, pieceMatches, hostGpuVendor) {
+  return db.combinaciones.some((c) => {
+    if (!pieceMatches(c)) return false;
+    const oks = (c.validaciones || []).filter((v) => v.resultado === 'ok');
+    if (oks.length === 0) return false;
+    return !hostGpuVendor || oks.some((v) => v.hardware.vendor === hostGpuVendor);
+  });
+}
+
 // Support verdict for an instance (section 3 of the doc). Pure.
 // input: { baseDigest, gappsId, magiskId, modulos: {id: version}, hostGpuVendor }
 function resolve(db, input) {
@@ -184,6 +200,19 @@ function resolve(db, input) {
     && sameModules(c.modulos, modulos));
 
   if (!combo) {
+    const pieceChecks = [];
+    if (gappsId) pieceChecks.push(pieceOkElsewhere(db, (c) => c.gapps === gappsId, hostGpuVendor));
+    if (magiskId) pieceChecks.push(pieceOkElsewhere(db, (c) => c.magisk === magiskId, hostGpuVendor));
+    for (const [modId, modVer] of Object.entries(modulos)) {
+      pieceChecks.push(pieceOkElsewhere(db, (c) => (c.modulos || {})[modId] === modVer, hostGpuVendor));
+    }
+    if (pieceChecks.length > 0 && pieceChecks.every(Boolean)) {
+      return {
+        nivel: 'piezas-validadas',
+        combinacion: null,
+        motivos: ['every individual piece has its own "ok" validation on this hardware, but this exact combination was never tried together'],
+      };
+    }
     return {
       nivel: 'comunidad',
       combinacion: null,

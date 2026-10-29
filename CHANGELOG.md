@@ -21,7 +21,17 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
 
 ## [Unreleased]
 
-(nothing yet)
+### Added
+
+- Known-combinations resolver: a new `piezas-validadas` support tier, between `oficial` and
+  `comunidad`. Found necessary the first time the resolver was checked live against this host's
+  real instances: all 3 landed in the old catch-all `comunidad` bucket, which was quietly mixing
+  "every piece has its own real evidence somewhere, just never combined" with the much weaker
+  "some piece has never actually worked on this hardware at all". No new database fields -- the
+  resolver now also checks, when no exact combination match exists, whether every individual
+  requested piece (GApps/Magisk package, each module at its exact requested version) has an `ok`
+  validation for the host's GPU vendor in *some* existing combination. See
+  `docs/KNOWN-COMBINATIONS.md` section 3.
 
 ## [0.3.0] - 2026-10-29
 
