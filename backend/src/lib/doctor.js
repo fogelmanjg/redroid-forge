@@ -6,6 +6,7 @@ const { promisify } = require('util');
 const runtime = require('./dockerRuntime');
 const store = require('./store');
 const hwAccel = require('./hwAccel');
+const fwknop = require('./fwknop');
 const images = require('../../images.json');
 
 const ANDROID_ID_DEADLINE_HOURS = 48;
@@ -216,6 +217,41 @@ async function checkHwAccel() {
   }
 }
 
+// Port-knocking (docs/ROADMAP.md Phase 9). Two independent questions bundled into one check:
+// (1) is OUR OWN fwknopd actually alive -- if any instance has an interface marked as
+// knock-gated and the daemon is down, that interface is unreachable with no way to open it
+// (default-DROP, nothing left to answer the knock), a real "fail", not cosmetic; (2) is there
+// a FOREIGN fwknopd on this host (pid: host means this is a real question, not hypothetical --
+// see fwknop.js's own CHAIN_NAME comment for the one already found live on this project's own
+// development host, an unrelated systemd `fwknop-server.service` protecting SSH). That second
+// case is never escalated past 'ok' -- this project's own chain name/no-flush config already
+// make it harmless by construction -- but it is surfaced with the ONE instruction that still
+// matters if someone edits this project's fwknop.js later: never rename this project's own
+// chain to collide with the other service's, and never re-enable FLUSH_IPT_AT_INIT/_EXIT
+// without first checking what chain that other fwknopd actually manages.
+async function checkFwknop() {
+  const anyGated = store.readAll().some((i) => (i.knockRequiredHosts || []).length > 0);
+  const alive = fwknop.isRunning();
+
+  const base = alive
+    ? { status: 'ok', detail: `fwknopd running, using this project's own chain (${fwknop.CHAIN_NAME}).` }
+    : {
+      status: anyGated ? 'fail' : 'warn',
+      detail: anyGated
+        ? 'fwknopd is not running, but at least one instance has an interface marked as requiring a knock -- that interface is completely unreachable (default-DROP, no way left to open it) until fwknopd is back.'
+        : 'fwknopd is not running. No instance currently requires a knock, so nothing is affected yet, but opening access on any gated interface will fail until this is fixed.',
+      fix: 'Restart the redroid-forge container. If it keeps failing to start, check the container logs for the real fwknopd error -- common causes: config file permissions (fwknopd refuses anything looser than 0600) or a value fwknopd itself rejects (e.g. MAX_FW_TIMEOUT above its own hard ceiling).',
+    };
+
+  const foreign = await fwknop.detectForeignFwknopd().catch(() => []);
+  if (foreign.length) {
+    base.detail += ` Note: this host also runs ${foreign.length} fwknopd process(es) NOT started by redroid-forge (most likely an unrelated port-knocking setup for something else, e.g. SSH) -- this is expected to coexist safely, since this project always uses its own dedicated iptables chain and never flushes a chain it did not create itself.`;
+    base.fix = `${base.fix ? `${base.fix}\n\n` : ''}A foreign fwknopd is running on this host. This is safe as long as this project's own chain name (${fwknop.CHAIN_NAME}, fwknop.js's CHAIN_NAME) never collides with whatever chain that other process manages -- if you ever change CHAIN_NAME or re-enable FLUSH_IPT_AT_INIT/_EXIT in fwknop.js, check "iptables -L" for the other fwknopd's chain name first.`;
+  }
+
+  return base;
+}
+
 async function checkImagesPresent() {
   const localTags = await runtime.listLocalImageTags();
   return images.map((img) => {
@@ -366,12 +402,13 @@ function checkKnownDb() {
 }
 
 async function runAll() {
-  const [dockerSocket, hwsim, imagePresence, hwAccelCheck, grallocFix] = await Promise.all([
+  const [dockerSocket, hwsim, imagePresence, hwAccelCheck, grallocFix, fwknopCheck] = await Promise.all([
     checkDockerSocket(),
     checkHwsim(),
     checkImagesPresent(),
     checkHwAccel(),
     checkGrallocFix().catch((e) => [{ id: 'redroid-gralloc-fix', label: 'Known redroid bug: gralloc crash on 10-bit formats', status: 'warn', detail: `could not be checked: ${e.message}` }]),
+    checkFwknop(),
   ]);
 
   const checks = [
@@ -385,6 +422,7 @@ async function runAll() {
     { id: 'gpu', label: 'GPU / /dev/dri', ...checkGpu() },
     { id: 'hw-accel', label: 'HW acceleration (hwenc, VA-API)', ...hwAccelCheck },
     { id: 'known-db', label: 'Known-combinations database', ...checkKnownDb() },
+    { id: 'fwknop', label: 'Port-knocking (fwknop)', ...fwknopCheck },
     ...imagePresence,
     ...grallocFix,
     ...checkAndroidIdRegistration(),

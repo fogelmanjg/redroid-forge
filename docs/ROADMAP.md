@@ -908,6 +908,20 @@ require a knock before its ADB port responds to anything new, triggered from the
 already-authenticated user, with an already-open session surviving the window's expiry and zero effect on
 any interface that does not opt in.
 
+**28/10/2026 (later the same day) — Doctor check added, per the user's own follow-up:** the collision
+found above is exactly the kind of thing an admin installing this on their own host could hit without
+knowing it, so `doctor.js` gained a `fwknop` check (`checkFwknop()`) instead of leaving it as something
+only this project's own commit history remembers. Two things bundled into one check, deliberately not
+two: (1) is this project's OWN `fwknopd` actually alive -- `fail` only if some instance actually has an
+interface gated (that interface is then unreachable with no way left to open it), `warn` otherwise, since
+nothing is broken yet if nothing uses it; (2) is there a FOREIGN `fwknopd` on the host
+(`fwknop.detectForeignFwknopd()`, a `pid: host`-aware `pgrep -af fwknopd` filtered by this project's own
+config file path) -- never escalated past `ok`, since the chain-name fix above already makes it harmless
+by construction, but surfaced with the one instruction that still matters if `CHAIN_NAME` or the
+`FLUSH_IPT_AT_INIT`/`_EXIT` settings ever change later. Live-verified against the real host: correctly
+singles out the pre-existing `fwknop-server.service` (SSH) as foreign while correctly NOT flagging this
+project's own `fwknopd` process.
+
 ## Phase 10 — Removal of the old code + public polish
 
 **Difficulty: Low** — it is cleanup and documentation, not new technical work.

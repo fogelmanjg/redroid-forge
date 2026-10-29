@@ -37,6 +37,11 @@ Phase 9: port-knocking (SPA, via `fwknop`) for ADB/scrcpy access, per instance a
   ever warns, never blocks).
 - An already-open connection survives the knock window's expiry; only a new connection attempt needs a
   fresh knock (one permanent `ESTABLISHED,RELATED` exception rule per guarded interface+port).
+- Doctor check `fwknop`: `fail`/`warn` if this project's own `fwknopd` is not running (`fail` only if some
+  instance actually has an interface gated, since that interface is then unreachable with no way left to
+  open it), plus an informational note -- never escalated past `ok` -- when a foreign `fwknopd` is found
+  on the host (`fwknop.detectForeignFwknopd()`, `pid: host`-aware `pgrep` filtered by this project's own
+  config path), with the one instruction that matters if this project's own chain name ever changes.
 
 ### Fixed
 

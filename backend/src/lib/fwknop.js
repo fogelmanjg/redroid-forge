@@ -167,6 +167,23 @@ function isRunning() {
   return !!daemonProcess;
 }
 
+// Any `fwknopd` process on the host that is NOT this project's own (matched by command line,
+// same `pkill -f` target as killStale() above) -- for doctor.js's own check. `pid: host` is
+// what makes this even meaningful to ask: on a normal container this would only ever see
+// itself. Found live (26/10/2026, see CHAIN_NAME's comment): this host already runs an
+// unrelated `fwknop-server.service` for SSH, and there is no reason another host running
+// redroid-forge could not have its own unrelated fwknop setup too -- this is a real scenario
+// to detect and explain, not a one-off fluke of this particular host.
+async function detectForeignFwknopd({ exec = execFileAsync, fwknopdConf = FWKNOPD_CONF } = {}) {
+  try {
+    const { stdout } = await exec('pgrep', ['-af', 'fwknopd']);
+    return stdout.split('\n').map((l) => l.trim()).filter(Boolean).filter((line) => !line.includes(fwknopdConf));
+  } catch (e) {
+    if (e.code === 1) return []; // pgrep's own "no process matched at all" -- not an error
+    throw e;
+  }
+}
+
 const ESTABLISHED_ARGS = (hostIp, port) => [
   '-d', hostIp, '-p', 'tcp', '--dport', String(port), '-m', 'conntrack', '--ctstate', 'ESTABLISHED,RELATED', '-j', 'ACCEPT',
 ];
@@ -242,8 +259,8 @@ async function requestAccess({
 }
 
 module.exports = {
-  ADB_PORT_START, ADB_PORT_END, DEFAULT_KNOCK_SECONDS, MAX_FW_TIMEOUT_SECONDS, CHAIN_NAME,
+  ADB_PORT_START, ADB_PORT_END, DEFAULT_KNOCK_SECONDS, MAX_FW_TIMEOUT_SECONDS, CHAIN_NAME, FWKNOPD_CONF,
   getOrGenerateKeys, buildOpenPortsList, renderAccessConf, renderFwknopdConf, ensureConfigFiles,
-  start, stop, isRunning,
+  start, stop, isRunning, detectForeignFwknopd,
   ensureGuardRules, removeGuardRules, requestAccess, getState,
 };

@@ -125,3 +125,26 @@ test('requestAccess: ensures the guard rules, knocks via the fwknop client, and 
   assert.ok(fwknop.getState('100.73.0.50', 5580).open);
   assert.equal(fwknop.getState('100.73.0.50', 5581).open, false, 'a different port was never knocked for');
 });
+
+test('detectForeignFwknopd: filters out this project\'s own process by its config path, keeps the rest', async () => {
+  const fwknopdConf = '/app/backend/data/fwknop/fwknopd.conf';
+  const exec = async () => ({
+    stdout: [
+      `9027 /usr/sbin/fwknopd`,
+      `9883 fwknopd -f -c ${fwknopdConf} -a /app/backend/data/fwknop/access.conf`,
+    ].join('\n'),
+  });
+  const foreign = await fwknop.detectForeignFwknopd({ exec, fwknopdConf });
+  assert.deepEqual(foreign, ['9027 /usr/sbin/fwknopd']);
+});
+
+test('detectForeignFwknopd: no fwknopd at all (pgrep exit code 1) -> empty, not an error', async () => {
+  const exec = async () => { const e = new Error('no process found'); e.code = 1; throw e; };
+  assert.deepEqual(await fwknop.detectForeignFwknopd({ exec }), []);
+});
+
+test('detectForeignFwknopd: only this project\'s own process running -> empty', async () => {
+  const fwknopdConf = '/app/backend/data/fwknop/fwknopd.conf';
+  const exec = async () => ({ stdout: `9883 fwknopd -f -c ${fwknopdConf} -a /app/backend/data/fwknop/access.conf\n` });
+  assert.deepEqual(await fwknop.detectForeignFwknopd({ exec, fwknopdConf }), []);
+});
