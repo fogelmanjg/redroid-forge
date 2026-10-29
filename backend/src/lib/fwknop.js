@@ -258,9 +258,71 @@ async function requestAccess({
   return getState(hostIp, port);
 }
 
+// Real incident, 28/10/2026: on this host, an unrelated pre-existing rule ("ACCEPT * * tailscale0
+// -> 0.0.0.0/0", no port restriction) sits ahead of our own per-host DROP in INPUT, so the knock
+// gate never gets evaluated at all for anything arriving over Tailscale -- knockRequiredHosts said
+// "gated" while the port was wide open. Not a general netfilter rule engine (that would mean
+// reimplementing iptables' own matching) -- deliberately narrow: only the common, realistic shape of
+// "an earlier ACCEPT with nothing that would exclude our host/port" (an interface-wide accept, or an
+// accept for the same destination with no port restriction). Misses anything that requires following
+// a jump into another chain, or more exotic match modules (negated matches, -m recent, ipsets, ...).
+function portInDportsSpec(port, spec) {
+  // "-m multiport --dports 22,80,25565:25569" -- comma list of single ports and n:m ranges.
+  return spec.split(',').some((part) => {
+    if (part.includes(':')) {
+      const [lo, hi] = part.split(':').map(Number);
+      return port >= lo && port <= hi;
+    }
+    return Number(part) === port;
+  });
+}
+
+function ruleTokenValue(tokens, flag) {
+  const i = tokens.indexOf(flag);
+  return i === -1 ? null : tokens[i + 1];
+}
+
+function isOurDropRule(tokens, hostIp, port) {
+  const d = ruleTokenValue(tokens, '-d');
+  const dport = ruleTokenValue(tokens, '--dport');
+  return tokens[tokens.length - 1] === 'DROP' && (d === hostIp || d === `${hostIp}/32`) && dport === String(port);
+}
+
+function wouldBypassForFreshConnection(tokens, hostIp, port) {
+  if (tokens[tokens.length - 1] !== 'ACCEPT') return false;
+  const inIf = ruleTokenValue(tokens, '-i');
+  if (inIf === 'lo') return false; // same-host access, not a meaningful bypass of a remote-access gate
+  const state = ruleTokenValue(tokens, '--state') || ruleTokenValue(tokens, '--ctstate');
+  if (state && !state.split(',').includes('NEW')) return false; // only admits already-established traffic, never a knock-less fresh connection
+  const d = ruleTokenValue(tokens, '-d');
+  if (d && d !== hostIp && d !== `${hostIp}/32`) return false; // scoped to a different destination
+  const proto = ruleTokenValue(tokens, '-p');
+  if (proto && proto !== 'tcp') return false;
+  const dport = ruleTokenValue(tokens, '--dport');
+  if (dport && dport !== String(port)) return false;
+  const dports = ruleTokenValue(tokens, '--dports');
+  if (dports && !portInDportsSpec(port, dports)) return false;
+  return true;
+}
+
+// Returns the raw `-A INPUT ...` lines (iptables-save syntax) of any rule that would already
+// ACCEPT a fresh connection to hostIp:port before this project's own DROP rule is ever reached --
+// i.e. the knock requirement recorded in knockRequiredHosts has no actual effect at the firewall.
+async function detectBypassingRules(hostIp, port, { exec = execFileAsync } = {}) {
+  const { stdout } = await exec('iptables', ['-S', 'INPUT']);
+  const lines = stdout.split('\n').map((l) => l.trim()).filter((l) => l.startsWith('-A INPUT'));
+  const bypassing = [];
+  for (const line of lines) {
+    const tokens = line.split(/\s+/);
+    if (isOurDropRule(tokens, hostIp, port)) break; // nothing after this point can matter -- it's our own gate
+    if (wouldBypassForFreshConnection(tokens, hostIp, port)) bypassing.push(line);
+  }
+  return bypassing;
+}
+
 module.exports = {
   ADB_PORT_START, ADB_PORT_END, DEFAULT_KNOCK_SECONDS, MAX_FW_TIMEOUT_SECONDS, CHAIN_NAME, FWKNOPD_CONF,
   getOrGenerateKeys, buildOpenPortsList, renderAccessConf, renderFwknopdConf, ensureConfigFiles,
   start, stop, isRunning, detectForeignFwknopd,
-  ensureGuardRules, removeGuardRules, requestAccess, getState,
+  ensureGuardRules, removeGuardRules, requestAccess, getState, detectBypassingRules,
 };

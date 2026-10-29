@@ -42,6 +42,9 @@ Phase 9: port-knocking (SPA, via `fwknop`) for ADB/scrcpy access, per instance a
   open it), plus an informational note -- never escalated past `ok` -- when a foreign `fwknopd` is found
   on the host (`fwknop.detectForeignFwknopd()`, `pid: host`-aware `pgrep` filtered by this project's own
   config path), with the one instruction that matters if this project's own chain name ever changes.
+  Also downgrades to `warn` and names the exact rule/instance when `fwknop.detectBypassingRules()` finds
+  an earlier `INPUT` rule that already accepts a gated host:port before this project's own `DROP` is ever
+  reached -- i.e. `knockRequiredHosts` says "gated" but the knock has no actual effect at the firewall.
 
 ### Fixed
 

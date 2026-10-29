@@ -249,6 +249,24 @@ async function checkFwknop() {
     base.fix = `${base.fix ? `${base.fix}\n\n` : ''}A foreign fwknopd is running on this host. This is safe as long as this project's own chain name (${fwknop.CHAIN_NAME}, fwknop.js's CHAIN_NAME) never collides with whatever chain that other process manages -- if you ever change CHAIN_NAME or re-enable FLUSH_IPT_AT_INIT/_EXIT in fwknop.js, check "iptables -L" for the other fwknopd's chain name first.`;
   }
 
+  // Real incident, 28/10/2026: knockRequiredHosts said "gated" while an unrelated, earlier rule
+  // (this host's own blanket "ACCEPT * * tailscale0 -> 0.0.0.0/0") already let everything through
+  // before our DROP was ever reached -- the UI showed a requirement that had no actual effect.
+  const bypassNotes = [];
+  for (const inst of store.readAll()) {
+    for (const host of (inst.knockRequiredHosts || [])) {
+      const bypassing = await fwknop.detectBypassingRules(host, inst.adbPort).catch(() => []);
+      if (bypassing.length) {
+        bypassNotes.push(`"${inst.name}" (${host}:${inst.adbPort}) -- already let through by: ${bypassing.join(' | ')}`);
+      }
+    }
+  }
+  if (bypassNotes.length) {
+    if (base.status === 'ok') base.status = 'warn';
+    base.detail += ` Note: the knock requirement has NO ACTUAL EFFECT for ${bypassNotes.length} host(s) -- an earlier rule in INPUT already accepts that traffic before this project's own DROP is ever reached: ${bypassNotes.join('; ')}.`;
+    base.fix = `${base.fix ? `${base.fix}\n\n` : ''}Either this is intentional (e.g. Tailscale is already a trusted network on this host, so gating its interface adds nothing -- in that case the knock requirement on that host can simply be turned off in Configure), or the earlier rule needs to be narrowed/moved so it stops shadowing this project's own DROP rule.`;
+  }
+
   return base;
 }
 

@@ -148,3 +148,56 @@ test('detectForeignFwknopd: only this project\'s own process running -> empty', 
   const exec = async () => ({ stdout: `9883 fwknopd -f -c ${fwknopdConf} -a /app/backend/data/fwknop/access.conf\n` });
   assert.deepEqual(await fwknop.detectForeignFwknopd({ exec, fwknopdConf }), []);
 });
+
+function fakeIptablesSave(lines) {
+  return async () => ({ stdout: lines.join('\n') });
+}
+
+test('detectBypassingRules: real incident -- an earlier blanket tailscale0 accept shadows our own DROP', async () => {
+  const exec = fakeIptablesSave([
+    '-A INPUT -i lo -j ACCEPT',
+    '-A INPUT -m state --state RELATED,ESTABLISHED -j ACCEPT',
+    '-A INPUT -i tailscale0 -j ACCEPT',
+    '-A INPUT -d 100.73.0.50/32 -p tcp -m tcp --dport 5702 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT',
+    '-A INPUT -d 100.73.0.50/32 -p tcp -m tcp --dport 5702 -j DROP',
+  ]);
+  const bypassing = await fwknop.detectBypassingRules('100.73.0.50', 5702, { exec });
+  assert.equal(bypassing.length, 1);
+  assert.match(bypassing[0], /tailscale0/);
+});
+
+test('detectBypassingRules: no earlier rule matches -> empty', async () => {
+  const exec = fakeIptablesSave([
+    '-A INPUT -i lo -j ACCEPT',
+    '-A INPUT -p tcp -m tcp --dport 80 -j ACCEPT',
+    '-A INPUT -s 192.168.1.0/24 -p tcp -m tcp --dport 445 -j ACCEPT',
+    '-A INPUT -d 100.73.0.50/32 -p tcp -m tcp --dport 5702 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT',
+    '-A INPUT -d 100.73.0.50/32 -p tcp -m tcp --dport 5702 -j DROP',
+  ]);
+  assert.deepEqual(await fwknop.detectBypassingRules('100.73.0.50', 5702, { exec }), []);
+});
+
+test('detectBypassingRules: an ESTABLISHED/RELATED-only accept never bypasses a fresh knock-less connection', async () => {
+  const exec = fakeIptablesSave([
+    '-A INPUT -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT',
+    '-A INPUT -d 100.73.0.50/32 -p tcp -m tcp --dport 5702 -j DROP',
+  ]);
+  assert.deepEqual(await fwknop.detectBypassingRules('100.73.0.50', 5702, { exec }), []);
+});
+
+test('detectBypassingRules: a multiport accept covering our port counts as a bypass', async () => {
+  const exec = fakeIptablesSave([
+    '-A INPUT -p tcp -m multiport --dports 22,25565:25569,5700:5705 -j ACCEPT',
+    '-A INPUT -d 100.73.0.50/32 -p tcp -m tcp --dport 5702 -j DROP',
+  ]);
+  const bypassing = await fwknop.detectBypassingRules('100.73.0.50', 5702, { exec });
+  assert.equal(bypassing.length, 1);
+});
+
+test('detectBypassingRules: stops scanning once it reaches our own DROP rule (later rules cannot matter)', async () => {
+  const exec = fakeIptablesSave([
+    '-A INPUT -d 100.73.0.50/32 -p tcp -m tcp --dport 5702 -j DROP',
+    '-A INPUT -i tailscale0 -j ACCEPT', // after our own gate -- irrelevant, never flagged
+  ]);
+  assert.deepEqual(await fwknop.detectBypassingRules('100.73.0.50', 5702, { exec }), []);
+});

@@ -922,6 +922,21 @@ by construction, but surfaced with the one instruction that still matters if `CH
 singles out the pre-existing `fwknop-server.service` (SSH) as foreign while correctly NOT flagging this
 project's own `fwknopd` process.
 
+**28/10/2026 (still later the same day) — a third thing bundled into the same check, found while
+testing the feature in the UI for the first time:** `knockRequiredHosts` said "gated" for an instance's
+Tailscale interface while `adb connect` succeeded anyway, no knock performed. Root cause: this host's
+own pre-existing `INPUT` chain already has a blanket `ACCEPT * * tailscale0 -> 0.0.0.0/0` rule (no port
+restriction, a known "ALTA" item in this host's own hardening backlog), sitting ahead of this project's
+per-host `DROP` -- the gate was correctly configured and never actually evaluated. `fwknop.js` gained
+`detectBypassingRules(hostIp, port)`: walks `iptables -S INPUT` top to bottom, stops at this project's
+own `DROP` rule for that host:port, and flags any earlier `ACCEPT` that is not scoped away from that
+host/port/protocol (deliberately narrow -- not a netfilter rule engine: skips `-i lo` as same-host
+trust rather than a real bypass, skips ESTABLISHED/RELATED-only accepts since those never admit a fresh
+knock-less connection, and does not follow jumps into other chains). `checkFwknop()` now runs this for
+every currently-gated host across every instance and, if any is shadowed, downgrades `ok` to `warn` and
+names the exact rule and instance. Live-verified: correctly singled out the real `tailscale0` rule on
+this host for `cifi-2gb-test`, and emitted nothing for a host with no such shadowing rule ahead of it.
+
 ## Phase 10 — Removal of the old code + public polish
 
 **Difficulty: Low** — it is cleanup and documentation, not new technical work.
