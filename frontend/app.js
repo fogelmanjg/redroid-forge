@@ -1190,6 +1190,18 @@ function buildAdbAccessEditRow(inst) {
     ipInput.placeholder = t('instances.knock.ipPlaceholder');
     row.appendChild(ipInput);
 
+    // Pre-filled from the request's own source IP (routes/instances.js's GET /adb-access) --
+    // right by default only when the device browsing this panel is also the one that will
+    // connect, over the SAME network path. Confirmed live 29/10/2026: opening access from a
+    // Tailscale-reached panel for a LAN connection attempt (or vice versa, or from a different
+    // device entirely) needs this edited to the real connecting address, since the temporary
+    // ACCEPT rule matches the packet's actual source IP, not which interface the panel itself
+    // was reached through.
+    const ipHint = document.createElement('div');
+    ipHint.className = 'muted';
+    ipHint.textContent = t('instances.knock.ipHint');
+    row.appendChild(ipHint);
+
     const minutesInput = document.createElement('input');
     minutesInput.type = 'number';
     minutesInput.min = '1';
