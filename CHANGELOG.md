@@ -43,8 +43,9 @@ Phase 9: port-knocking (SPA, via `fwknop`) for ADB/scrcpy access, per instance a
   on the host (`fwknop.detectForeignFwknopd()`, `pid: host`-aware `pgrep` filtered by this project's own
   config path), with the one instruction that matters if this project's own chain name ever changes.
   Also downgrades to `warn` and names the exact rule/instance when `fwknop.detectBypassingRules()` finds
-  an earlier `INPUT` rule that already accepts a gated host:port before this project's own `DROP` is ever
-  reached -- i.e. `knockRequiredHosts` says "gated" but the knock has no actual effect at the firewall.
+  an earlier rule that already accepts a gated instance's container/port before this project's own
+  `DROP` is ever reached -- i.e. `knockRequiredHosts` says "gated" but the knock has no actual effect at
+  the firewall.
 
 ### Fixed
 
@@ -60,6 +61,27 @@ Phase 9: port-knocking (SPA, via `fwknop`) for ADB/scrcpy access, per instance a
 - `pid: host` means an uncleanly-stopped container can leave a real orphaned `fwknopd` outliving it.
   `server.js` now kills it on `SIGTERM`/`SIGINT`, and `fwknop.js`'s own `start()` defensively kills a
   stale one (matched by this project's own config file path only) before spawning a new one.
+- ⚠ **The knock gate never actually worked, on any interface, for any real instance.** First testing it
+  live against a running instance (not just the unit suite) showed a LAN connection getting through with
+  the knock correctly required and never requested. Root cause, confirmed with kernel packet counters
+  (temporary `nft` probes, removed right after): an instance's ADB port is published through Docker's
+  bridge network, which DNATs in `PREROUTING` -- before `INPUT` (where the guard rules lived) ever runs
+  -- then forwards the rewritten packet via `DOCKER-USER`, never delivering it locally. `INPUT` was the
+  wrong chain from the start; the Tailscale-specific symptom found earlier the same day was real but was
+  never the actual cause, just the first thing that happened to surface it. Fixed by moving
+  `ensureGuardRules`/`removeGuardRules`/`detectBypassingRules` to `DOCKER-USER`, matching the instance's
+  own container bridge IP (`dockerRuntime.getBridgeIp`) + its fixed internal ADB port (5555) + the
+  packet's ORIGINAL pre-NAT destination (`-m conntrack --ctorigdst`/`--ctorigdstport`) to keep the gate
+  scoped to one host interface. `fwknopd`'s own dynamic rule insertion could not be reused for the
+  temporary "access granted" rule either (wrong chain, and it cannot tell containers apart -- every one
+  exposes the same internal port) -- replaced with this project's own comment-tagged temporary `ACCEPT`
+  rule (embedding its own expiry) plus a `sweepStaleTempRules()` restart-survival sweep, since the
+  container's bridge IP is only assigned while running and is not guaranteed to be the same across
+  restarts -- `routes/instances.js` now applies/releases these rules at every point in an instance's own
+  lifecycle (start, stop, restart, recreate, delete), not just when `knockRequiredHosts` itself changes.
+  Actually live-verified end to end this time, from a real second host, over both the LAN and the
+  Tailscale interface: blocked without a knock, let through immediately after one, blocked again once
+  the window elapsed for real. See `docs/ROADMAP.md`'s Phase 9 for the full incident writeup.
 
 Unrelated (found while debugging why a local tool on this host could no longer reach the app's API at
 all, Phase 6/7):

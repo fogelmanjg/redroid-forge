@@ -230,6 +230,29 @@ async function releaseWifiFixes(instance) {
   await hwsimWifi.releaseHwsimPhys(instance.id, instance.containerId);
 }
 
+// Guard rules (docs/ROADMAP.md Phase 9) live in DOCKER-USER, keyed by the instance's own
+// container bridge IP (fwknop.js's own header comment explains why) -- unlike the old INPUT-based
+// design, that address is only assigned while the container is actually running, and Docker does
+// not promise the SAME one back on the next start. So, same pattern as scheduleWifiFixes/
+// releaseWifiFixes just above (also netns-lifecycle-bound state): apply after every start/restart,
+// release before every stop/restart/delete, keyed off whatever containerIp is current at that
+// exact moment -- never cached across a start/stop cycle.
+async function applyKnockGuards(instance) {
+  const hosts = instance.knockRequiredHosts || [];
+  if (hosts.length === 0) return;
+  const containerIp = await runtime.getBridgeIp(instance.containerId).catch(() => undefined);
+  if (!containerIp) return; // not actually up yet -- nothing to guard until it is
+  for (const host of hosts) await fwknop.ensureGuardRules(containerIp, host, instance.adbPort);
+}
+
+async function releaseKnockGuards(instance) {
+  const hosts = instance.knockRequiredHosts || [];
+  if (hosts.length === 0 || !instance.containerId) return;
+  const containerIp = await runtime.getBridgeIp(instance.containerId).catch(() => undefined);
+  if (!containerIp) return; // already gone -- nothing left to remove
+  for (const host of hosts) await fwknop.removeGuardRules(containerIp, host, instance.adbPort);
+}
+
 async function withRuntimeStatus(instance) {
   try {
     const info = await runtime.inspect(instance.containerId);
@@ -396,6 +419,7 @@ router.post('/:id/start', async (req, res) => {
     meminfoFix.scheduleBindMount(reconciled);
     moduleRunner.scheduleRuntimeFixups(requiredModuleIds, reconciled.containerId);
     moduleScheduler.start(reconciled.id, reconciled.containerId, requiredModuleIds);
+    await applyKnockGuards(reconciled);
     res.json(await withRuntimeStatus(reconciled));
   } catch (e) {
     sendError(res, e);
@@ -410,6 +434,7 @@ router.post('/:id/stop', async (req, res) => {
     moduleScheduler.stop(instance.id);
     meminfoFix.release(instance.id);
     await releaseWifiFixes(instance);
+    await releaseKnockGuards(instance);
     await runtime.stop(instance.containerId);
     res.json(await withRuntimeStatus(instance));
   } catch (e) {
@@ -430,6 +455,7 @@ router.post('/:id/restart', async (req, res) => {
     // Docker's own restart = stop + start under the hood -- the same netns teardown a plain
     // stop() does, so the phys have to be released here too (before, not after).
     await releaseWifiFixes(instance);
+    await releaseKnockGuards(instance);
     await runtime.restart(instance.containerId);
     const reconciled = await reconcileDeviceProfile(instance);
     scheduleWifiFixes(reconciled);
@@ -437,6 +463,7 @@ router.post('/:id/restart', async (req, res) => {
     meminfoFix.scheduleBindMount(reconciled);
     moduleRunner.scheduleRuntimeFixups(requiredModuleIds, reconciled.containerId);
     moduleScheduler.start(reconciled.id, reconciled.containerId, requiredModuleIds);
+    await applyKnockGuards(reconciled);
     res.json(await withRuntimeStatus(reconciled));
   } catch (e) {
     sendError(res, e);
@@ -666,6 +693,11 @@ router.post('/:id/display', async (req, res) => {
     if (instance.containerId) {
       await releaseWifiFixes(instance);
       meminfoFix.release(instance.id);
+      // Guard rules (docs/ROADMAP.md Phase 9) are keyed by the OLD container's bridge IP --
+      // Docker's allocator can hand that exact address to a later, unrelated container, so
+      // this has to run before remove() below, not be skipped just because the instance keeps
+      // the same knockRequiredHosts setting across the recreate.
+      await releaseKnockGuards(instance);
       await runtime.remove(instance.containerId, { force: true });
       // Persisted right away, before create() is even attempted: if create() itself fails
       // below (a real possibility -- missing image, no free binder slot, ...), the stored
@@ -736,6 +768,10 @@ router.post('/:id/display', async (req, res) => {
       meminfoFix.scheduleBindMount(updated);
       moduleRunner.scheduleRuntimeFixups(requiredModuleIds, containerId);
       moduleScheduler.start(updated.id, containerId, requiredModuleIds);
+      // The NEW container almost certainly got a different bridge IP than the one just
+      // removed above -- re-apply against whatever it actually is now, same reasoning as
+      // scheduleWifiFixes right above it.
+      await applyKnockGuards(updated);
     }
 
     res.json(await withRuntimeStatus(updated));
@@ -745,10 +781,11 @@ router.post('/:id/display', async (req, res) => {
 });
 
 // Which of this instance's own bound interfaces require a port-knock before the ADB port
-// answers at all (docs/ROADMAP.md Phase 9) -- deliberately separate from /:id/display: unlike
-// bindHosts itself, this never needs a container recreate. The iptables rules it adds/removes
-// are host-level, keyed by the interface's own IP:port, which stays stable across any
-// recreate of this instance's container (see dockerRuntime.js/fwknop.js).
+// answers at all (docs/ROADMAP.md Phase 9) -- deliberately separate from /:id/display: this
+// never needs a container recreate. Unlike the original (INPUT-based) design, the iptables rules
+// this installs are keyed by the container's OWN bridge IP (see fwknop.js's header comment on
+// why), which only exists while it is actually running -- if it is not, this just persists the
+// new list and leaves the firewall alone; /:id/start's applyKnockGuards picks it up from there.
 router.put('/:id/knock-hosts', async (req, res) => {
   const instance = store.get(req.params.id);
   if (!instance) return res.status(404).json({ error: 'Instancia no encontrada' });
@@ -760,8 +797,11 @@ router.put('/:id/knock-hosts', async (req, res) => {
     );
     const before = new Set(instance.knockRequiredHosts || []);
     const after = new Set(knockRequiredHosts);
-    for (const host of after) if (!before.has(host)) await fwknop.ensureGuardRules(host, instance.adbPort);
-    for (const host of before) if (!after.has(host)) await fwknop.removeGuardRules(host, instance.adbPort);
+    const containerIp = await runtime.getBridgeIp(instance.containerId).catch(() => undefined);
+    if (containerIp) {
+      for (const host of after) if (!before.has(host)) await fwknop.ensureGuardRules(containerIp, host, instance.adbPort);
+      for (const host of before) if (!after.has(host)) await fwknop.removeGuardRules(containerIp, host, instance.adbPort);
+    }
     const updated = store.upsert({ ...instance, knockRequiredHosts });
     res.json(await withRuntimeStatus(updated));
   } catch (e) {
@@ -813,8 +853,10 @@ router.post('/:id/adb-access', async (req, res) => {
     if (!Number.isFinite(minutes) || minutes <= 0) {
       throw httpError('"minutes" must be a positive number', 400);
     }
+    const containerIp = await runtime.getBridgeIp(instance.containerId).catch(() => undefined);
+    if (!containerIp) throw httpError("This instance is not running -- there is nothing to open access to", 409);
     const state = await fwknop.requestAccess({
-      hostIp, port: instance.adbPort, sourceIp: resolvedSourceIp, seconds: Math.round(minutes * 60),
+      containerIp, hostIp, port: instance.adbPort, sourceIp: resolvedSourceIp, seconds: Math.round(minutes * 60),
     });
     const warning = minutes > 1
       ? "A longer window leaves the port answering for longer before anything connects -- it does not extend how long an already-open session's own connection lasts."
@@ -924,10 +966,11 @@ router.delete('/:id', async (req, res) => {
     permissions.assertCan(req.user, 'delete', instance);
     moduleScheduler.stop(instance.id);
     meminfoFix.release(instance.id);
-    // Guard rules (docs/ROADMAP.md Phase 9) are keyed by this instance's own host:port -- a
-    // deleted instance's port can be reused by a future one, so the DROP/ESTABLISHED pair
-    // must not outlive it.
-    for (const host of (instance.knockRequiredHosts || [])) await fwknop.removeGuardRules(host, instance.adbPort);
+    // Guard rules (docs/ROADMAP.md Phase 9) are keyed by this instance's own container bridge
+    // IP -- Docker's allocator can hand that exact address to a completely different container
+    // later, so they must not outlive this one. Read BEFORE remove() below, while the
+    // container (and its address) still exist.
+    await releaseKnockGuards(instance);
     await releaseWifiFixes(instance);
     await runtime.remove(instance.containerId, { force: true });
     if (instance.volumeName) await runtime.removeVolume(instance.volumeName);

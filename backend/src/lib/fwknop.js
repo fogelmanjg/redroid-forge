@@ -153,6 +153,11 @@ function start({ spawnFn = spawn, conf } = {}) {
     daemonProcess = null;
   });
   daemonProcess.stderr?.on('data', (d) => console.error(`fwknopd: ${d}`.trim()));
+  // Fire-and-forget: self-heals anything a previous, uncleanly-stopped process left open past
+  // its own expiry, and restores the remaining-time timers for anything still legitimately open
+  // (see sweepStaleTempRules's own comment -- this module's temporary-access rules cannot reuse
+  // fwknopd's own built-in expiry, so they need their own restart-survival story).
+  sweepStaleTempRules().catch((e) => console.error(`fwknop: sweepStaleTempRules failed: ${e}`));
   return daemonProcess;
 }
 
@@ -184,14 +189,33 @@ async function detectForeignFwknopd({ exec = execFileAsync, fwknopdConf = FWKNOP
   }
 }
 
-const ESTABLISHED_ARGS = (hostIp, port) => [
-  '-d', hostIp, '-p', 'tcp', '--dport', String(port), '-m', 'conntrack', '--ctstate', 'ESTABLISHED,RELATED', '-j', 'ACCEPT',
+// Real incident, 28/10/2026, found testing Phase 9 live for the first time against a real
+// instance: Docker publishes every instance's ADB port through bridge-network NAT (dockerRuntime
+// create()'s PortBindings), which DNATs in PREROUTING -- long before this host's own INPUT chain
+// (where this feature's rules used to live) ever runs. Confirmed with kernel packet counters
+// (temporary nft probes, removed after): zero hits in INPUT for a real connection, the hits are
+// all in FORWARD, via DOCKER-USER (the chain Docker itself reserves for exactly this -- user
+// rules that filter traffic to a published container). This was never just a Tailscale problem --
+// it never worked for ANY interface, because INPUT is simply the wrong chain for Docker-published
+// container traffic. Matching on the container's own bridge IP + its fixed internal port (5555,
+// see dockerRuntime.js's ExposedPorts/PortBindings, identical for every instance) plus the
+// ORIGINAL pre-NAT destination (`-m conntrack --ctorigdst`/`--ctorigdstport`, already fully
+// populated by the time a packet reaches FORWARD, even for its own first SYN -- confirmed live)
+// keeps this scoped to exactly the one host interface being gated, the precision `-d hostIp` used
+// to give for free back when the rules lived in INPUT.
+const CONTAINER_ADB_PORT = 5555;
+const DOCKER_USER_CHAIN = 'DOCKER-USER';
+
+const matchArgs = (containerIp, hostIp, port) => [
+  '-d', containerIp, '-p', 'tcp', '--dport', String(CONTAINER_ADB_PORT),
+  '-m', 'conntrack', '--ctorigdst', hostIp, '--ctorigdstport', String(port),
 ];
-const DROP_ARGS = (hostIp, port) => ['-d', hostIp, '-p', 'tcp', '--dport', String(port), '-j', 'DROP'];
+const ESTABLISHED_ARGS = (containerIp, hostIp, port) => [...matchArgs(containerIp, hostIp, port), '--ctstate', 'ESTABLISHED,RELATED', '-j', 'ACCEPT'];
+const DROP_ARGS = (containerIp, hostIp, port) => [...matchArgs(containerIp, hostIp, port), '-j', 'DROP'];
 
 async function ruleExists(args, exec) {
   try {
-    await exec('iptables', ['-C', 'INPUT', ...args]);
+    await exec('iptables', ['-C', DOCKER_USER_CHAIN, ...args]);
     return true;
   } catch {
     return false;
@@ -201,27 +225,26 @@ async function ruleExists(args, exec) {
 // Idempotent: safe to call every time an instance's knockRequiredHosts gains this host, even
 // if the rules are somehow already there (process restart, a previous call that half-applied).
 // Call order matters -- both use -A (append), so ESTABLISHED must be appended BEFORE DROP to
-// land ahead of it in INPUT; fwknopd's own FWKNOP_INPUT jump rule (IPT_INPUT_ACCESS, inserted
-// at position 1) stays ahead of both regardless of when this runs.
-async function ensureGuardRules(hostIp, port, { exec = execFileAsync } = {}) {
-  const established = ESTABLISHED_ARGS(hostIp, port);
-  const drop = DROP_ARGS(hostIp, port);
-  if (!(await ruleExists(established, exec))) await exec('iptables', ['-A', 'INPUT', ...established]);
-  if (!(await ruleExists(drop, exec))) await exec('iptables', ['-A', 'INPUT', ...drop]);
+// land ahead of it in DOCKER-USER.
+async function ensureGuardRules(containerIp, hostIp, port, { exec = execFileAsync } = {}) {
+  const established = ESTABLISHED_ARGS(containerIp, hostIp, port);
+  const drop = DROP_ARGS(containerIp, hostIp, port);
+  if (!(await ruleExists(established, exec))) await exec('iptables', ['-A', DOCKER_USER_CHAIN, ...established]);
+  if (!(await ruleExists(drop, exec))) await exec('iptables', ['-A', DOCKER_USER_CHAIN, ...drop]);
 }
 
 // Tolerant of "already gone" (iptables -D exits non-zero with "Bad rule" if the rule is not
 // there) -- same reasoning as dockerRuntime's stop()/remove() tolerance of an already-stopped
 // container, turning this interface's knock requirement off twice in a row is not an error.
-async function removeGuardRules(hostIp, port, { exec = execFileAsync } = {}) {
-  await exec('iptables', ['-D', 'INPUT', ...DROP_ARGS(hostIp, port)]).catch(() => {});
-  await exec('iptables', ['-D', 'INPUT', ...ESTABLISHED_ARGS(hostIp, port)]).catch(() => {});
+async function removeGuardRules(containerIp, hostIp, port, { exec = execFileAsync } = {}) {
+  await exec('iptables', ['-D', DOCKER_USER_CHAIN, ...DROP_ARGS(containerIp, hostIp, port)]).catch(() => {});
+  await exec('iptables', ['-D', DOCKER_USER_CHAIN, ...ESTABLISHED_ARGS(containerIp, hostIp, port)]).catch(() => {});
 }
 
-// In-memory only -- advisory display state for the UI ("open until HH:MM"), never the actual
-// enforcement (that is fwknopd's own iptables rule + its own timeout). Losing this on a
-// restart is harmless: the real rule either already expired on its own or is still open, and
-// the next GET simply shows "closed" until someone knocks again.
+// In-memory only -- advisory display state for the UI ("open until HH:MM"); the real enforcement
+// is the tagged temporary ACCEPT rule below. Losing this map on a restart is harmless on its own
+// (the next GET just shows "closed" until the sweep below restores it), which is exactly why the
+// rule itself carries its own expiry rather than relying on this map.
 const openState = new Map();
 const stateKey = (hostIp, port) => `${hostIp}:${port}`;
 
@@ -231,13 +254,82 @@ function getState(hostIp, port) {
   return { open: true, sourceIp: s.sourceIp, openUntil: s.openUntil };
 }
 
-// `seconds`: the actual firewall window requested (-f on the fwknop client) -- the caller
-// (routes/instances.js) is where "no cap, just a warning past the 1-minute default" lives,
-// this function does not re-judge that, it just forwards whatever it is given.
+// The temporary ACCEPT rule a successful knock installs, tagged with its own expiry (no spaces,
+// so a naive whitespace split -- same tokenizer detectBypassingRules uses -- never mis-parses
+// it). fwknopd's OWN dynamic rule-insertion (IPT_INPUT_ACCESS/CHAIN_NAME) cannot be reused for
+// this: it matches by port alone, in a chain jumped from INPUT, which (a) is the wrong chain (see
+// above) and (b) could not distinguish between instances anyway, since every container exposes
+// the SAME internal port 5555 -- there is no per-container destination in fwknopd's own rule
+// shape. The real fwknop client/daemon SPA exchange still happens below regardless (defense in
+// depth, same "prior authenticated channel" reasoning as this module's header comment); only the
+// rule that actually matters -- this one -- is reimplemented here instead of reused from it.
+const TEMP_TAG = 'redroid-forge-knock-open';
+const tempArgs = (containerIp, hostIp, port, sourceIp, openUntil) => [
+  '-d', containerIp, '-s', sourceIp, '-p', 'tcp', '--dport', String(CONTAINER_ADB_PORT),
+  '-m', 'conntrack', '--ctorigdst', hostIp, '--ctorigdstport', String(port),
+  '-m', 'comment', '--comment', `${TEMP_TAG}:${hostIp}:${port}:${openUntil}`,
+  '-j', 'ACCEPT',
+];
+
+// hostIp:port -> Node Timeout, so a fresh knock on an already-open window replaces the old timer
+// instead of stacking two that would both try to -D the (by then different-looking) rule.
+const openTimers = new Map();
+
+function armExpiry(hostIp, port, ruleArgs, remainingMs, { exec = execFileAsync } = {}) {
+  const key = stateKey(hostIp, port);
+  const existing = openTimers.get(key);
+  if (existing) clearTimeout(existing);
+  const timer = setTimeout(() => {
+    exec('iptables', ['-D', DOCKER_USER_CHAIN, ...ruleArgs]).catch(() => {});
+    openTimers.delete(key);
+  }, Math.max(0, remainingMs));
+  openTimers.set(key, timer);
+}
+
+// Finds this feature's own temporary ACCEPT rules directly in DOCKER-USER by their --comment tag,
+// independent of in-memory state -- what lets sweepStaleTempRules self-heal after a restart
+// instead of leaking one open forever (the in-memory openTimers/openState above do not survive
+// one, unlike fwknopd's own built-in expiry, which this rule shape cannot reuse -- see TEMP_TAG).
+async function listTempRules({ exec = execFileAsync } = {}) {
+  const { stdout } = await exec('iptables', ['-S', DOCKER_USER_CHAIN]);
+  const out = [];
+  for (const rawLine of stdout.split('\n')) {
+    const tokens = rawLine.trim().split(/\s+/);
+    const ci = tokens.indexOf('--comment');
+    if (ci === -1) continue;
+    const comment = tokens[ci + 1];
+    if (!comment || !comment.startsWith(`${TEMP_TAG}:`)) continue;
+    const [, hostIp, port, openUntilStr] = comment.split(':');
+    // tokens[0] is '-A', tokens[1] is the chain name -- the rest replays exactly against a `-D`.
+    out.push({ hostIp, port: Number(port), openUntil: Number(openUntilStr), ruleArgs: tokens.slice(2) });
+  }
+  return out;
+}
+
+// Called once from start() -- removes anything already past its own expiry (leaked by an
+// uncleanly-stopped previous process) and re-arms a fresh timer for anything still legitimately
+// open, so the remaining window survives a restart instead of being silently lost either way.
+async function sweepStaleTempRules({ exec = execFileAsync } = {}) {
+  const rules = await listTempRules({ exec }).catch(() => []);
+  const now = Date.now();
+  for (const rule of rules) {
+    if (rule.openUntil <= now) {
+      await exec('iptables', ['-D', DOCKER_USER_CHAIN, ...rule.ruleArgs]).catch(() => {});
+      continue;
+    }
+    openState.set(stateKey(rule.hostIp, rule.port), { sourceIp: undefined, openUntil: rule.openUntil });
+    armExpiry(rule.hostIp, rule.port, rule.ruleArgs, rule.openUntil - now, { exec });
+  }
+}
+
+// `seconds`: the actual firewall window requested (-f on the fwknop client, and this temporary
+// rule's own lifetime) -- the caller (routes/instances.js) is where "no cap, just a warning past
+// the 1-minute default" lives, this function does not re-judge that, it just forwards whatever it
+// is given.
 async function requestAccess({
-  hostIp, port, sourceIp, seconds = DEFAULT_KNOCK_SECONDS, exec = execFileAsync, keys,
+  containerIp, hostIp, port, sourceIp, seconds = DEFAULT_KNOCK_SECONDS, exec = execFileAsync, keys,
 }) {
-  await ensureGuardRules(hostIp, port, { exec });
+  await ensureGuardRules(containerIp, hostIp, port, { exec });
   const k = keys || getOrGenerateKeys();
   const fwTimeout = String(Math.max(1, Math.round(seconds)));
   await exec('fwknop', [
@@ -254,18 +346,21 @@ async function requestAccess({
     // --no-rc-file alone needs neither a home directory nor an rc file at all.
     '--no-rc-file',
   ]);
-  openState.set(stateKey(hostIp, port), { sourceIp, openUntil: Date.now() + seconds * 1000 });
+  const openUntil = Date.now() + seconds * 1000;
+  const args = tempArgs(containerIp, hostIp, port, sourceIp, openUntil);
+  // -I ... 1: ahead of every other rule in this chain, including other instances' own guard
+  // pairs -- harmless, since none of them can match a different containerIp/ctorigdst anyway.
+  await exec('iptables', ['-I', DOCKER_USER_CHAIN, '1', ...args]);
+  armExpiry(hostIp, port, args, seconds * 1000, { exec });
+  openState.set(stateKey(hostIp, port), { sourceIp, openUntil });
   return getState(hostIp, port);
 }
 
-// Real incident, 28/10/2026: on this host, an unrelated pre-existing rule ("ACCEPT * * tailscale0
-// -> 0.0.0.0/0", no port restriction) sits ahead of our own per-host DROP in INPUT, so the knock
-// gate never gets evaluated at all for anything arriving over Tailscale -- knockRequiredHosts said
-// "gated" while the port was wide open. Not a general netfilter rule engine (that would mean
-// reimplementing iptables' own matching) -- deliberately narrow: only the common, realistic shape of
-// "an earlier ACCEPT with nothing that would exclude our host/port" (an interface-wide accept, or an
-// accept for the same destination with no port restriction). Misses anything that requires following
-// a jump into another chain, or more exotic match modules (negated matches, -m recent, ipsets, ...).
+// Deliberately narrow (not a general netfilter rule engine): only the common, realistic shape of
+// "an earlier ACCEPT with nothing that would exclude this container/port" (any rule whose match
+// criteria do not rule out containerIp:5555 for a fresh connection). Misses anything that requires
+// following a jump into another chain, or more exotic match modules (negated matches, -m recent,
+// ipsets, ...).
 function portInDportsSpec(port, spec) {
   // "-m multiport --dports 22,80,25565:25569" -- comma list of single ports and n:m ranges.
   return spec.split(',').some((part) => {
@@ -282,47 +377,51 @@ function ruleTokenValue(tokens, flag) {
   return i === -1 ? null : tokens[i + 1];
 }
 
-function isOurDropRule(tokens, hostIp, port) {
+function isOurDropRule(tokens, containerIp) {
   const d = ruleTokenValue(tokens, '-d');
   const dport = ruleTokenValue(tokens, '--dport');
-  return tokens[tokens.length - 1] === 'DROP' && (d === hostIp || d === `${hostIp}/32`) && dport === String(port);
+  return tokens[tokens.length - 1] === 'DROP' && (d === containerIp || d === `${containerIp}/32`) && dport === String(CONTAINER_ADB_PORT);
 }
 
-function wouldBypassForFreshConnection(tokens, hostIp, port) {
+function wouldBypassForFreshConnection(tokens, containerIp) {
   if (tokens[tokens.length - 1] !== 'ACCEPT') return false;
   const inIf = ruleTokenValue(tokens, '-i');
-  if (inIf === 'lo') return false; // same-host access, not a meaningful bypass of a remote-access gate
+  if (inIf === 'lo') return false; // locally-originated (then forwarded) -- same-host trust, not a meaningful bypass of a remote-access gate
   const state = ruleTokenValue(tokens, '--state') || ruleTokenValue(tokens, '--ctstate');
   if (state && !state.split(',').includes('NEW')) return false; // only admits already-established traffic, never a knock-less fresh connection
   const d = ruleTokenValue(tokens, '-d');
-  if (d && d !== hostIp && d !== `${hostIp}/32`) return false; // scoped to a different destination
+  if (d && d !== containerIp && d !== `${containerIp}/32`) return false; // scoped to a different destination
   const proto = ruleTokenValue(tokens, '-p');
   if (proto && proto !== 'tcp') return false;
   const dport = ruleTokenValue(tokens, '--dport');
-  if (dport && dport !== String(port)) return false;
+  if (dport && dport !== String(CONTAINER_ADB_PORT)) return false;
   const dports = ruleTokenValue(tokens, '--dports');
-  if (dports && !portInDportsSpec(port, dports)) return false;
+  if (dports && !portInDportsSpec(CONTAINER_ADB_PORT, dports)) return false;
   return true;
 }
 
-// Returns the raw `-A INPUT ...` lines (iptables-save syntax) of any rule that would already
-// ACCEPT a fresh connection to hostIp:port before this project's own DROP rule is ever reached --
-// i.e. the knock requirement recorded in knockRequiredHosts has no actual effect at the firewall.
-async function detectBypassingRules(hostIp, port, { exec = execFileAsync } = {}) {
-  const { stdout } = await exec('iptables', ['-S', 'INPUT']);
-  const lines = stdout.split('\n').map((l) => l.trim()).filter((l) => l.startsWith('-A INPUT'));
+// Returns the raw `-A DOCKER-USER ...` lines (iptables-save syntax) of any rule that would
+// already ACCEPT a fresh connection to this instance's container before this project's own DROP
+// rule is ever reached -- i.e. the knock requirement recorded in knockRequiredHosts has no actual
+// effect at the firewall. `containerIp`: the instance's own bridge IP (dockerRuntime.getBridgeIp),
+// not the host-facing address -- see this module's own header comment on why DOCKER-USER, keyed
+// by the container, is the only chain that ever actually sees this traffic.
+async function detectBypassingRules(containerIp, { exec = execFileAsync } = {}) {
+  const { stdout } = await exec('iptables', ['-S', DOCKER_USER_CHAIN]);
+  const lines = stdout.split('\n').map((l) => l.trim()).filter((l) => l.startsWith(`-A ${DOCKER_USER_CHAIN}`));
   const bypassing = [];
   for (const line of lines) {
     const tokens = line.split(/\s+/);
-    if (isOurDropRule(tokens, hostIp, port)) break; // nothing after this point can matter -- it's our own gate
-    if (wouldBypassForFreshConnection(tokens, hostIp, port)) bypassing.push(line);
+    if (isOurDropRule(tokens, containerIp)) break; // nothing after this point can matter -- it's our own gate
+    if (wouldBypassForFreshConnection(tokens, containerIp)) bypassing.push(line);
   }
   return bypassing;
 }
 
 module.exports = {
   ADB_PORT_START, ADB_PORT_END, DEFAULT_KNOCK_SECONDS, MAX_FW_TIMEOUT_SECONDS, CHAIN_NAME, FWKNOPD_CONF,
+  CONTAINER_ADB_PORT, DOCKER_USER_CHAIN,
   getOrGenerateKeys, buildOpenPortsList, renderAccessConf, renderFwknopdConf, ensureConfigFiles,
-  start, stop, isRunning, detectForeignFwknopd,
+  start, stop, isRunning, detectForeignFwknopd, sweepStaleTempRules,
   ensureGuardRules, removeGuardRules, requestAccess, getState, detectBypassingRules,
 };

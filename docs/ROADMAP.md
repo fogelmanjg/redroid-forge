@@ -933,6 +933,9 @@ dependency's worth of care) -- the route handlers are thin, already-tested-patte
 functions proven above (`permissions.assertCan` + `instanceParams.parseKnockRequiredHosts` +
 `fwknop.ensureGuardRules`/`requestAccess`/`getState`), same level of route-layer coverage as every other
 route in `routes/instances.js` (this codebase has no HTTP-level test harness for that file at all).
+**Correction, 28/10/2026, later the same day: this claim was wrong in the one way that mattered.** The
+real `iptables`/`fwknopd` calls above were genuinely exercised, but never against a real instance's
+actual traffic path -- see the addendum near the end of this phase for why that gap hid the actual bug.
 
 **Gate, met:** an instance's internet-facing interface (but not its Tailscale one, if also bound) can
 require a knock before its ADB port responds to anything new, triggered from the UI by an
@@ -955,18 +958,88 @@ project's own `fwknopd` process.
 
 **28/10/2026 (still later the same day) — a third thing bundled into the same check, found while
 testing the feature in the UI for the first time:** `knockRequiredHosts` said "gated" for an instance's
-Tailscale interface while `adb connect` succeeded anyway, no knock performed. Root cause: this host's
-own pre-existing `INPUT` chain already has a blanket `ACCEPT * * tailscale0 -> 0.0.0.0/0` rule (no port
-restriction, a known "ALTA" item in this host's own hardening backlog), sitting ahead of this project's
-per-host `DROP` -- the gate was correctly configured and never actually evaluated. `fwknop.js` gained
-`detectBypassingRules(hostIp, port)`: walks `iptables -S INPUT` top to bottom, stops at this project's
-own `DROP` rule for that host:port, and flags any earlier `ACCEPT` that is not scoped away from that
-host/port/protocol (deliberately narrow -- not a netfilter rule engine: skips `-i lo` as same-host
-trust rather than a real bypass, skips ESTABLISHED/RELATED-only accepts since those never admit a fresh
-knock-less connection, and does not follow jumps into other chains). `checkFwknop()` now runs this for
-every currently-gated host across every instance and, if any is shadowed, downgrades `ok` to `warn` and
-names the exact rule and instance. Live-verified: correctly singled out the real `tailscale0` rule on
-this host for `cifi-2gb-test`, and emitted nothing for a host with no such shadowing rule ahead of it.
+Tailscale interface while `adb connect` succeeded anyway, no knock performed. Root cause as understood
+AT THAT TIME: this host's own pre-existing `INPUT` chain already has a blanket `ACCEPT * * tailscale0 ->
+0.0.0.0/0` rule (no port restriction, a known "ALTA" item in this host's own hardening backlog), sitting
+ahead of this project's per-host `DROP` -- the gate was correctly configured and never actually
+evaluated. `fwknop.js` gained `detectBypassingRules(hostIp, port)`: walked `iptables -S INPUT` top to
+bottom, stopped at this project's own `DROP` rule for that host:port, flagged any earlier `ACCEPT` not
+scoped away from that host/port/protocol. **This diagnosis was real but incomplete -- see the next
+addendum.** It correctly found A bypass, just not THE one that actually mattered.
+
+**28/10/2026 (the same evening) — the real bug: the INPUT-based design never worked at all, on ANY
+interface, for any real instance.** Testing the feature live against an actual running instance for the
+first time (not just the unit suite) via `adb connect`/raw TCP from another host, through all three
+states the UI allows (unbound, bound without a knock, bound requiring one): the LAN case, with the knock
+correctly required and never requested, still let the connection through -- the Tailscale finding above
+was not the whole story. Root-caused with kernel-level ground truth, not guesswork: `conntrack` (the CLI)
+turned out not to be installed on this host at all, which had earlier produced a false "no active
+connection" reading with its own `2>/dev/null` masking "command not found" -- caught and redone with
+`ss`/`tcpdump`/native `nft` counters instead. Temporary, passive `nft insert rule ... counter` probes
+(added then removed immediately after, never left in place) showed **zero** hits in `INPUT` for a real
+connection and 5 hits in `FORWARD`, matching the container's own bridge IP, not the host's. Cause:
+`dockerRuntime.create()` publishes every instance's ADB port through Docker's bridge network
+(`PortBindings`), which Docker implements as DNAT in the `nat` table's `PREROUTING` chain --
+confirmed live (`ip daddr <hostIp> ... dnat to <containerBridgeIp>:5555`) -- long before the host's own
+`INPUT` chain ever runs. The rewritten packet is then *forwarded* (via Docker's own `DOCKER-USER` chain,
+reserved for exactly this), never delivered locally. `INPUT` was simply the wrong chain from the start --
+not a Tailscale-specific gap, a universal one; the tailscale0 rule above happened to be the first thing
+that surfaced it, not the cause of it.
+
+**Fix (same session): guard rules, the temporary access rule, and the bypass-detection scan all moved
+from `INPUT`/host-IP to `DOCKER-USER`/container-IP.**
+- `fwknop.js`: `ensureGuardRules`/`removeGuardRules` now take `(containerIp, hostIp, port)` and operate on
+  `DOCKER-USER`, matching `-d <containerIp> --dport 5555` (`CONTAINER_ADB_PORT`, the container-side ADB
+  port Docker always publishes, fixed regardless of the host-facing port each instance picks -- see
+  `dockerRuntime.js`'s `ExposedPorts`/`PortBindings`) plus `-m conntrack --ctorigdst <hostIp>
+  --ctorigdstport <port>`, matching the packet's ORIGINAL (pre-NAT) destination -- already fully populated
+  by the time a packet reaches `FORWARD`, even for its own first SYN (verified live) -- to keep the gate
+  scoped to the one host interface actually marked as requiring it, the precision `-d hostIp` alone used
+  to give for free back when this lived in `INPUT`.
+- `fwknopd`'s own dynamic rule insertion (`IPT_INPUT_ACCESS`/`CHAIN_NAME`) could not be reused for the
+  temporary "access granted" rule: it is intrinsically `INPUT`-chain-shaped, and even retargeted it could
+  not tell instances apart, since every container exposes the identical internal port 5555 -- there is no
+  per-container destination in its own rule shape. `requestAccess` now installs this project's OWN
+  comment-tagged temporary `ACCEPT` (`TEMP_TAG`, embedding its own expiry timestamp in the comment text)
+  directly into `DOCKER-USER`, with a Node timer to remove it. The real `fwknop` client/daemon SPA exchange
+  still happens on every request regardless (defense in depth, same "prior authenticated channel"
+  reasoning as this module's own header comment) -- only the rule that actually enforces anything changed.
+- Restart-survival for that temporary rule (the original reason to lean on `fwknopd`'s own expiry at all)
+  is reimplemented at this layer too: `start()` now calls `sweepStaleTempRules()`, which reads
+  `DOCKER-USER` for this project's own tagged rules, removes any already past their embedded expiry (self-
+  healing a leak from an uncleanly-stopped previous process), and re-arms a fresh timer for the remaining
+  time of any still legitimately open.
+- The container's bridge IP (`dockerRuntime.getBridgeIp`) only exists while the container is actually
+  running, and Docker does not promise the same one back on the next start -- unlike the old design, these
+  rules are no longer stable across the instance's own lifecycle. `routes/instances.js` now applies/
+  releases them at every point that matters: `applyKnockGuards`/`releaseKnockGuards` run on `/start`,
+  `/stop`, `/restart`, `/:id/display`'s recreate (release the OLD container's rules before removing it,
+  apply fresh ones for the NEW container's address after), and `DELETE` (release before the container is
+  gone, since Docker's IP allocator can hand that exact address to a future, unrelated container).
+- `doctor.js`'s `checkFwknop()` now calls `detectBypassingRules(containerIp)` (no more `hostIp`/`port` --
+  the scope is the whole container, since DOCKER-USER sees it regardless of which host interface the
+  traffic came in on) for every running, gated instance, scanning `DOCKER-USER` instead of `INPUT`.
+- **Found live while re-verifying, not touched:** this host's `DOCKER-USER` chain already carries its own
+  pre-existing content -- a blanket `-m state --state RELATED,ESTABLISHED -j ACCEPT` and a LAN-only
+  `! -s 192.168.1.0/24 -i br0 -j DROP` -- unrelated to this project (part of this host's own existing
+  FORWARD/DOCKER hardening, [[project_pendientes_server]]). This project's own rules are appended after
+  them with `-A`/`-I 1` for the temporary one, same non-destructive, append-only discipline this feature
+  already followed for `INPUT`; neither pre-existing rule was read as instruction to change anything here.
+- The stale `INPUT` rules the original (broken) design had installed for `cifi-2gb-test` were manually
+  removed by hand on the live host once the fix was deployed -- they were this project's own debris, not
+  the host's pre-existing rules, and nothing in the new code path would ever clean them up itself (the new
+  `removeGuardRules` matches a completely different chain/shape).
+
+**Actually live-verified end to end this time, against the real running `cifi-2gb-test` instance, from a
+real second host on the LAN (not the unit suite, not a synthetic probe):** with the LAN interface marked
+as requiring a knock, a raw TCP connect was refused; `POST /:id/adb-access` for that interface let the
+exact same connection through immediately after; letting the 1-minute window elapse (observed for real,
+not assumed) caused the temporary rule to disappear on its own and the next attempt was refused again;
+the same sequence was repeated over the Tailscale interface and behaved identically (confirming the
+original Tailscale-specific symptom is also gone, as a side effect of the real fix, not a separate patch).
+`doctor.js`'s `fwknop` check reports `ok` (no bypass) for this instance afterward. The `aurora-host-test`
+instance, which has no knock requirement configured, was left untouched throughout and confirmed
+unaffected.
 
 ## Phase 10 — Removal of the old code + public polish
 
