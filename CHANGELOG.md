@@ -21,7 +21,12 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
 
 ## [Unreleased]
 
-Phase 9: port-knocking (SPA, via `fwknop`) for ADB/scrcpy access, per instance and per bound interface.
+(nothing yet)
+
+## [0.3.0] - 2026-10-29
+
+Phase 9: port-knocking (SPA, via `fwknop`) for ADB/scrcpy access, per instance and per bound interface --
+actually works end to end, on every interface, once the real bug (below) was found and fixed.
 
 ### Added
 
@@ -112,6 +117,12 @@ all, Phase 6/7):
   to "Storage" -- opening access is something done every time someone wants to connect, not a
   configuration change like deciding which interfaces require a knock at all (which stays in
   Configure).
+- The source-IP field in "Open access" now has a hint explaining when it needs editing: it is
+  pre-filled from the panel's own detected address, which is only right when the device opening
+  access is also the one connecting, over the same network path -- confirmed live opening access
+  for a LAN interface from a panel reached over Tailscale, left at the auto-filled Tailscale
+  address, did not let the LAN connection through (the temporary rule matches the real source
+  address, not which interface the panel itself was reached on).
 
 ## [0.2.0] - 2026-10-26
 

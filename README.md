@@ -20,9 +20,10 @@ without depending on any other infrastructure.
 > [`docs/MODULE-AUTHORING.md`](docs/MODULE-AUTHORING.md) (writing a module — native vs. own vs.
 > user module, the manifest schema, the 7-stage hook contract) and
 > [`docs/ROADMAP.md`](docs/ROADMAP.md) (in what order) and [`CHANGELOG.md`](CHANGELOG.md) (tagged
-> releases, SemVer policy) for the full picture. What exists today covers **Phases 0 through 7**
-> of the roadmap — everything in the Features table below — with Phase 8 (federation with
-> `jg-dashboard`/Plenum) next. See [`CHANGELOG.md`](CHANGELOG.md) for the detail, tag `v0.2.0`.
+> releases, SemVer policy) for the full picture. What exists today covers **Phases 0 through 7,
+> plus Phase 9** (port-knocking, done out of order since it does not depend on Phase 8) of the
+> roadmap — everything in the Features table below — with Phase 8 (federation with
+> `jg-dashboard`/Plenum) next. See [`CHANGELOG.md`](CHANGELOG.md) for the detail, tag `v0.3.0`.
 
 ## Features
 

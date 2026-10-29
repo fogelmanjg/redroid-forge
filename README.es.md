@@ -22,9 +22,10 @@ sin depender de ninguna otra infraestructura.
 > módulo propio vs. módulo de usuario, el schema del manifiesto, el contrato de las 7 etapas) y
 > [`docs/ROADMAP.md`](docs/ROADMAP.md) (en qué orden; solo en inglés) y
 > [`CHANGELOG.md`](CHANGELOG.md) (releases etiquetados, política de versionado; solo en inglés) para
-> el panorama completo. Lo que hay hoy corresponde a las **Fases 0 a 7** del roadmap — todo lo de
-> la tabla de Features más abajo — con la Fase 8 (federación con `jg-dashboard`/Plenum) como
-> próximo paso. Ver [`CHANGELOG.md`](CHANGELOG.md) para el detalle, tag `v0.2.0`.
+> el panorama completo. Lo que hay hoy corresponde a las **Fases 0 a 7, más la Fase 9** (port-knocking,
+> hecha fuera de orden porque no depende de la Fase 8) del roadmap — todo lo de la tabla de Features
+> más abajo — con la Fase 8 (federación con `jg-dashboard`/Plenum) como próximo paso. Ver
+> [`CHANGELOG.md`](CHANGELOG.md) para el detalle, tag `v0.3.0`.
 
 ## Features
 
