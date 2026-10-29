@@ -58,6 +58,13 @@ Phase 9: port-knocking (SPA, via `fwknop`) for ADB/scrcpy access, per instance a
   `server.js` now kills it on `SIGTERM`/`SIGINT`, and `fwknop.js`'s own `start()` defensively kills a
   stale one (matched by this project's own config file path only) before spawning a new one.
 
+### Changed
+
+- The "open access" control moved out of the Configure panel into its own quick-access row next
+  to "Storage" -- opening access is something done every time someone wants to connect, not a
+  configuration change like deciding which interfaces require a knock at all (which stays in
+  Configure).
+
 ## [0.2.0] - 2026-10-26
 
 First live pass of `oidc` mode against a real IdP, plus everything it led to.
