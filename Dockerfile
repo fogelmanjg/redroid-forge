@@ -41,8 +41,11 @@ FROM node:22-alpine
 # mesa-va-gallium only covers AMD (radeonsi) and nouveau -- confirmed live on
 # 05/10 on n02 (TigerLake): without this vaInitialize fails and the daemon dies ;
 # build-base/libva-dev/mesa-dev -> to compile backend/native/vaapi-daemon (only
-# build-time, they are not left installed in the final image, see the stage below)
-RUN apk add --no-cache iproute2 iw kmod util-linux python3 pciutils docker-cli libva mesa-gbm mesa-egl mesa-va-gallium intel-media-driver
+# build-time, they are not left installed in the final image, see the stage below) ;
+# fwknop/fwknop-server/iptables -> Single Packet Authorization for per-instance ADB/scrcpy
+# port-knocking (see backend/src/lib/fwknop.js, docs/ROADMAP.md Phase 9) -- `fwknopd` runs
+# as one more supervised child process started by server.js, no separate container
+RUN apk add --no-cache iproute2 iw kmod util-linux python3 pciutils docker-cli libva mesa-gbm mesa-egl mesa-va-gallium intel-media-driver fwknop fwknop-server iptables
 
 WORKDIR /app/backend
 COPY backend/package.json backend/package-lock.json ./

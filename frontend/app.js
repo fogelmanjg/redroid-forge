@@ -726,6 +726,125 @@ function buildRestartEditRow(inst) {
   updateNetWarn();
   panel.appendChild(netWarn);
 
+  // --- Port-knocking (docs/ROADMAP.md Phase 9): per bound interface (localhost/wildcard
+  // excluded -- see instanceParams.parseKnockRequiredHosts for why), whether the ADB port
+  // requires a knock before it answers at all. Saved independently of the "Apply" button
+  // above -- unlike bindHosts, this never needs a container recreate (lib/fwknop.js).
+  const knockHeader = document.createElement('div');
+  knockHeader.className = 'resources-edit-header';
+  knockHeader.textContent = t('instances.knock.header');
+  panel.appendChild(knockHeader);
+
+  const currentKnockHosts = new Set(inst.knockRequiredHosts || []);
+  const knockChecks = [];
+  for (const host of currentBindHosts) {
+    if (['127.0.0.1', '::1', '0.0.0.0', '::'].includes(host)) continue;
+    const wrap = document.createElement('label');
+    wrap.className = 'display-edit-field';
+    wrap.style.flexDirection = 'row';
+    const chk = document.createElement('input');
+    chk.type = 'checkbox';
+    chk.checked = currentKnockHosts.has(host);
+    knockChecks.push({ address: host, chk });
+    wrap.appendChild(chk);
+    wrap.appendChild(document.createTextNode(t('instances.knock.requireLabel', { address: host })));
+    panel.appendChild(wrap);
+  }
+
+  if (knockChecks.length) {
+    const knockAccessWrap = document.createElement('div');
+
+    function renderKnockAccessControls(hosts) {
+      knockAccessWrap.innerHTML = '';
+      for (const host of hosts) {
+        const row = document.createElement('div');
+        row.className = 'display-edit-field';
+
+        const label = document.createElement('div');
+        label.textContent = t('instances.knock.openLabel', { address: host });
+        row.appendChild(label);
+
+        const ipInput = document.createElement('input');
+        ipInput.type = 'text';
+        ipInput.placeholder = t('instances.knock.ipPlaceholder');
+        row.appendChild(ipInput);
+
+        const minutesInput = document.createElement('input');
+        minutesInput.type = 'number';
+        minutesInput.min = '1';
+        minutesInput.value = '1';
+        minutesInput.style.width = '4em';
+        row.appendChild(minutesInput);
+        row.appendChild(document.createTextNode(t('instances.knock.minutesLabel')));
+
+        const openBtn = document.createElement('button');
+        openBtn.type = 'button';
+        openBtn.className = 'secondary';
+        openBtn.textContent = t('instances.knock.open');
+        row.appendChild(openBtn);
+
+        const stateLine = document.createElement('div');
+        row.appendChild(stateLine);
+
+        const warnLine = document.createElement('div');
+        warnLine.className = 'resources-warn resources-warn-error';
+        warnLine.style.display = 'none';
+        warnLine.textContent = t('instances.knock.longWindowWarn');
+        row.appendChild(warnLine);
+
+        const renderState = (state) => {
+          stateLine.textContent = (state && state.open)
+            ? t('instances.knock.stateOpenUntil', { time: new Date(state.openUntil).toLocaleTimeString() })
+            : t('instances.knock.stateClosed');
+        };
+
+        api(`/instances/${inst.id}/adb-access?hostIp=${encodeURIComponent(host)}`)
+          .then((state) => {
+            if (!ipInput.value && state.detectedSourceIp) ipInput.value = state.detectedSourceIp;
+            renderState(state);
+          })
+          .catch(() => {});
+
+        openBtn.addEventListener('click', async () => {
+          openBtn.disabled = true;
+          try {
+            const minutes = Number(minutesInput.value) || 1;
+            warnLine.style.display = minutes > 1 ? '' : 'none';
+            const body = { hostIp: host, minutes };
+            if (ipInput.value) body.sourceIp = ipInput.value;
+            const state = await api(`/instances/${inst.id}/adb-access`, { method: 'POST', body: JSON.stringify(body) });
+            renderState(state);
+          } catch (err) {
+            stateLine.textContent = err.message;
+          } finally {
+            openBtn.disabled = false;
+          }
+        });
+
+        knockAccessWrap.appendChild(row);
+      }
+    }
+
+    const knockSaveBtn = document.createElement('button');
+    knockSaveBtn.type = 'button';
+    knockSaveBtn.className = 'secondary';
+    knockSaveBtn.textContent = t('instances.knock.save');
+    knockSaveBtn.addEventListener('click', async () => {
+      knockSaveBtn.disabled = true;
+      try {
+        const knockRequiredHosts = knockChecks.filter(({ chk }) => chk.checked).map(({ address }) => address);
+        await api(`/instances/${inst.id}/knock-hosts`, { method: 'PUT', body: JSON.stringify({ knockRequiredHosts }) });
+        inst.knockRequiredHosts = knockRequiredHosts;
+        renderKnockAccessControls(knockRequiredHosts);
+      } finally {
+        knockSaveBtn.disabled = false;
+      }
+    });
+    panel.appendChild(knockSaveBtn);
+    panel.appendChild(knockAccessWrap);
+    renderKnockAccessControls([...currentKnockHosts]);
+  }
+
   // --- Optional modules: gapps/arm-translation (hardcoded, same as the create form) plus
   // whatever stage-7 "user modules" the catalog has (CIFI today, see loadUserModulesCache) --
   // full parity with what the create form already lets you choose, just reachable after the

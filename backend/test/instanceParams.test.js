@@ -4,7 +4,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const {
-  parseResources, parseGpuMode, parseBindHosts, DEFAULT_BIND_HOSTS, countCpus,
+  parseResources, parseGpuMode, parseBindHosts, DEFAULT_BIND_HOSTS, countCpus, parseKnockRequiredHosts,
 } = require('../src/lib/instanceParams');
 
 test('parseResources: empty body -> no limit at all, same behavior as before this existed', () => {
@@ -101,4 +101,51 @@ test('countCpus: a range expands to every core in it, inclusive', () => {
   assert.equal(countCpus('4-7'), 4);
   assert.equal(countCpus('4-7,13'), 5);
   assert.equal(countCpus('0-1,4-7,13'), 7);
+});
+
+test('parseKnockRequiredHosts: omitted -> the fallback (nothing gated, same as before this existed)', () => {
+  assert.deepEqual(parseKnockRequiredHosts({}, ['127.0.0.1', '100.73.0.50']), []);
+  assert.deepEqual(parseKnockRequiredHosts({}, ['127.0.0.1', '100.73.0.50'], ['100.73.0.50']), ['100.73.0.50']);
+});
+
+test('parseKnockRequiredHosts: accepts a subset of this instance\'s own bindHosts', () => {
+  const bindHosts = ['127.0.0.1', '100.73.0.50', '203.0.113.9'];
+  assert.deepEqual(
+    parseKnockRequiredHosts({ knockRequiredHosts: ['100.73.0.50'] }, bindHosts),
+    ['100.73.0.50'],
+  );
+  assert.deepEqual(
+    parseKnockRequiredHosts({ knockRequiredHosts: ['100.73.0.50', '203.0.113.9'] }, bindHosts).sort(),
+    ['100.73.0.50', '203.0.113.9'],
+  );
+  assert.deepEqual(parseKnockRequiredHosts({ knockRequiredHosts: [] }, bindHosts), []);
+});
+
+test('parseKnockRequiredHosts: rejects an address this instance is not bound to, and dedupes', () => {
+  const bindHosts = ['127.0.0.1', '100.73.0.50'];
+  assert.throws(() => parseKnockRequiredHosts({ knockRequiredHosts: ['203.0.113.9'] }, bindHosts), /not bound to/);
+  assert.throws(() => parseKnockRequiredHosts({ knockRequiredHosts: [5] }, bindHosts), /not bound to/);
+  assert.deepEqual(
+    parseKnockRequiredHosts({ knockRequiredHosts: ['100.73.0.50', '100.73.0.50'] }, bindHosts),
+    ['100.73.0.50'],
+  );
+});
+
+test('parseKnockRequiredHosts: never allows localhost or the wildcard, even if somehow bound', () => {
+  assert.throws(
+    () => parseKnockRequiredHosts({ knockRequiredHosts: ['127.0.0.1'] }, ['127.0.0.1']),
+    /localhost and the wildcard/,
+  );
+  assert.throws(
+    () => parseKnockRequiredHosts({ knockRequiredHosts: ['0.0.0.0'] }, ['0.0.0.0']),
+    /localhost and the wildcard/,
+  );
+  assert.throws(
+    () => parseKnockRequiredHosts({ knockRequiredHosts: ['::1'] }, ['::1']),
+    /localhost and the wildcard/,
+  );
+  assert.throws(
+    () => parseKnockRequiredHosts({ knockRequiredHosts: ['::'] }, ['::']),
+    /localhost and the wildcard/,
+  );
 });

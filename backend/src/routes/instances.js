@@ -15,6 +15,7 @@ const moduleScheduler = require('../lib/moduleScheduler');
 const instanceSupport = require('../lib/instanceSupport');
 const instanceParams = require('../lib/instanceParams');
 const backup = require('../lib/backup');
+const fwknop = require('../lib/fwknop');
 const settings = require('../lib/settings');
 const permissions = require('../lib/permissions');
 const quotas = require('../lib/quotas');
@@ -743,6 +744,87 @@ router.post('/:id/display', async (req, res) => {
   }
 });
 
+// Which of this instance's own bound interfaces require a port-knock before the ADB port
+// answers at all (docs/ROADMAP.md Phase 9) -- deliberately separate from /:id/display: unlike
+// bindHosts itself, this never needs a container recreate. The iptables rules it adds/removes
+// are host-level, keyed by the interface's own IP:port, which stays stable across any
+// recreate of this instance's container (see dockerRuntime.js/fwknop.js).
+router.put('/:id/knock-hosts', async (req, res) => {
+  const instance = store.get(req.params.id);
+  if (!instance) return res.status(404).json({ error: 'Instancia no encontrada' });
+  try {
+    permissions.assertCan(req.user, 'configure', instance);
+    const bindHosts = instance.bindHosts || instanceParams.DEFAULT_BIND_HOSTS;
+    const knockRequiredHosts = instanceParams.parseKnockRequiredHosts(
+      req.body, bindHosts, instance.knockRequiredHosts || [],
+    );
+    const before = new Set(instance.knockRequiredHosts || []);
+    const after = new Set(knockRequiredHosts);
+    for (const host of after) if (!before.has(host)) await fwknop.ensureGuardRules(host, instance.adbPort);
+    for (const host of before) if (!after.has(host)) await fwknop.removeGuardRules(host, instance.adbPort);
+    const updated = store.upsert({ ...instance, knockRequiredHosts });
+    res.json(await withRuntimeStatus(updated));
+  } catch (e) {
+    sendError(res, e);
+  }
+});
+
+// Current knock state for one guarded interface (closed, or open until when -- advisory only,
+// see fwknop.js's own comment on its in-memory openState), plus the request's own source IP so
+// the UI can pre-fill the "open access" control (ROADMAP Phase 9: the device browsing the UI
+// and the device that will run scrcpy are very often behind the same home NAT/public IP even
+// when they are not the same device). `req.ip` is the raw socket address -- a known future gap
+// if this app ever sits behind a reverse proxy (documented in ROADMAP, not fixed here).
+router.get('/:id/adb-access', (req, res) => {
+  const instance = store.get(req.params.id);
+  if (!instance) return res.status(404).json({ error: 'Instancia no encontrada' });
+  try {
+    permissions.assertCan(req.user, 'start-stop', instance);
+    const { hostIp } = req.query;
+    if (!hostIp || !(instance.knockRequiredHosts || []).includes(hostIp)) {
+      throw httpError(`This instance's interface ${JSON.stringify(hostIp)} does not require a knock`, 400);
+    }
+    res.json({ ...fwknop.getState(hostIp, instance.adbPort), detectedSourceIp: req.ip });
+  } catch (e) {
+    sendError(res, e);
+  }
+});
+
+// Opens access for one guarded interface by having the BACKEND itself send the SPA knock --
+// never the connecting device (see fwknop.js's own header comment for why that is sound: this
+// project's role+ownership check just above IS the "prior authenticated channel"). `minutes`
+// defaults to 1 (the agreed window); anything longer comes back as a `warning`, never a 4xx --
+// explicit decision (ROADMAP Phase 9: "a riesgo del administrador").
+router.post('/:id/adb-access', async (req, res) => {
+  const instance = store.get(req.params.id);
+  if (!instance) return res.status(404).json({ error: 'Instancia no encontrada' });
+  try {
+    permissions.assertCan(req.user, 'start-stop', instance);
+    const { hostIp, sourceIp } = req.body || {};
+    if (!hostIp || !(instance.knockRequiredHosts || []).includes(hostIp)) {
+      throw httpError(`This instance's interface ${JSON.stringify(hostIp)} does not require a knock`, 400);
+    }
+    const resolvedSourceIp = sourceIp || req.ip;
+    if (typeof resolvedSourceIp !== 'string' || !instanceParams.IP_SHAPE_RE.test(resolvedSourceIp)) {
+      throw httpError('"sourceIp" must be a valid IP address', 400);
+    }
+    const minutesRaw = req.body?.minutes;
+    const minutes = minutesRaw === undefined || minutesRaw === null ? 1 : Number(minutesRaw);
+    if (!Number.isFinite(minutes) || minutes <= 0) {
+      throw httpError('"minutes" must be a positive number', 400);
+    }
+    const state = await fwknop.requestAccess({
+      hostIp, port: instance.adbPort, sourceIp: resolvedSourceIp, seconds: Math.round(minutes * 60),
+    });
+    const warning = minutes > 1
+      ? "A longer window leaves the port answering for longer before anything connects -- it does not extend how long an already-open session's own connection lasts."
+      : undefined;
+    res.json({ ...state, warning });
+  } catch (e) {
+    sendError(res, e);
+  }
+});
+
 // Known-combinations verdict for THIS instance's actual base image + modules (section 3
 // of docs/KNOWN-COMBINATIONS.md), not the image's defaults -- an instance with extra
 // optional modules can legitimately differ from what the image alone would resolve to.
@@ -842,6 +924,10 @@ router.delete('/:id', async (req, res) => {
     permissions.assertCan(req.user, 'delete', instance);
     moduleScheduler.stop(instance.id);
     meminfoFix.release(instance.id);
+    // Guard rules (docs/ROADMAP.md Phase 9) are keyed by this instance's own host:port -- a
+    // deleted instance's port can be reused by a future one, so the DROP/ESTABLISHED pair
+    // must not outlive it.
+    for (const host of (instance.knockRequiredHosts || [])) await fwknop.removeGuardRules(host, instance.adbPort);
     await releaseWifiFixes(instance);
     await runtime.remove(instance.containerId, { force: true });
     if (instance.volumeName) await runtime.removeVolume(instance.volumeName);

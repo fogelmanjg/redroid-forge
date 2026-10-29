@@ -21,6 +21,38 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
 
 ## [Unreleased]
 
+Phase 9: port-knocking (SPA, via `fwknop`) for ADB/scrcpy access, per instance and per bound interface.
+
+### Added
+
+- `fwknopd` runs as a supervised process inside the existing container (`backend/src/lib/fwknop.js`),
+  its own key generated once and persisted. `knockRequiredHosts` (a subset of an instance's own
+  `bindHosts`) marks which bound interfaces require a knock before the ADB port answers at all --
+  localhost and the wildcard address can never be marked (see `instanceParams.parseKnockRequiredHosts`).
+- `PUT /api/instances/:id/knock-hosts` (no container recreate -- the guard rules are host-level, keyed by
+  an IP:port that stays stable across one), `POST`/`GET /api/instances/:id/adb-access` (opens access by
+  having the backend itself send the knock on behalf of an already-authenticated, already role-checked
+  session -- never the connecting device). Network panel UI: per-interface toggle + request-access
+  control (IP pre-filled from the request, editable; minutes, default 1, no cap -- a longer window only
+  ever warns, never blocks).
+- An already-open connection survives the knock window's expiry; only a new connection attempt needs a
+  fresh knock (one permanent `ESTABLISHED,RELATED` exception rule per guarded interface+port).
+
+### Fixed
+
+- This host already runs its own, unrelated `fwknop-server.service` protecting SSH. Sharing
+  `network_mode: host` + `pid: host` with it meant `fwknop`'s library-default chain name
+  (`FWKNOP_INPUT`) collided with that pre-existing service, and this project's `FLUSH_IPT_AT_EXIT: Y`
+  (also a library default) would have deleted the host's live SSH access rule on every container stop.
+  Fixed with a chain name unique to this project and `FLUSH_IPT_AT_INIT`/`_EXIT: N` -- verified live,
+  twice, that a full container restart leaves the host's own SSH chain untouched.
+- `fwknopd` refuses to start unless its config files are `0600` (now `chmod`'d right after being
+  written), and the `fwknop` client's `--no-home-dir` flag refuses to run without also setting
+  `--rc-file` -- replaced with `--no-rc-file`, which needs neither.
+- `pid: host` means an uncleanly-stopped container can leave a real orphaned `fwknopd` outliving it.
+  `server.js` now kills it on `SIGTERM`/`SIGINT`, and `fwknop.js`'s own `start()` defensively kills a
+  stale one (matched by this project's own config file path only) before spawning a new one.
+
 ## [0.2.0] - 2026-10-26
 
 First live pass of `oidc` mode against a real IdP, plus everything it led to.

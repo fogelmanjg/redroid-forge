@@ -48,7 +48,7 @@ oficial significa validado con evidencia en hardware real, no una garantía.
 | **Doctor** | ✅ | Diagnóstico del host con el comando exacto para arreglar lo que falta — solo diagnostica, nunca ejecuta nada solo. |
 | **Visualización de pantalla** | ✅ | Scripts de conexión scrcpy (`connect.sh`/`connect.ps1`), un puerto para ver desde un dispositivo Android mismo, sin visor web embebido por diseño (ver abajo). |
 | **Federación** | 📝 planeado | `jg-dashboard` y Plenum pasando a consumir esta app vía `oidc`, reusando el identity provider que cada host ya tiene en vez de un login aparte. |
-| **Port knocking** | 📝 planeado, etapa de investigación | Un acompañante opcional `fwknop` para sysops que lo quieran, encima de los controles de red de arriba. |
+| **Port knocking** | ✅ hecho | Gate SPA (`fwknop`) por instancia y por interfaz para el puerto ADB/scrcpy, encima de los controles de red de arriba -- se abre desde la UI por una sesión ya autenticada, nunca por el dispositivo que se conecta. |
 
 ## Casos de uso
 

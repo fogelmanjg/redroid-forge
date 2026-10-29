@@ -789,7 +789,7 @@ dashboard.
 **Gate:** both operate real instances exclusively through `redroid-forge` during a run-in period, with no
 regressions, authenticating through each host's own existing identity provider.
 
-## Phase 9 — Advanced: port-knocking for ADB/scrcpy access (design agreed 26/10/2026, not built yet)
+## Phase 9 — Advanced: port-knocking for ADB/scrcpy access (built and live-verified 28/10/2026)
 
 **Difficulty: Medium-High.** Originally framed as "research first" (`(to) investigate`, not commit to) --
 see the reality check below, still valid background, now resolved into a concrete design.
@@ -856,20 +856,57 @@ it is just never the end user's own job to knock.
   default); when on, a small control to request access (IP pre-filled/editable, minutes pre-filled at 1)
   and the current state (closed / open until HH:MM).
 
-**Steps (not started):**
-1. `fwknopd` as a supervised process inside the existing container + the static `access.conf` stanza +
-   generated/stored shared key (same pattern as other generated secrets in this project).
-2. `knockRequiredHosts` field + migration (additive, same pattern as `ownerId`'s own migration) +
-   the DROP/ACCEPT/ESTABLISHED-exception rule management, keyed by interface IP + port, independent of
-   container recreation (the rules are host-level and keyed by an IP:port that stays stable).
-3. `POST /api/instances/:id/adb-access` (role+ownership gated like every other instance route) that shells
-   out to the real `fwknop` client binary against the local `fwknopd`; `GET` for current state.
-4. Network panel UI: per-interface toggle + request-access control + state display.
+**Steps, all done:**
+1. `fwknopd` as a supervised process inside the existing container (`lib/fwknop.js`), spawned by
+   `server.js` at boot + the generated/stored shared key (same pattern as `session.js`'s own secret) +
+   generated `fwknopd.conf`/`access.conf`.
+2. `knockRequiredHosts` field (`instanceParams.parseKnockRequiredHosts` -- additive, default `[]`, no
+   migration needed) + the DROP/ACCEPT/ESTABLISHED-exception rule management (`fwknop.ensureGuardRules`/
+   `removeGuardRules`), keyed by interface IP + port, independent of container recreation.
+3. `PUT /api/instances/:id/knock-hosts` (sets which bound interfaces require a knock, applies/removes the
+   guard rules immediately -- no recreate), `POST /api/instances/:id/adb-access` (role+ownership gated
+   like every other instance route, shells out to the real `fwknop` client against the local `fwknopd`),
+   `GET` for current state + the request's own detected source IP.
+4. Network panel UI (`frontend/app.js`): per-interface toggle (saved independently of the recreate-heavy
+   "Apply" button above it) + a request-access control (IP pre-filled/editable, minutes, state line) per
+   gated interface.
 
-**Gate:** an instance's internet-facing interface (but not its Tailscale one, if also bound) can require a
-knock before its ADB port responds to anything new, triggered from the UI by an already-authenticated
-user, with an already-open session surviving the window's expiry and zero effect on any interface that
-does not opt in.
+**Real collision found and fixed during live verification (28/10/2026), not foreseen by the design
+above:** this host already runs its OWN, completely unrelated `fwknop-server.service` (systemd,
+protecting SSH, pre-existing, not part of this project). `network_mode: host` + `pid: host` mean there is
+no namespace of any kind separating this container's `fwknopd` from that one, and fwknop's library
+default chain name (`FWKNOP_INPUT`) is the same for both -- confirmed live that this project's `fwknopd`
+detected the existing jump rule and shared the chain rather than erroring, which would have meant this
+container's `FLUSH_IPT_AT_EXIT: Y` (the library default) deleting the host's live SSH access rule on
+every container stop. Fixed by giving this feature its own chain name (`REDROID_FORGE_FWKNOP_INPUT`,
+`fwknop.js`'s own `CHAIN_NAME`) and setting `FLUSH_IPT_AT_INIT`/`FLUSH_IPT_AT_EXIT` to `N` outright --
+verified live, twice, that a full container restart leaves the host's own SSH chain byte-for-byte
+untouched. Two smaller bugs found the same way: `fwknopd` refuses to start if its config files are not
+`0600` (now `chmod`'d right after writing), and the client's `--no-home-dir` flag refuses to run without
+also setting `--rc-file` -- replaced with `--no-rc-file`, which needs neither. Also added: `pid: host`
+means an uncleanly-stopped container can leave a REAL orphaned `fwknopd` process on the host outliving
+it, so `server.js` now has an explicit `SIGTERM`/`SIGINT` handler that kills it, and `fwknop.js`'s own
+`start()` defensively `pkill -f`s a stale one (matched by this project's own config file path only, never
+touching the host's unrelated service) before spawning a new one.
+
+**Live-verified end to end (28/10/2026), via the real `fwknopd`/`fwknop` binaries and real `iptables`, not
+just the unit suite:** `ensureGuardRules` appends the ESTABLISHED/RELATED exception before the DROP, both
+idempotent; `requestAccess` (through the actual `fwknop.js` code path, not the raw CLI) knocks and a real,
+time-limited `ACCEPT` rule appears in this project's own chain for the exact source IP/port requested;
+`fwknopd` removes it on its own once the window elapses (`"Removed rule ... with expire time"` in its
+log, no app-side timer involved); a full `docker compose restart` leaves exactly one `fwknopd` running
+afterward (the stale one killed, not orphaned) and the host's own SSH chain unchanged throughout. Not
+exercised live: the actual HTTP routes end to end through the browser/a real instance (this project
+currently manages zero live instances to test against, and the fix above already needed a real IdP-style
+dependency's worth of care) -- the route handlers are thin, already-tested-pattern wiring over the exact
+functions proven above (`permissions.assertCan` + `instanceParams.parseKnockRequiredHosts` +
+`fwknop.ensureGuardRules`/`requestAccess`/`getState`), same level of route-layer coverage as every other
+route in `routes/instances.js` (this codebase has no HTTP-level test harness for that file at all).
+
+**Gate, met:** an instance's internet-facing interface (but not its Tailscale one, if also bound) can
+require a knock before its ADB port responds to anything new, triggered from the UI by an
+already-authenticated user, with an already-open session surviving the window's expiry and zero effect on
+any interface that does not opt in.
 
 ## Phase 10 — Removal of the old code + public polish
 

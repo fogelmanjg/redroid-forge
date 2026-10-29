@@ -46,7 +46,7 @@ means validated with evidence on real hardware, not a guarantee.
 | **Doctor** | ✅ | Host diagnostics with the exact command to fix what's missing — it only diagnoses, never runs anything on its own. |
 | **Screen viewing** | ✅ | scrcpy connector scripts (`connect.sh`/`connect.ps1`), a port for viewing from an Android device itself, no bundled web viewer by design (see below). |
 | **Federation** | 📝 planned | `jg-dashboard` and Plenum becoming consumers of this app via `oidc`, reusing each host's existing identity provider instead of a separate login. |
-| **Port knocking** | 📝 planned, research stage | An optional `fwknop` companion for sysops who want it, on top of the network controls above. |
+| **Port knocking** | ✅ done | Per-instance, per-interface SPA (`fwknop`) gate for the ADB/scrcpy port, on top of the network controls above -- opened from the UI by an already-authenticated session, never by the connecting device. |
 
 ## Use cases
 

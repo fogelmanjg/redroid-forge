@@ -50,9 +50,26 @@ app.listen(PORT, BIND_HOST, () => {
   // Checks (never applies) whether a newer combinations database exists: on
   // open and once a day. Can be turned off with REDROID_FORGE_DB_CHECK=0.
   require('./lib/knownDbUpdate').startScheduler();
+  // Port-knocking daemon (docs/ROADMAP.md Phase 9) -- idle until an instance actually opts an
+  // interface into knockRequiredHosts; see lib/fwknop.js for why this is safe to always run.
+  require('./lib/fwknop').start();
 });
 
 // Last safety net: a bug in a single request cannot bring down the whole process
 // (and with it the management of ALL the running instances).
 process.on('unhandledRejection', (err) => console.error('unhandledRejection:', err));
 process.on('uncaughtException', (err) => console.error('uncaughtException:', err));
+
+// This container runs with `pid: host` (docker-compose.yml): there is no PID namespace to
+// clean up the fwknopd child on container stop the way there would be in a normal container,
+// an unreaped child just becomes a REAL orphaned process on the host. `docker stop`/`compose
+// down` sends SIGTERM to this process specifically (the one Docker actually exec'd), not to
+// PID 1 -- explicitly killing the child here is what makes shutdown actually clean instead of
+// leaking an fwknopd that outlives its container (lib/fwknop.js's own start() also guards
+// against that leftover on the NEXT start, but better to not rely on that every time).
+function shutdown() {
+  require('./lib/fwknop').stop();
+  process.exit(0);
+}
+process.on('SIGTERM', shutdown);
+process.on('SIGINT', shutdown);

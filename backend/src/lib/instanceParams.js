@@ -127,6 +127,42 @@ function parseBindHosts(body = {}, fallback = DEFAULT_BIND_HOSTS) {
   return out;
 }
 
+// Which of an instance's own `bindHosts` require a port-knock (docs/ROADMAP.md Phase 9) before
+// the ADB port answers at all -- a subset, never a value of its own. Default [] (nothing
+// gated) preserves today's behavior for every instance that never touches this.
+//
+// 127.0.0.1 is rejected on purpose: the backend's own knock always originates from there (see
+// lib/fwknop.js), gating it would just lock the one client fwknop ever has out of its own
+// mechanism. The wildcard (0.0.0.0/::) is rejected too, for a different reason -- it means
+// "every interface at once", and the iptables rules this feature adds are scoped by `-d
+// <hostIp>`; there is no destination address that means "all interfaces but not loopback", so
+// a wildcard-bound instance cannot be gated on just its non-local exposure the way this feature
+// promises ("per instance AND per bound interface").
+const KNOCK_INELIGIBLE = new Set(['127.0.0.1', '::1', '0.0.0.0', '::']);
+
+// `currentBindHosts`: the instance's OWN `bindHosts` (not the request's) -- membership is
+// checked against what the instance is actually bound to right now, never against whatever the
+// same request also happens to be changing bindHosts to (those two are edited independently,
+// see routes/instances.js's PUT /:id/knock-hosts vs POST /:id/display).
+function parseKnockRequiredHosts(body = {}, currentBindHosts = [], fallback = []) {
+  const raw = body.knockRequiredHosts;
+  if (raw === undefined || raw === null) return fallback;
+  if (!Array.isArray(raw)) {
+    throw httpError('"knockRequiredHosts" must be an array of IP addresses', 400);
+  }
+  const out = [];
+  for (const h of raw) {
+    if (typeof h !== 'string' || !currentBindHosts.includes(h)) {
+      throw httpError(`"knockRequiredHosts" contains an address this instance is not bound to: ${JSON.stringify(h)}`, 400);
+    }
+    if (KNOCK_INELIGIBLE.has(h)) {
+      throw httpError(`"knockRequiredHosts" cannot include ${JSON.stringify(h)} (localhost and the wildcard address can never be knock-gated)`, 400);
+    }
+    out.push(h);
+  }
+  return [...new Set(out)];
+}
+
 // How many distinct cores a `cpusetCpus` string claims -- "4,13" -> 2, "4-7" -> 4, "4-7,13" -> 5
 // (same expansion the frontend's own `parseCoreSet` does for its checkbox grid, see
 // frontend/app.js, mirrored here because quota math (docs/ROADMAP.md Phase 7's operator
@@ -150,5 +186,5 @@ function countCpus(cpusetCpus) {
 
 module.exports = {
   parseDisplay, DEFAULTS, LIMITS, parseResources, MEMORY_MB_LIMITS, CPUSET_RE, parseGpuMode, GPU_MODES,
-  parseBindHosts, DEFAULT_BIND_HOSTS, IP_SHAPE_RE, countCpus,
+  parseBindHosts, DEFAULT_BIND_HOSTS, IP_SHAPE_RE, countCpus, parseKnockRequiredHosts,
 };
