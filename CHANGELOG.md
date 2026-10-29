@@ -61,6 +61,29 @@ Phase 9: port-knocking (SPA, via `fwknop`) for ADB/scrcpy access, per instance a
   `server.js` now kills it on `SIGTERM`/`SIGINT`, and `fwknop.js`'s own `start()` defensively kills a
   stale one (matched by this project's own config file path only) before spawning a new one.
 
+Unrelated (found while debugging why a local tool on this host could no longer reach the app's API at
+all, Phase 6/7):
+
+### Changed
+
+- ⚠ Settings' `appBindHost` (a single address) is now `appBindHosts` (an array), matching an instance's
+  own `bindHosts` -- `127.0.0.1` is implicit and can never be left out. An existing install's legacy
+  `appBindHost` is migrated transparently the first time settings are read, so nothing already chosen is
+  lost. Settings' "App network" section is now a checklist (localhost pinned) instead of a `<select>`,
+  sourced from the same already-filtered interfaces list the per-instance Network picker uses.
+
+### Fixed
+
+- This app's own server only ever bound ONE address -- picking a non-default one (e.g. a Tailscale IP, to
+  reach the UI remotely without a reverse proxy) silently gave up `127.0.0.1` too, breaking any local tool
+  on the same host that assumes the app is always reachable on localhost. `server.js` now calls
+  `app.listen()` once per configured address, localhost included unconditionally.
+- A local tool with no session cookie (`local`/`oidc`/`both` auth) got `"Not logged in"` even over
+  loopback. `auth.js`'s `attachUser` now treats any loopback request (`req.ip`, never a spoofable header)
+  as the same fixed admin-bypass user as "none" mode, regardless of configured auth mode -- whoever can
+  already reach this app from the same host has strictly more power anyway (reads `data/*.json` directly,
+  manages Docker, ...).
+
 ### Changed
 
 - The "open access" control moved out of the Configure panel into its own quick-access row next

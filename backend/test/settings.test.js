@@ -36,14 +36,29 @@ test('get(): corrupt file is ignored, falls back to defaults', () => {
   assert.deepStrictEqual(settings.get(file), settings.DEFAULTS);
 });
 
-test('appBindHost: null by default, persists once set, clears back to null', () => {
+test('appBindHosts: empty array by default, persists once set, clears back to empty', () => {
   const file = tmpFile();
-  assert.strictEqual(settings.get(file).appBindHost, null);
-  const after = settings.update({ appBindHost: '192.168.1.50' }, file);
-  assert.strictEqual(after.appBindHost, '192.168.1.50');
-  assert.strictEqual(settings.get(file).appBindHost, '192.168.1.50');
-  const cleared = settings.update({ appBindHost: null }, file);
-  assert.strictEqual(cleared.appBindHost, null);
+  assert.deepStrictEqual(settings.get(file).appBindHosts, []);
+  const after = settings.update({ appBindHosts: ['192.168.1.50'] }, file);
+  assert.deepStrictEqual(after.appBindHosts, ['192.168.1.50']);
+  assert.deepStrictEqual(settings.get(file).appBindHosts, ['192.168.1.50']);
+  const cleared = settings.update({ appBindHosts: [] }, file);
+  assert.deepStrictEqual(cleared.appBindHosts, []);
+});
+
+test('get(): migrates the old single appBindHost field to appBindHosts transparently', () => {
+  const file = tmpFile();
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, JSON.stringify({ backupDir: '/mnt/backups', appBindHost: '100.73.0.50' }));
+  assert.deepStrictEqual(settings.get(file).appBindHosts, ['100.73.0.50']);
+  assert.strictEqual(settings.get(file).appBindHost, undefined);
+});
+
+test('get(): migrating a legacy appBindHost of exactly "127.0.0.1" needs no extra entry (already implicit)', () => {
+  const file = tmpFile();
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, JSON.stringify({ appBindHost: '127.0.0.1' }));
+  assert.deepStrictEqual(settings.get(file).appBindHosts, []);
 });
 
 test('operatorPoolMaxVcpus/operatorPoolMaxMemoryMb: null by default, persist once set (src/lib/quotas.js\'s shared pool)', () => {

@@ -582,6 +582,37 @@ same port — Docker either rejects the combination outright (CLI) or silently p
 Both `instanceParams.parseBindHosts` and the Configure panel's "Network" checkboxes now treat
 `0.0.0.0`/`::` as exclusive with everything else instead of letting that combination reach Docker.
 
+**28/10/2026 — real incident: `appBindHost` (a single address) meant giving up loopback to get
+Tailscale, found while chasing an unrelated report** ("the fleet's own `scrcpy-redroid.sh`, which
+SSHes into this host and reads the API over `localhost`, suddenly listed zero instances"). Root
+cause: an admin had pointed this app's own listener at the Tailscale interface (to reach the UI
+remotely without a reverse proxy) -- `app.listen(PORT, host)` only ever binds the ONE address it is
+given, so that silently gave up loopback too, breaking every local tool that assumes the app is
+always reachable on `localhost` from its own host. Fixed properly rather than patched around:
+`appBindHost` (string) became `appBindHosts` (array), same shape as an instance's own `bindHosts`,
+with `127.0.0.1` implicit and impossible to leave out (`server.js` now calls `app.listen()` once per
+address, never just one). The Settings "App network" section is now a checklist (localhost
+checked+disabled) instead of a `<select>`, sourced from the same already-filtered interfaces list the
+per-instance picker uses (`GET /network/interfaces`), not the unfiltered `/interfaces/all` meant for
+correcting the filter itself. `lib/settings.js`'s `get()` transparently migrates an on-disk legacy
+`appBindHost` the first time it is read, so an install already past first boot does not silently lose
+whatever address it had chosen (confirmed live on this very host: it would otherwise have become
+loopback-only on upgrade, locking the admin out of the UI they were using remotely at that moment).
+
+**Same investigation, one more layer down:** even with loopback reachable again, `scrcpy-redroid.sh`
+still got `{"error":"Not logged in"}` once Phase 7's `local`/`oidc`/`both` auth is on, since a plain
+`curl` has no session cookie and this app never had a credential type for scripts. Rather than build a
+new credential mechanism, `auth.js`'s `attachUser` now treats a request from loopback (`req.ip` --
+never a spoofable header, this app never sets `trust proxy`) the same as "none" mode's fixed
+admin-bypass user, regardless of which auth mode is actually configured. Reasoning: whoever can
+already reach this app from THIS SAME HOST has strictly more power already (reading `data/*.json`
+directly, managing Docker, ...) than the API grants -- the same baseline trust this app always had
+before Phase 7 existed, just narrowed to loopback instead of every request. Live-verified: `curl
+127.0.0.1:8099/api/instances` returns real data with zero cookie even in `local` mode, while `curl
+100.73.0.50:8099/api/instances` (the Tailscale address, still bound) correctly still demands one; the
+real `scrcpy-redroid.sh` pipeline (`curl | jq`) now lists both real instances exactly as the script
+expects.
+
 ## Phase 7 — Access control: roles, per-instance ownership, pluggable auth
 
 **Difficulty: High** — a real permission model plus a generic (not Keycloak-specific) auth abstraction.

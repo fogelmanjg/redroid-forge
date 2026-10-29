@@ -93,6 +93,25 @@ test('mode "local": a valid session cookie round-trips into req.user, requireAut
   assert.equal(called, true);
 });
 
+test('mode "local": a loopback request bypasses auth entirely, same fixed user as "none" mode', () => {
+  const auth = freshAuth('local');
+  for (const ip of ['127.0.0.1', '::1', '::ffff:127.0.0.1']) {
+    const req = { headers: {}, ip };
+    auth.attachUser(req, {}, () => {});
+    assert.deepEqual(req.user, { id: null, role: 'admin', username: null });
+    let called = false;
+    auth.requireAuth(req, mockRes(), () => { called = true; });
+    assert.equal(called, true);
+  }
+});
+
+test('mode "local": a non-loopback request with no cookie still needs one (the bypass is not just "no cookie")', () => {
+  const auth = freshAuth('local');
+  const req = { headers: {}, ip: '192.168.1.50' };
+  auth.attachUser(req, {}, () => {});
+  assert.equal(req.user, undefined);
+});
+
 test('mode "local": a tampered/garbage cookie is treated the same as no cookie', () => {
   const auth = freshAuth('local');
   const req = { headers: { cookie: `${require('../src/lib/session').COOKIE_NAME}=garbage` } };

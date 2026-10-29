@@ -16,11 +16,16 @@ const DEFAULTS = {
   // own judgment with nothing to configure; an admin only needs this once a specific interface
   // on their own host is mis-classified either way.
   networkInterfaceOverrides: {},
-  // Which address THIS APP's own server listens on (not any instance's) -- null means "defer to
-  // REDROID_FORGE_BIND_HOST, or 127.0.0.1 if that is unset too" (see server.js's own comment on
-  // why this, not the env var, wins once it is set, and why either way it needs a restart to
-  // actually take effect).
-  appBindHost: null,
+  // Which addresses THIS APP's own server listens on, IN ADDITION to 127.0.0.1 (not any
+  // instance's) -- same shape as an instance's own bindHosts, except localhost is implicit and
+  // can never be left out (see routes/settings.js), since nothing else can reach this app at all
+  // once it is not even listening on loopback (real incident, 28/10/2026: this host's own
+  // scrcpy-redroid.sh script SSHes in and reaches for localhost, which stopped working the moment
+  // this was a single address pinned to the Tailscale interface only). Empty means "nothing beyond
+  // localhost, unless REDROID_FORGE_BIND_HOST says otherwise" (see server.js's own comment on why
+  // that env var only wins before this has ever been set through the UI, and why either way it
+  // needs a restart to actually take effect).
+  appBindHosts: [],
   // Shared ceiling across every "operator" at once (docs/ROADMAP.md Phase 7, 25/10/2026) -- the
   // other half of src/lib/quotas.js's quota model, which also supports a per-operator limit
   // (that one keyed by user id, so it lives in its own store, not here). null = unlimited, same
@@ -30,7 +35,17 @@ const DEFAULTS = {
 };
 
 function get(file = SETTINGS_FILE) {
-  return { ...DEFAULTS, ...readJsonObject(file) };
+  const raw = readJsonObject(file);
+  // Migration (28/10/2026): appBindHost (a single string) -> appBindHosts (an array, localhost
+  // implicit) -- transparent so an install already past first boot does not silently lose
+  // whatever address it had chosen the moment this field is read with the old name still on
+  // disk (caught on this very host before it shipped: the UI became loopback-only on upgrade).
+  if (raw && 'appBindHost' in raw && !('appBindHosts' in raw)) {
+    const { appBindHost, ...rest } = raw;
+    rest.appBindHosts = appBindHost && appBindHost !== '127.0.0.1' ? [appBindHost] : [];
+    return { ...DEFAULTS, ...rest };
+  }
+  return { ...DEFAULTS, ...raw };
 }
 
 function update(partial, file = SETTINGS_FILE) {

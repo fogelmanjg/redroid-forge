@@ -1630,14 +1630,17 @@ function renderNetIfacesSettings(ifaces) {
   }
 }
 
-// This app's OWN listen address, not any instance's -- a single select (an http.Server binds to
-// exactly one address, unlike an instance's Docker port which can bind several at once), built
-// from the same already-filtered interface list as the instance picker (reused, not re-fetched)
-// plus the two fixed choices every instance's own picker also has.
+// This app's OWN listen addresses, not any instance's -- a checklist, same shape and same
+// already-filtered interface list (networkInterfacesCache, via loadNetworkInterfacesCache,
+// reused not re-fetched) as the per-instance Network picker above, not the unfiltered
+// /interfaces/all list the OTHER fieldset on this page uses (that one is for correcting the
+// filter itself; this one should only ever offer what the filter already lets through).
+// 127.0.0.1 is pinned: unlike an instance, this app always listens on it with no way to opt out
+// (server.js), so unlike the instance picker's localhost checkbox, this one is checked+disabled.
 function updateAppBindHostWarn() {
-  const select = $('#settings-app-bind-host');
   const warn = $('#settings-app-bind-host-warn');
-  const exposed = select.value !== '' && select.value !== '127.0.0.1';
+  const exposed = $$('#settings-app-bind-hosts-list input[type="checkbox"]')
+    .some((chk) => chk.checked && chk.dataset.address !== '127.0.0.1');
   if (!exposed) { warn.hidden = true; return; }
   warn.hidden = false;
   // "none" mode has no login at all -- exposing the APP ITSELF (not just one instance) beyond
@@ -1648,37 +1651,48 @@ function updateAppBindHostWarn() {
     : t('settings.appBindHost.warnExposed');
 }
 
-function renderAppBindHostSelect(currentValue, ifaces) {
-  const select = $('#settings-app-bind-host');
-  select.innerHTML = '';
-  const opt = (value, label) => {
-    const o = document.createElement('option');
-    o.value = value;
-    o.textContent = label;
-    select.appendChild(o);
+function renderAppBindHostsList(currentHosts, ifaces) {
+  const list = $('#settings-app-bind-hosts-list');
+  list.innerHTML = '';
+  const addRow = (address, labelText, { pinned = false } = {}) => {
+    const li = document.createElement('li');
+    const label = document.createElement('label');
+    label.className = 'contract-checkbox';
+    const chk = document.createElement('input');
+    chk.type = 'checkbox';
+    chk.dataset.address = address;
+    chk.checked = pinned || currentHosts.includes(address);
+    chk.disabled = pinned;
+    label.appendChild(chk);
+    label.appendChild(document.createTextNode(` ${labelText}`));
+    li.appendChild(label);
+    list.appendChild(li);
+    return chk;
   };
-  opt('', t('settings.appBindHost.useDefault'));
-  opt('127.0.0.1', t('instances.network.localhost'));
+  addRow('127.0.0.1', t('instances.network.localhost'), { pinned: true });
+  const addrChecks = [];
   for (const i of ifaces) {
-    if (!i.visible) continue;
-    for (const address of i.addresses) {
-      if (address === '127.0.0.1') continue;
-      opt(address, `${i.iface} (${address})`);
-    }
+    if (i.address === '127.0.0.1' || i.internal) continue;
+    addrChecks.push(addRow(i.address, `${i.iface} (${i.address})`));
   }
-  opt('0.0.0.0', t('instances.network.allInterfaces'));
-  select.value = currentValue || '';
-  updateAppBindHostWarn();
+  const allIfacesChk = addRow('0.0.0.0', t('instances.network.allInterfaces'));
+  const updateExclusivity = () => {
+    for (const chk of addrChecks) {
+      chk.disabled = allIfacesChk.checked;
+      if (allIfacesChk.checked) chk.checked = false;
+    }
+    updateAppBindHostWarn();
+  };
+  for (const chk of [...addrChecks, allIfacesChk]) chk.addEventListener('change', updateExclusivity);
+  updateExclusivity();
 }
-$('#settings-app-bind-host').addEventListener('change', updateAppBindHostWarn);
 
 async function loadSettings() {
   try {
     const settings = await api('/settings');
     $('#settings-backup-dir').value = settings.backupDir;
-    const ifaces = await api('/network/interfaces/all');
-    renderNetIfacesSettings(ifaces);
-    renderAppBindHostSelect(settings.appBindHost, ifaces);
+    renderNetIfacesSettings(await api('/network/interfaces/all'));
+    renderAppBindHostsList(settings.appBindHosts || [], await loadNetworkInterfacesCache());
     // Operator quotas (docs/ROADMAP.md Phase 7, 25/10/2026) only mean anything once there is
     // more than one person -- in "none" mode the only user is the always-admin bypass, which
     // never counts against any quota (src/lib/quotas.js), so the fieldset stays hidden there.
@@ -1708,20 +1722,22 @@ $('#settings-form').addEventListener('submit', async (ev) => {
       if (chk.checked === heuristic) delete networkInterfaceOverrides[chk.dataset.iface];
       else networkInterfaceOverrides[chk.dataset.iface] = chk.checked;
     }
-    const appBindHost = $('#settings-app-bind-host').value || null;
+    const appBindHosts = $$('#settings-app-bind-hosts-list input[type="checkbox"]')
+      .filter((chk) => chk.checked && chk.dataset.address !== '127.0.0.1')
+      .map((chk) => chk.dataset.address);
     const vcpusVal = $('#settings-pool-max-vcpus').value;
     const memVal = $('#settings-pool-max-memory-mb').value;
     const settings = await api('/settings', {
       method: 'PUT',
       body: JSON.stringify({
-        backupDir, networkInterfaceOverrides, appBindHost,
+        backupDir, networkInterfaceOverrides, appBindHosts,
         operatorPoolMaxVcpus: vcpusVal ? Number(vcpusVal) : null,
         operatorPoolMaxMemoryMb: memVal ? Number(memVal) : null,
       }),
     });
     $('#settings-backup-dir').value = settings.backupDir;
-    renderAppBindHostSelect(settings.appBindHost, await api('/network/interfaces/all'));
-    networkInterfacesCache = null; // the per-instance Configure panel re-fetches with the new filter next time it opens
+    networkInterfacesCache = null; // the new filter (if changed above) applies to this list too, and to the per-instance Configure panel next time it opens
+    renderAppBindHostsList(settings.appBindHosts || [], await loadNetworkInterfacesCache());
     saved.hidden = false;
   } catch (e) {
     alert(e.message);

@@ -10,11 +10,11 @@ router.get('/', (req, res) => {
 });
 
 // Admin only (docs/ROADMAP.md Phase 7) -- this changes where every instance's backups land,
-// which interfaces are offered at all, and (appBindHost) this app's OWN listen address -- none
+// which interfaces are offered at all, and (appBindHosts) this app's OWN listen addresses -- none
 // of it scoped to any one instance's ownership.
 router.put('/', (req, res) => {
   if (!permissions.canManageSettings(req.user)) return res.status(403).json({ error: 'Admin only' });
-  const { backupDir, networkInterfaceOverrides, appBindHost, operatorPoolMaxVcpus, operatorPoolMaxMemoryMb } = req.body || {};
+  const { backupDir, networkInterfaceOverrides, appBindHosts, operatorPoolMaxVcpus, operatorPoolMaxMemoryMb } = req.body || {};
   if (backupDir !== undefined && (typeof backupDir !== 'string' || backupDir.trim() === '')) {
     return res.status(400).json({ error: 'backupDir must be a non-empty string' });
   }
@@ -28,13 +28,19 @@ router.put('/', (req, res) => {
       }
     }
   }
-  // null/empty string = "defer to REDROID_FORGE_BIND_HOST / 127.0.0.1" (server.js) -- not an
-  // error, that is the explicit way back to the env-var default.
-  if (appBindHost !== undefined && appBindHost !== null && appBindHost !== '' && !IP_SHAPE_RE.test(appBindHost)) {
-    return res.status(400).json({ error: 'appBindHost must be an IP address, or null/empty to clear it' });
+  // 127.0.0.1 is implicit (server.js always binds it regardless) and never needs to be listed
+  // here -- an empty array = "nothing beyond localhost, or REDROID_FORGE_BIND_HOST" (server.js).
+  if (appBindHosts !== undefined) {
+    if (!Array.isArray(appBindHosts)) {
+      return res.status(400).json({ error: 'appBindHosts must be an array of IP addresses' });
+    }
+    for (const h of appBindHosts) {
+      if (typeof h !== 'string' || !IP_SHAPE_RE.test(h)) {
+        return res.status(400).json({ error: `appBindHosts contains an invalid address: ${JSON.stringify(h)}` });
+      }
+    }
   }
-  // Shared ceiling across every operator at once (src/lib/quotas.js) -- null/empty = unlimited,
-  // same convention as appBindHost just above.
+  // Shared ceiling across every operator at once (src/lib/quotas.js) -- null/empty = unlimited.
   for (const [key, value] of [['operatorPoolMaxVcpus', operatorPoolMaxVcpus], ['operatorPoolMaxMemoryMb', operatorPoolMaxMemoryMb]]) {
     if (value !== undefined && value !== null && value !== '' && !(Number.isInteger(value) && value > 0)) {
       return res.status(400).json({ error: `${key} must be a positive integer, or null/empty to leave it unlimited` });
@@ -43,7 +49,10 @@ router.put('/', (req, res) => {
   const patch = {};
   if (backupDir !== undefined) patch.backupDir = backupDir.trim();
   if (networkInterfaceOverrides !== undefined) patch.networkInterfaceOverrides = networkInterfaceOverrides;
-  if (appBindHost !== undefined) patch.appBindHost = appBindHost || null;
+  if (appBindHosts !== undefined) {
+    const deduped = [...new Set(appBindHosts)].filter((h) => h !== '127.0.0.1');
+    patch.appBindHosts = deduped.includes('0.0.0.0') ? ['0.0.0.0'] : deduped;
+  }
   if (operatorPoolMaxVcpus !== undefined) patch.operatorPoolMaxVcpus = operatorPoolMaxVcpus || null;
   if (operatorPoolMaxMemoryMb !== undefined) patch.operatorPoolMaxMemoryMb = operatorPoolMaxMemoryMb || null;
   res.json(settings.update(patch));

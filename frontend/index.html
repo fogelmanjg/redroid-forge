@@ -88,9 +88,8 @@ gunzip -c image.tar.gz | docker load</pre>
         <fieldset class="display-fields" style="grid-template-columns: 1fr;">
           <legend data-i18n="settings.appBindHost.legend">This app's own network (not any instance's)</legend>
           <p class="muted" data-i18n="settings.appBindHost.hint"></p>
-          <label><span data-i18n="settings.appBindHost.label">Listen on</span>
-            <select id="settings-app-bind-host"></select>
-          </label>
+          <p><span data-i18n="settings.appBindHost.label">Listen on</span></p>
+          <ul id="settings-app-bind-hosts-list" class="doctor-list"></ul>
           <p id="settings-app-bind-host-warn" class="resources-warn-error" hidden></p>
           <p class="muted" data-i18n="settings.appBindHost.restartHint"></p>
         </fieldset>

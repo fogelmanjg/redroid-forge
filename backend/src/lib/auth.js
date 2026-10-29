@@ -91,12 +91,22 @@ function readCookie(req, name) {
   return undefined;
 }
 
-// Sets req.user from the session cookie (local/oidc) or the fixed bypass user (none). Runs on
-// every request, including unauthenticated ones -- it never itself rejects a request, that is
-// requireAuth/requireCapability's job, so that e.g. GET /api/auth/me can answer "not logged in"
-// instead of 401ing before the frontend even gets to render a login screen.
+// Whoever can already reach this app from THIS SAME HOST has more power than the API grants
+// anyway (read data/*.json directly, manage Docker, ...) -- same baseline trust this app always
+// had before Phase 7's auth even existed, just narrowed to loopback instead of applying to every
+// request. Added 28/10/2026 so a local tool (e.g. this host's own scrcpy-redroid.sh, which SSHes
+// in and reads the API over localhost) can work in "local"/"oidc"/"both" mode without needing
+// credentials of its own. `req.ip` is the raw socket address, never a spoofable header (this app
+// never sets `trust proxy`), so this cannot be faked by anything that is not actually loopback.
+const LOOPBACK_ADDRESSES = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
+
+// Sets req.user from the session cookie (local/oidc), the fixed bypass user (none), or the same
+// bypass user for a loopback request regardless of mode. Runs on every request, including
+// unauthenticated ones -- it never itself rejects a request, that is requireAuth/
+// requireCapability's job, so that e.g. GET /api/auth/me can answer "not logged in" instead of
+// 401ing before the frontend even gets to render a login screen.
 function attachUser(req, res, next) {
-  if (AUTH_MODE === 'none') { req.user = NONE_MODE_USER; return next(); }
+  if (AUTH_MODE === 'none' || LOOPBACK_ADDRESSES.has(req.ip)) { req.user = NONE_MODE_USER; return next(); }
   const payload = session.verify(readCookie(req, session.COOKIE_NAME));
   if (payload) req.user = { id: payload.uid, role: payload.role, username: payload.username };
   next();
