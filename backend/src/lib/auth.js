@@ -8,6 +8,7 @@
 const session = require('./session');
 const userStore = require('./userStore');
 const oidc = require('./oidc');
+const settings = require('./settings');
 
 // "both" (26/10/2026): local accounts and OIDC providers accepted at the same login screen at
 // once -- e.g. an admin who wants a password-based account for themselves (no IdP dependency to
@@ -16,7 +17,17 @@ const oidc = require('./oidc');
 // about how a session is verified, only which of the two login routes answer instead of 404,
 // and which rows the merged identities table (routes/auth.js's GET /identities) can contain.
 const VALID_MODES = ['none', 'local', 'oidc', 'both'];
-const RAW_AUTH_MODE = process.env.REDROID_FORGE_AUTH || 'none';
+
+// Live-manageable mode (Identities panel, 30/10/2026): settings.json's `authMode` wins once an
+// admin has ever set it through PUT /api/auth/mode, same precedence as appBindHosts vs
+// REDROID_FORGE_BIND_HOST (settings.js's own comment). REDROID_FORGE_AUTH stays the bootstrap
+// default for a fresh install, and the only way to ever reach "oidc" alone -- see routes/auth.js's
+// PUT /mode, which deliberately never writes that one value, so it is only reachable by hand-
+// editing this env var (see the PR/commit that added the mode-switch UI for why).
+const CONFIGURED_AUTH_MODE = settings.get().authMode;
+const RAW_AUTH_MODE = (CONFIGURED_AUTH_MODE !== null && CONFIGURED_AUTH_MODE !== undefined)
+  ? CONFIGURED_AUTH_MODE
+  : (process.env.REDROID_FORGE_AUTH || 'none');
 if (!VALID_MODES.includes(RAW_AUTH_MODE)) {
   throw new Error(`REDROID_FORGE_AUTH must be one of: ${VALID_MODES.join(', ')} (got "${JSON.stringify(RAW_AUTH_MODE)}")`);
 }
@@ -136,6 +147,6 @@ function requireAuth(req, res, next) {
 }
 
 module.exports = {
-  AUTH_MODE, LOCAL_ENABLED, OIDC_ENABLED, attachUser, requireAuth, setSessionCookie, clearSessionCookie, readCookie,
+  AUTH_MODE, LOCAL_ENABLED, OIDC_ENABLED, VALID_MODES, attachUser, requireAuth, setSessionCookie, clearSessionCookie, readCookie,
   localPathOpen, oidcPathOpen,
 };

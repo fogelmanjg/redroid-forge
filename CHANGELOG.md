@@ -21,6 +21,30 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-10-30
+
+### Changed
+
+- Auth mode (`none`/`local`/`both`) and OIDC providers (add/edit/remove) can now be switched and
+  managed live from the Identities panel, instead of only via `.env` with no visibility into what
+  is configured. `PUT /api/auth/mode` enforces the same safety rules either way -- `none → local`
+  requires an admin to already exist, any `→ both` requires at least one OIDC provider configured,
+  `both → local` requires an existing local admin, `local → none` requires explicit confirmation --
+  a restart is still required to apply (`AUTH_MODE`/providers are read once at process start, same
+  rule as every other setting in this app). Both now persist in `backend/data/settings.json` (never
+  committed, same as every other instance-specific data file), with the env var only acting as the
+  bootstrap default before the UI is ever touched -- same precedence pattern as `appBindHosts`
+  (Phase 6). Live-verified end to end against two real OIDC providers (a Keycloak realm and Google)
+  by an actual login round trip through each, not just unit tests -- the specific provider
+  configuration/secrets used for that test are not part of the repo.
+
+### Fixed
+
+- The restart command the UI tells you to run after a settings change (setup wizard, `appBindHost`,
+  and now auth mode) said `docker compose up -d` everywhere, which does nothing when only
+  `backend/data/*.json` changed (no `.env`/image diff for Compose to notice) -- corrected to
+  `docker compose restart` in all three places.
+
 ### Added
 
 - Known-combinations resolver: a new `piezas-validadas` support tier, between `oficial` and

@@ -3,21 +3,35 @@
 // against a fresh require() with the env var set first, same pattern as oidc.test.js.
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const os = require('os');
+const path = require('path');
+
+// Nonexistent-but-writable (os.tmpdir() itself always exists) -- settings.get() treats a
+// missing file as {} (DEFAULTS), so this reliably means "authMode was never set through the
+// UI" without ever touching this host's real backend/data/settings.json.
+const NONEXISTENT_SETTINGS_FILE = path.join(os.tmpdir(), `redroid-forge-test-settings-${process.pid}.json`);
 
 // auth.js's self-lockout guard (26/10/2026, see test/auth.lockout.test.js for its own direct
 // coverage) downgrades "local"/"both" to "none" at require time when no local account exists
 // AND these two are unset -- every test below wants the mode it actually asked for, regardless
 // of whatever happens to be in the real backend/data/users.json on whatever machine runs this
 // suite, so set them here unconditionally rather than depending on that file's live content.
+// REDROID_FORGE_SETTINGS_FILE (settings.js's own test-only escape hatch) points auth.js's
+// settings.get().authMode read at a nonexistent tmp path, not this host's real
+// backend/data/settings.json -- without it, this suite's require-time mode would silently be
+// overridden by whatever a real redroid-forge instance running on the same machine (this one
+// included) has actually been switched to through PUT /api/auth/mode.
 function freshAuth(mode) {
   const prev = {
     REDROID_FORGE_AUTH: process.env.REDROID_FORGE_AUTH,
     REDROID_FORGE_LOCAL_ADMIN_USER: process.env.REDROID_FORGE_LOCAL_ADMIN_USER,
     REDROID_FORGE_LOCAL_ADMIN_PASSWORD: process.env.REDROID_FORGE_LOCAL_ADMIN_PASSWORD,
+    REDROID_FORGE_SETTINGS_FILE: process.env.REDROID_FORGE_SETTINGS_FILE,
   };
   process.env.REDROID_FORGE_AUTH = mode;
   process.env.REDROID_FORGE_LOCAL_ADMIN_USER = 'test-admin';
   process.env.REDROID_FORGE_LOCAL_ADMIN_PASSWORD = 'test-password';
+  process.env.REDROID_FORGE_SETTINGS_FILE = NONEXISTENT_SETTINGS_FILE;
   delete require.cache[require.resolve('../src/lib/auth')];
   const auth = require('../src/lib/auth');
   for (const [k, v] of Object.entries(prev)) { if (v === undefined) delete process.env[k]; else process.env[k] = v; }
@@ -36,11 +50,12 @@ function mockRes() {
 }
 
 test('an invalid REDROID_FORGE_AUTH value throws at require time, not silently falls back', () => {
-  const prev = process.env.REDROID_FORGE_AUTH;
+  const prev = { REDROID_FORGE_AUTH: process.env.REDROID_FORGE_AUTH, REDROID_FORGE_SETTINGS_FILE: process.env.REDROID_FORGE_SETTINGS_FILE };
   process.env.REDROID_FORGE_AUTH = 'bogus';
+  process.env.REDROID_FORGE_SETTINGS_FILE = NONEXISTENT_SETTINGS_FILE;
   delete require.cache[require.resolve('../src/lib/auth')];
   assert.throws(() => require('../src/lib/auth'), /REDROID_FORGE_AUTH/);
-  process.env.REDROID_FORGE_AUTH = prev;
+  for (const [k, v] of Object.entries(prev)) { if (v === undefined) delete process.env[k]; else process.env[k] = v; }
   delete require.cache[require.resolve('../src/lib/auth')];
 });
 

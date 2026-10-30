@@ -1,7 +1,18 @@
 const path = require('path');
 const { readJsonObject, writeJsonObject } = require('./jsonFileStore');
 
-const SETTINGS_FILE = path.join(__dirname, '..', '..', 'data', 'settings.json');
+const DEFAULT_SETTINGS_FILE = path.join(__dirname, '..', '..', 'data', 'settings.json');
+
+// Test-only override (same escape-hatch idiom as every other path/env knob in this app).
+// auth.js and oidc.js now read settings.get()/.update() at require time and on every request
+// respectively, with no explicit `file` argument -- without this, that would hit THIS HOST's
+// real backend/data/settings.json, the exact file this project's own live redroid-forge
+// instance (docker-compose bind-mounts ./backend/data into the running container) writes real
+// authMode/oidcProviders changes into. Read fresh on every call, not cached at module load, so
+// a test can set/unset it per-call with no require-cache dance.
+function settingsFile() {
+  return process.env.REDROID_FORGE_SETTINGS_FILE || DEFAULT_SETTINGS_FILE;
+}
 
 // First (and for now only) global setting: where instance backups land by default.
 // REDROID_FORGE_BACKUPS_DIR (see docker-compose.yml) is a real HOST path, bound at the
@@ -32,9 +43,17 @@ const DEFAULTS = {
   // as every other optional field in this file.
   operatorPoolMaxVcpus: null,
   operatorPoolMaxMemoryMb: null,
+  // Auth mode + OIDC provider management, moved into the UI (Identities panel, 30/10/2026) --
+  // null means "never touched through the UI", in which case auth.js/oidc.js fall back to
+  // REDROID_FORGE_AUTH/REDROID_FORGE_OIDC_PROVIDERS, same precedence rule as appBindHosts vs
+  // REDROID_FORGE_BIND_HOST above. Once set (even to "none" or []), the UI-chosen value wins --
+  // both still need a restart to actually apply (see auth.js's own comment on why the restart
+  // itself is never automated from inside this app).
+  authMode: null,
+  oidcProviders: null,
 };
 
-function get(file = SETTINGS_FILE) {
+function get(file = settingsFile()) {
   const raw = readJsonObject(file);
   // Migration (28/10/2026): appBindHost (a single string) -> appBindHosts (an array, localhost
   // implicit) -- transparent so an install already past first boot does not silently lose
@@ -48,7 +67,7 @@ function get(file = SETTINGS_FILE) {
   return { ...DEFAULTS, ...raw };
 }
 
-function update(partial, file = SETTINGS_FILE) {
+function update(partial, file = settingsFile()) {
   const next = { ...get(file), ...partial };
   writeJsonObject(file, next);
   return next;

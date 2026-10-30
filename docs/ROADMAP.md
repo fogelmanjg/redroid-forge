@@ -789,6 +789,35 @@ describe as unsolved.
   every other route in this project (verified live by hand against real Docker, not supertest); that live
   pass has not happened yet for this specific feature.
 
+**30/10/2026 — auth mode and OIDC providers now manageable live from the Identities panel, not
+only via `.env` + restart with no visibility into what is configured.** Until now, switching
+`AUTH_MODE` or adding an OIDC provider meant editing `.env` blind and restarting to find out if it
+worked. `settings.js` gained `authMode`/`oidcProviders` (same precedence pattern as `appBindHosts`,
+Phase 6: a UI-set value wins once non-null, the env var is only the bootstrap default before the UI
+is ever touched). `oidc.js` split `listProviders()` (the existing strict validator) off a new
+`rawProviderList()`, plus `addProvider`/`updateProvider`/`removeProvider` -- adding one provider via
+the UI builds on top of whatever `rawProviderList()` already returns, so it never silently drops a
+pre-existing env-var-configured provider. New routes: `PUT /auth/mode` (guarded by
+`ALLOWED_MODE_TRANSITIONS = { none: [local], local: [both, none], both: [local] }`, each transition
+with its own safety check -- `none → local` needs an admin to already exist, any `→ both` needs at
+least one provider configured, `both → local` needs an existing local admin, `local → none` needs
+`confirm: true`) and `/oidc-providers` CRUD (never echoes a stored `clientSecret` back, only
+`hasClientSecret: true/false`). A mode switch still requires an actual restart -- `AUTH_MODE` is
+read once at require time, and this project has never allowed a settings change to trigger its own
+restart, since this container holds the Docker socket. Deliberately **not exposed**: `oidc`-alone as
+a UI-reachable mode (only `none`/`local`/`both`) -- discussed with the user and left for a future
+decision, reachable today only by setting `REDROID_FORGE_AUTH=oidc` by hand if ever wanted.
+**Real bug found and fixed along the way:** every "restart to apply" instruction already in this
+project's UI (setup wizard, `appBindHost`'s hint, and now this one) said `docker compose up -d` --
+which does nothing when only `backend/data/*.json` changed, since Compose only recreates on an
+`.env`/image diff it can actually see; corrected to `docker compose restart` in all three places.
+**Live-verified end to end** (not just the 451 unit tests, which stayed green throughout): a real
+Keycloak client (realm `plenum`) and a real Google OAuth client were created, `none → local → both`
+was driven live from the UI including the restart step, and a real login round trip was completed
+through both providers from an actual browser. Neither the Keycloak client secret, the Google
+client secret, nor the specific provider configuration used for that test is part of this repo --
+both live only in `backend/data/settings.json`, already gitignored.
+
 ## Phase 8 — Federation mode: `jg-dashboard` and Plenum as consumers
 
 **Difficulty: Medium-High** — two real integrations against two different codebases (Angular/NestJS in one

@@ -70,3 +70,33 @@ test('operatorPoolMaxVcpus/operatorPoolMaxMemoryMb: null by default, persist onc
   assert.strictEqual(after.operatorPoolMaxMemoryMb, 32768);
   assert.strictEqual(settings.get(file).operatorPoolMaxVcpus, 10);
 });
+
+test('authMode/oidcProviders: null by default (auth.js/oidc.js fall back to their env vars), persist once set', () => {
+  const file = tmpFile();
+  assert.strictEqual(settings.get(file).authMode, null);
+  assert.strictEqual(settings.get(file).oidcProviders, null);
+  const after = settings.update({ authMode: 'local', oidcProviders: [{ id: 'kc', label: 'KC', issuerUrl: 'https://idp.example', clientId: 'x' }] }, file);
+  assert.strictEqual(after.authMode, 'local');
+  assert.deepStrictEqual(after.oidcProviders, [{ id: 'kc', label: 'KC', issuerUrl: 'https://idp.example', clientId: 'x' }]);
+  assert.strictEqual(settings.get(file).authMode, 'local');
+});
+
+test('oidcProviders: can be set to an explicit empty array -- distinct from null (never touched)', () => {
+  const file = tmpFile();
+  const after = settings.update({ oidcProviders: [] }, file);
+  assert.deepStrictEqual(after.oidcProviders, []);
+  assert.deepStrictEqual(settings.get(file).oidcProviders, []);
+});
+
+test('settingsFile(): REDROID_FORGE_SETTINGS_FILE overrides the default path when no explicit file arg is given', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'settings-env-'));
+  const file = path.join(dir, 'settings.json');
+  const prev = process.env.REDROID_FORGE_SETTINGS_FILE;
+  process.env.REDROID_FORGE_SETTINGS_FILE = file;
+  try {
+    settings.update({ authMode: 'both' });
+    assert.strictEqual(JSON.parse(fs.readFileSync(file, 'utf-8')).authMode, 'both');
+  } finally {
+    if (prev === undefined) delete process.env.REDROID_FORGE_SETTINGS_FILE; else process.env.REDROID_FORGE_SETTINGS_FILE = prev;
+  }
+});

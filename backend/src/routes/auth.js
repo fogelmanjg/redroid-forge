@@ -5,6 +5,7 @@ const oidc = require('../lib/oidc');
 const roleAssignments = require('../lib/roleAssignments');
 const accountLinks = require('../lib/accountLinks');
 const permissions = require('../lib/permissions');
+const settings = require('../lib/settings');
 
 const router = express.Router();
 
@@ -375,6 +376,112 @@ router.delete('/identities/:id/links/:externalId', requireIdentityAdmin, (req, r
   }
   accountLinks.unlink(req.params.externalId);
   res.status(204).end();
+});
+
+// Auth-mode switching (Identities panel, 30/10/2026) -- settings.json's `authMode` is the
+// persisted value auth.js reads at require time (see its own comment on precedence over
+// REDROID_FORGE_AUTH); writing it here never flips the LIVE auth.AUTH_MODE in this process, by
+// design -- a restart is still required to actually apply it, same as every other "needs
+// restart" setting in this app (appBindHosts), and for the same extra reason auth.js's own
+// module comment gives for the setup wizard: this container holds the Docker socket, and
+// automating its own restart for a security-mode change is not a risk worth taking from in here.
+// Every route below checks canManageSettings(req.user) directly rather than reusing
+// requireIdentityAdmin, because that helper 404s while AUTH_MODE is "none" -- exactly the state
+// none->local needs to be reachable FROM, and the state every one of these oidc-providers routes
+// should also work in (bootstrapping providers before ever leaving "none").
+//
+// "oidc" alone is deliberately not a reachable destination here (see auth.js's own comment): a
+// misconfigured or unreachable sole IdP has no self-service way back in, unlike "both", which
+// always keeps a local admin account as a fallback. Going there is still possible by hand-editing
+// REDROID_FORGE_AUTH, for whoever wants it anyway, just never through this UI.
+const ALLOWED_MODE_TRANSITIONS = {
+  none: ['local'],
+  local: ['both', 'none'],
+  both: ['local'],
+};
+
+router.put('/mode', (req, res) => {
+  if (!permissions.canManageSettings(req.user)) return res.status(403).json({ error: 'Admin only' });
+  const current = auth.AUTH_MODE;
+  const { mode, confirm } = req.body || {};
+  const allowed = ALLOWED_MODE_TRANSITIONS[current] || [];
+  if (!allowed.includes(mode)) {
+    return res.status(400).json({
+      error: `Cannot switch from "${current}" to ${JSON.stringify(mode)} here. Allowed from "${current}": ${allowed.map((m) => `"${m}"`).join(', ') || '(none)'}.`,
+    });
+  }
+  // none -> local: a password login mode with nobody who could ever use it would be a dead-end
+  // login screen the instant this restarts (see auth.js's self-lockout guard) -- /setup/admin
+  // (above) is how the admin row gets created first; this just refuses to switch before that.
+  if (current === 'none' && userStore.listUsers().length === 0) {
+    return res.status(400).json({ error: 'Create a local admin account first (POST /api/auth/setup/admin) before switching to "local".' });
+  }
+  // local -> both: not unsafe (the existing local admin stays intact either way), just pointless
+  // without at least one provider configured yet.
+  if (mode === 'both' && oidc.listProviders().length === 0) {
+    return res.status(400).json({ error: 'Add at least one OIDC provider before switching to "both".' });
+  }
+  // both -> local: whoever's only identity is an OIDC one would be locked out the moment OIDC
+  // stops being checked -- refuse unless some local admin account already exists to get back in.
+  if (current === 'both' && mode === 'local' && !userStore.listUsers().some((u) => u.role === 'admin')) {
+    return res.status(400).json({ error: 'No local admin account exists yet -- create one before disabling OIDC, or nobody will be able to log in.' });
+  }
+  // local -> none: the widest exposure change of the four (anyone who can reach this app gets
+  // full admin access, no login at all) -- the only transition that needs an explicit, separate
+  // confirmation rather than just being blocked by a missing prerequisite.
+  if (current === 'local' && mode === 'none' && confirm !== true) {
+    return res.status(400).json({
+      error: 'Switching to "none" removes all login protection -- anyone who can reach this app gets full admin access. Resend with confirm: true to proceed.',
+    });
+  }
+  settings.update({ authMode: mode });
+  res.json({ authMode: mode, restartRequired: true });
+});
+
+function toProviderRow(p) {
+  return { id: p.id, label: p.label, issuerUrl: p.issuerUrl, clientId: p.clientId, hasClientSecret: !!p.clientSecret };
+}
+
+// rawProviderList(), not listProviders() -- the admin view of what is configured should show
+// every saved entry, including one that is not usable YET (e.g. before
+// REDROID_FORGE_OIDC_REDIRECT_BASE_URL is set, exactly like a hand-edited
+// REDROID_FORGE_OIDC_PROVIDERS entry can already sit there "saved but not live"); listProviders()
+// silently drops those, which would make a provider the admin just added here look like it had
+// vanished.
+router.get('/oidc-providers', (req, res) => {
+  if (!permissions.canManageSettings(req.user)) return res.status(403).json({ error: 'Admin only' });
+  res.json(oidc.rawProviderList().map(toProviderRow));
+});
+
+router.post('/oidc-providers', (req, res) => {
+  if (!permissions.canManageSettings(req.user)) return res.status(403).json({ error: 'Admin only' });
+  try {
+    res.status(201).json(toProviderRow(oidc.addProvider(req.body || {})));
+  } catch (e) {
+    sendError(res, e, 400);
+  }
+});
+
+// Fields left out of the body keep their previous value, including clientSecret -- see oidc.js's
+// updateProvider comment on why (this route never hands a secret back out via GET, so there is
+// nothing for the admin to have re-typed from). Pass clientSecret: "" explicitly to clear it.
+router.put('/oidc-providers/:id', (req, res) => {
+  if (!permissions.canManageSettings(req.user)) return res.status(403).json({ error: 'Admin only' });
+  try {
+    res.json(toProviderRow(oidc.updateProvider(req.params.id, req.body || {})));
+  } catch (e) {
+    sendError(res, e, 400);
+  }
+});
+
+router.delete('/oidc-providers/:id', (req, res) => {
+  if (!permissions.canManageSettings(req.user)) return res.status(403).json({ error: 'Admin only' });
+  try {
+    oidc.removeProvider(req.params.id);
+    res.status(204).end();
+  } catch (e) {
+    sendError(res, e, 400);
+  }
 });
 
 module.exports = router;

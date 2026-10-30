@@ -1868,6 +1868,11 @@ async function renderSetupWizard(list) {
           method: 'POST',
           body: JSON.stringify({ username: userInput.value, password: passInput.value }),
         });
+        // Flips settings.json's authMode to "local" right away (PUT /api/auth/mode, 30/10/2026)
+        // -- the admin row just created above is exactly what that route's "none -> local"
+        // check requires, so this always succeeds here. No more manual .env edit: only a
+        // restart is left, shown below.
+        await api('/auth/mode', { method: 'PUT', body: JSON.stringify({ mode: 'local' }) });
         renderSetupWizard(list);
       } catch (e) {
         errorEl.hidden = false;
@@ -1883,22 +1888,23 @@ async function renderSetupWizard(list) {
   created.textContent = t('setup.adminCreated', { username: status.localUsernames.join(', ') });
   li.appendChild(created);
 
-  const envPath = status.repoDir ? `${status.repoDir}/.env` : t('setup.envPathUnknown');
-  const envLine = 'REDROID_FORGE_AUTH=local';
-  const restartCmd = status.repoDir ? `cd ${status.repoDir} && docker compose up -d` : 'docker compose up -d';
-  const pathRow = document.createElement('p');
-  pathRow.append(`${t('setup.envPathLabel')} `, (() => { const c = document.createElement('code'); c.textContent = envPath; return c; })());
-  li.appendChild(pathRow);
-  for (const [labelKey, value] of [['setup.envLineLabel', envLine], ['setup.restartLabel', restartCmd]]) {
+  // "restart", not "up -d" -- a mode/settings change lives in backend/data/settings.json (a
+  // bind-mounted data file), never in .env or the image, so "up -d" sees no config diff and
+  // does nothing at all (real gotcha hit live, 30/10/2026) -- only an actual restart re-reads it.
+  const restartCmd = status.repoDir ? `cd ${status.repoDir} && docker compose restart` : 'docker compose restart';
+  const savedRow = document.createElement('p');
+  savedRow.textContent = t('setup.modeSaved');
+  li.appendChild(savedRow);
+  {
     const row = document.createElement('p');
     const code = document.createElement('code');
-    code.textContent = value;
+    code.textContent = restartCmd;
     const copyBtn = document.createElement('button');
     copyBtn.type = 'button';
     copyBtn.className = 'secondary';
     copyBtn.textContent = t('common.copy');
-    copyBtn.addEventListener('click', () => navigator.clipboard.writeText(value).catch(() => {}));
-    row.append(`${t(labelKey)} `, code, ' ', copyBtn);
+    copyBtn.addEventListener('click', () => navigator.clipboard.writeText(restartCmd).catch(() => {}));
+    row.append(`${t('setup.restartLabel')} `, code, ' ', copyBtn);
     li.appendChild(row);
   }
 
@@ -1928,14 +1934,260 @@ async function renderSetupWizard(list) {
   }, 3000);
 }
 
+// Auth-mode switching + OIDC provider management (Identities panel, 30/10/2026) -- admin only
+// (AuthUi.canManageSettings()), in every mode including "none" (the OIDC-providers half is
+// useful to pre-populate before ever leaving "none"; see PUT /api/auth/mode's own comment on
+// why "oidc" alone is never offered as a target here). Mode changes still need a restart (same
+// "this container holds the Docker socket" reasoning as the setup wizard above) -- this reuses
+// that exact poll-GET-/me-until-it-takes-effect pattern, generalized to any target mode instead
+// of just "local".
+const ALLOWED_MODE_TRANSITIONS_UI = { local: ['both', 'none'], both: ['local'] };
+let authModePollInterval = null;
+
+async function showAuthModeRestartNotice(resultEl, target) {
+  clearInterval(authModePollInterval);
+  authModePollInterval = null;
+  const status = await api('/auth/setup/status').catch(() => ({}));
+  // "restart", not "up -d" -- see renderSetupWizard's own comment on this same gotcha.
+  const restartCmd = status.repoDir ? `cd ${status.repoDir} && docker compose restart` : 'docker compose restart';
+  resultEl.hidden = false;
+  resultEl.className = '';
+  resultEl.innerHTML = '';
+  const msg = document.createElement('p');
+  msg.textContent = t('authmode.saved', { mode: target });
+  const row = document.createElement('p');
+  const code = document.createElement('code');
+  code.textContent = restartCmd;
+  const copyBtn = document.createElement('button');
+  copyBtn.type = 'button';
+  copyBtn.className = 'secondary';
+  copyBtn.textContent = t('common.copy');
+  copyBtn.addEventListener('click', () => navigator.clipboard.writeText(restartCmd).catch(() => {}));
+  row.append(`${t('setup.restartLabel')} `, code, ' ', copyBtn);
+  const waiting = document.createElement('p');
+  waiting.className = 'muted';
+  waiting.textContent = t('setup.waiting');
+  resultEl.append(msg, row, waiting);
+
+  authModePollInterval = setInterval(async () => {
+    try {
+      const me = await fetch('/api/auth/me').then((r) => r.json());
+      if (me.authMode === target) {
+        clearInterval(authModePollInterval);
+        authModePollInterval = null;
+        waiting.textContent = t('setup.activated');
+        const reloadBtn = document.createElement('button');
+        reloadBtn.type = 'button';
+        reloadBtn.textContent = t('setup.reloadNow');
+        reloadBtn.addEventListener('click', () => window.location.reload());
+        resultEl.appendChild(reloadBtn);
+      }
+    } catch {
+      // mid-restart, same as the setup wizard's own poll -- the next tick tries again.
+    }
+  }, 3000);
+}
+
+async function switchAuthMode(resultEl, current, target) {
+  resultEl.hidden = false;
+  resultEl.className = '';
+  resultEl.textContent = '';
+  if (target === 'none' && !confirm(t('authmode.confirmNone'))) return;
+  try {
+    await api('/auth/mode', {
+      method: 'PUT',
+      body: JSON.stringify({ mode: target, ...(target === 'none' ? { confirm: true } : {}) }),
+    });
+    await showAuthModeRestartNotice(resultEl, target);
+  } catch (e) {
+    resultEl.className = 'fail-text';
+    resultEl.textContent = e.message;
+  }
+}
+
+function buildAuthModeSection(mode) {
+  const section = document.createElement('div');
+  const badge = document.createElement('p');
+  const strong = document.createElement('strong');
+  strong.textContent = mode;
+  badge.append(`${t('authmode.current')} `, strong);
+  section.appendChild(badge);
+
+  const resultEl = document.createElement('p');
+  resultEl.hidden = true;
+
+  const actions = document.createElement('div');
+  actions.className = 'toolbar';
+  for (const target of (ALLOWED_MODE_TRANSITIONS_UI[mode] || [])) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'secondary';
+    btn.textContent = t(`authmode.switchTo.${target}`);
+    btn.addEventListener('click', () => switchAuthMode(resultEl, mode, target));
+    actions.appendChild(btn);
+  }
+  section.appendChild(actions);
+  section.appendChild(resultEl);
+  return section;
+}
+
+// Plain entry shape {id, label, issuerUrl, clientId, clientSecret} -- same fields
+// addProvider/updateProvider validate server-side (src/lib/oidc.js). One inline form, reused
+// for both "+ Add provider" and "Edit": editing locks the id field (it is the array key) and
+// leaves clientSecret blank with a placeholder explaining that blank means "keep the current
+// one" -- GET /auth/oidc-providers never hands a secret back out to fill it with (see
+// routes/auth.js's own comment on that route).
+function buildOidcProviderForm({ existing, onDone }) {
+  const form = document.createElement('form');
+  form.className = 'setup-form';
+  const idInput = document.createElement('input');
+  idInput.placeholder = t('oidcProviders.idPlaceholder');
+  idInput.required = true;
+  idInput.disabled = !!existing;
+  idInput.value = existing ? existing.id : '';
+  const labelInput = document.createElement('input');
+  labelInput.placeholder = t('oidcProviders.labelPlaceholder');
+  labelInput.required = true;
+  labelInput.value = existing ? existing.label : '';
+  const issuerInput = document.createElement('input');
+  issuerInput.placeholder = t('oidcProviders.issuerPlaceholder');
+  issuerInput.required = true;
+  issuerInput.value = existing ? existing.issuerUrl : '';
+  const clientIdInput = document.createElement('input');
+  clientIdInput.placeholder = t('oidcProviders.clientIdPlaceholder');
+  clientIdInput.required = true;
+  clientIdInput.value = existing ? existing.clientId : '';
+  const secretInput = document.createElement('input');
+  secretInput.type = 'password';
+  secretInput.autocomplete = 'off';
+  secretInput.placeholder = existing ? t('oidcProviders.secretKeepPlaceholder') : t('oidcProviders.secretPlaceholder');
+  const submitBtn = document.createElement('button');
+  submitBtn.type = 'submit';
+  submitBtn.textContent = existing ? t('oidcProviders.save') : t('oidcProviders.add');
+  const errorEl = document.createElement('p');
+  errorEl.className = 'fail-text';
+  errorEl.hidden = true;
+  form.append(idInput, labelInput, issuerInput, clientIdInput, secretInput, submitBtn, errorEl);
+  form.addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    errorEl.hidden = true;
+    const body = { id: idInput.value, label: labelInput.value, issuerUrl: issuerInput.value, clientId: clientIdInput.value };
+    if (secretInput.value) body.clientSecret = secretInput.value;
+    try {
+      if (existing) {
+        await api(`/auth/oidc-providers/${encodeURIComponent(existing.id)}`, { method: 'PUT', body: JSON.stringify(body) });
+      } else {
+        await api('/auth/oidc-providers', { method: 'POST', body: JSON.stringify(body) });
+      }
+      onDone();
+    } catch (e) {
+      errorEl.hidden = false;
+      errorEl.textContent = e.message;
+    }
+  });
+  return form;
+}
+
+async function buildOidcProvidersSection() {
+  const section = document.createElement('div');
+  const heading = document.createElement('p');
+  heading.innerHTML = '';
+  const strongHeading = document.createElement('strong');
+  strongHeading.textContent = t('oidcProviders.heading');
+  heading.appendChild(strongHeading);
+  section.appendChild(heading);
+
+  const listEl = document.createElement('ul');
+  listEl.className = 'doctor-list';
+  section.appendChild(listEl);
+
+  const formHolder = document.createElement('div');
+  section.appendChild(formHolder);
+
+  const addBtn = document.createElement('button');
+  addBtn.type = 'button';
+  addBtn.textContent = t('oidcProviders.new');
+
+  async function refresh() {
+    listEl.innerHTML = `<li class="muted">${t('common.loading')}</li>`;
+    formHolder.innerHTML = '';
+    let providers;
+    try {
+      providers = await api('/auth/oidc-providers');
+    } catch (e) {
+      listEl.innerHTML = `<li class="fail-text">${t('common.error', { msg: e.message })}</li>`;
+      return;
+    }
+    listEl.innerHTML = '';
+    if (providers.length === 0) listEl.innerHTML = `<li class="muted">${t('oidcProviders.none')}</li>`;
+    for (const p of providers) {
+      const li = document.createElement('li');
+      const label = document.createElement('span');
+      label.textContent = `${p.label} (${p.id}) — ${p.issuerUrl}`;
+      li.appendChild(label);
+
+      const editBtn = document.createElement('button');
+      editBtn.type = 'button';
+      editBtn.className = 'secondary';
+      editBtn.textContent = t('oidcProviders.edit');
+      editBtn.addEventListener('click', () => {
+        formHolder.innerHTML = '';
+        formHolder.appendChild(buildOidcProviderForm({ existing: p, onDone: refresh }));
+      });
+      li.appendChild(editBtn);
+
+      const delBtn = document.createElement('button');
+      delBtn.type = 'button';
+      delBtn.className = 'secondary';
+      delBtn.textContent = t('identities.delete');
+      delBtn.addEventListener('click', async () => {
+        if (!confirm(t('oidcProviders.deleteConfirm', { label: p.label }))) return;
+        try {
+          await api(`/auth/oidc-providers/${encodeURIComponent(p.id)}`, { method: 'DELETE' });
+          refresh();
+        } catch (e) {
+          alert(e.message);
+        }
+      });
+      li.appendChild(delBtn);
+      listEl.appendChild(li);
+    }
+  }
+
+  addBtn.addEventListener('click', () => {
+    formHolder.innerHTML = '';
+    formHolder.appendChild(buildOidcProviderForm({ existing: null, onDone: refresh }));
+  });
+  section.appendChild(addBtn);
+
+  await refresh();
+  return section;
+}
+
+async function renderAuthModePanel() {
+  const panel = $('#auth-mode-panel');
+  if (!AuthUi.canManageSettings()) { panel.hidden = true; return; }
+  panel.hidden = false;
+  panel.innerHTML = '';
+  clearInterval(authModePollInterval);
+  authModePollInterval = null;
+  const mode = AuthUi.authMode();
+  if (mode !== 'none') panel.appendChild(buildAuthModeSection(mode));
+  panel.appendChild(await buildOidcProvidersSection());
+}
+
 async function loadIdentities() {
   const list = $('#identities-list');
   list.innerHTML = `<li class="muted">${t('common.loading')}</li>`;
   $('#btn-new-user').hidden = !AuthUi.localEnabled();
-  if (AuthUi.authMode() === 'none') return renderSetupWizard(list);
+  if (AuthUi.authMode() === 'none') {
+    renderAuthModePanel(); // mode-switch buttons stay hidden for "none"; OIDC providers CRUD still shows
+    return renderSetupWizard(list);
+  }
   clearInterval(setupPollInterval);
   setupPollInterval = null;
   $('#tab-identities .tab-intro').textContent = t('identities.intro');
+  renderAuthModePanel();
   try {
     const [identities, quotas, providers] = await Promise.all([
       api('/auth/identities'), api('/quotas'), fetch('/api/auth/oidc/providers').then((r) => (r.ok ? r.json() : [])),

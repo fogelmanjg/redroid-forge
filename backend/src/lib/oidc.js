@@ -29,6 +29,7 @@
 // is the actual point of using a real library here instead of hand-rolling OIDC crypto.
 
 const { Issuer, generators } = require('openid-client');
+const settings = require('./settings');
 
 const PROVIDER_ID_RE = /^[a-z0-9][a-z0-9-]{0,31}$/;
 
@@ -41,25 +42,38 @@ function redirectBaseUrl() {
   return (process.env.REDROID_FORGE_OIDC_REDIRECT_BASE_URL || '').replace(/\/+$/, '');
 }
 
-// -> every syntactically valid provider from REDROID_FORGE_OIDC_PROVIDERS, silently dropping
-// anything malformed (same forgiving posture as jsonFileStore's readJsonArray) rather than
-// crashing the whole app over one bad entry -- logged, not silent, so a typo is still visible at
-// startup. Re-parsed on every call (cheap; this is not on any hot path) rather than cached, so a
-// restart is the only thing needed to pick up a config change, same as every other env var here.
-function listProviders() {
+// Raw (unvalidated) provider entries, before redirectBaseUrl/shape checks below -- settings.json's
+// `oidcProviders` (Identities panel CRUD, 30/10/2026) wins once it has ever been written
+// (even to [], an explicit "none configured"); REDROID_FORGE_OIDC_PROVIDERS is only the
+// bootstrap default for before that UI has ever been touched, same precedence as authMode in
+// auth.js. This is also where addProvider/updateProvider/removeProvider read from before writing
+// back, so the shape on disk is always the plain entry {id, label, issuerUrl, clientId,
+// clientSecret}, never the derived `redirectUri` listProviders() below adds.
+function rawProviderList() {
+  const configured = settings.get().oidcProviders;
+  if (Array.isArray(configured)) return configured;
   const raw = process.env.REDROID_FORGE_OIDC_PROVIDERS || '';
   if (!raw.trim()) return [];
-  let parsed;
   try {
-    parsed = JSON.parse(raw);
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) {
+      console.warn('redroid-forge: REDROID_FORGE_OIDC_PROVIDERS must be a JSON array -- no OIDC providers available.');
+      return [];
+    }
+    return parsed;
   } catch (e) {
     console.warn(`redroid-forge: REDROID_FORGE_OIDC_PROVIDERS is not valid JSON (${e.message}) -- no OIDC providers available.`);
     return [];
   }
-  if (!Array.isArray(parsed)) {
-    console.warn('redroid-forge: REDROID_FORGE_OIDC_PROVIDERS must be a JSON array -- no OIDC providers available.');
-    return [];
-  }
+}
+
+// -> every syntactically valid provider from rawProviderList(), silently dropping anything
+// malformed (same forgiving posture as jsonFileStore's readJsonArray) rather than crashing the
+// whole app over one bad entry -- logged, not silent, so a typo is still visible at startup.
+// Re-parsed/re-read on every call (cheap; this is not on any hot path) rather than cached, so a
+// restart is the only thing needed to pick up a config change, same as every other env var here.
+function listProviders() {
+  const parsed = rawProviderList();
   const base = redirectBaseUrl();
   const seen = new Set();
   const providers = [];
@@ -207,6 +221,69 @@ async function handleCallback(providerId, params) {
   };
 }
 
+// Admin CRUD for the Identities panel (30/10/2026) -- writes the plain entry shape into
+// settings.json's `oidcProviders` (see rawProviderList's comment on precedence over the env
+// var). Deliberately thinner than listProviders()'s validation: this only rejects what would
+// make an entry UNRECOGNIZABLE (bad id, missing required field), the same way a hand-edited
+// REDROID_FORGE_OIDC_PROVIDERS entry can sit there "saved but not usable yet" (e.g. before
+// REDROID_FORGE_OIDC_REDIRECT_BASE_URL is set) without the write itself being rejected.
+function validateProviderShape(entry) {
+  const { id, label, issuerUrl, clientId, clientSecret } = entry || {};
+  if (typeof id !== 'string' || !PROVIDER_ID_RE.test(id)) {
+    throw Object.assign(new Error('"id" must be lowercase letters/digits/"-", 1-32 chars.'), { httpStatus: 400 });
+  }
+  if (typeof label !== 'string' || !label.trim()) {
+    throw Object.assign(new Error('"label" is required.'), { httpStatus: 400 });
+  }
+  if (typeof issuerUrl !== 'string' || !issuerUrl.trim()) {
+    throw Object.assign(new Error('"issuerUrl" is required.'), { httpStatus: 400 });
+  }
+  if (typeof clientId !== 'string' || !clientId.trim()) {
+    throw Object.assign(new Error('"clientId" is required.'), { httpStatus: 400 });
+  }
+  return {
+    id,
+    label: label.trim(),
+    issuerUrl: issuerUrl.trim(),
+    clientId: clientId.trim(),
+    ...(typeof clientSecret === 'string' && clientSecret ? { clientSecret } : {}),
+  };
+}
+
+function addProvider(entry) {
+  const clean = validateProviderShape(entry);
+  const list = rawProviderList();
+  if (list.some((p) => p.id === clean.id)) {
+    throw Object.assign(new Error(`A provider with id "${clean.id}" already exists.`), { httpStatus: 400 });
+  }
+  settings.update({ oidcProviders: [...list, clean] });
+  return clean;
+}
+
+// `patch` fields left out keep their previous value -- including clientSecret, so editing just
+// the label does not force re-pasting a secret that was never shown back to the UI in the first
+// place (see routes/auth.js's GET /oidc-providers, which only ever returns hasClientSecret).
+// Pass clientSecret: '' explicitly to clear it (e.g. switching a confidential client to public).
+function updateProvider(id, patch) {
+  const list = rawProviderList();
+  const idx = list.findIndex((p) => p.id === id);
+  if (idx === -1) throw Object.assign(new Error(`No OIDC provider with id "${id}".`), { httpStatus: 404 });
+  const clean = validateProviderShape({ ...list[idx], ...patch, id });
+  const next = [...list];
+  next[idx] = clean;
+  settings.update({ oidcProviders: next });
+  return clean;
+}
+
+function removeProvider(id) {
+  const list = rawProviderList();
+  if (!list.some((p) => p.id === id)) {
+    throw Object.assign(new Error(`No OIDC provider with id "${id}".`), { httpStatus: 404 });
+  }
+  settings.update({ oidcProviders: list.filter((p) => p.id !== id) });
+}
+
 module.exports = {
   listProviders, getProvider, isEnabled, getAuthorizationUrl, handleCallback,
+  addProvider, updateProvider, removeProvider, rawProviderList,
 };
