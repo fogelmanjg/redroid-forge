@@ -290,11 +290,13 @@ async function checkImagesPresent() {
         ? `${img.dockerImage} is already in the local Docker. Support: ${soporte}.${notaSoporte}`
         : `${img.dockerImage} is not in the local Docker. Support: ${soporte}.${notaSoporte}`,
       fix: present ? undefined : [
-        'If the image was exported on another PC:',
+        `Most images in this catalog (including this one) are public on Docker Hub -- try this first:`,
+        `  docker pull ${img.dockerImage}`,
+        'Only if that fails (a private/custom image, or no internet on this host), bring it over by hand:',
         `  docker save ${img.dockerImage} | gzip > ${img.id}.tar.gz`,
         '  # copy the file to this PC, then:',
         `  gunzip -c ${img.id}.tar.gz | docker load`,
-        'If it is pushed to your own registry:',
+        'Or, if it is pushed to your own registry:',
         `  docker pull <your-registry>/${img.dockerImage}`,
       ].join('\n'),
     };

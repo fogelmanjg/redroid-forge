@@ -21,6 +21,16 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
 
 ## [Unreleased]
 
+### Fixed
+
+- Doctor's fix message for a missing catalog image, and the README's "Bringing the redroid image
+  to this PC" section, both assumed the image had to be custom-built elsewhere or pushed to your
+  own registry -- neither ever mentioned that the catalog's default image
+  (`redroid/redroid:15.0.0-latest`) is public on Docker Hub, so a plain `docker pull` is all almost
+  anyone needs. Found doing a from-scratch install on a machine with nothing pre-configured,
+  following only the public README (no fleet-specific shortcuts) -- the README was also missing
+  the `git clone` step entirely, jumping straight to `docker compose up -d --build`.
+
 ## [0.3.1] - 2026-10-30
 
 ### Changed

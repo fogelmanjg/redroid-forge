@@ -119,7 +119,18 @@ from there.
 
 ## Bringing the redroid image to this PC
 
-If the image was built on another machine:
+Most images in the catalog (including the default one, `redroid/redroid:15.0.0-latest`) are public
+on Docker Hub — the simplest path, and the one that covers almost everyone, is just:
+
+```bash
+docker pull redroid/redroid:15.0.0-latest
+```
+
+(The Doctor tab does this check for you and shows the exact command if it is missing — you do not
+need to pull it by hand before starting the app, this is just here for reference.)
+
+Only if the image you need is private/custom, or this host has no internet access, bring it over
+by hand instead. If it was built on another machine:
 
 ```bash
 docker save <image> | gzip > image.tar.gz
@@ -127,7 +138,7 @@ docker save <image> | gzip > image.tar.gz
 gunzip -c image.tar.gz | docker load
 ```
 
-If it is pushed to your own registry:
+Or, if it is pushed to your own registry:
 
 ```bash
 docker pull <your-registry>/<image>
@@ -139,6 +150,8 @@ image there (id, Docker tag, label, `gpuMode`, `needsHwsimWifi`).
 ## Starting the app
 
 ```bash
+git clone https://github.com/fogelmanjg/redroid-forge.git
+cd redroid-forge
 docker compose up -d --build
 ```
 
