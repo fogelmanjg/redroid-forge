@@ -50,11 +50,6 @@ const FILES = [
   // service links against).
   ['lib64/libdrm.so', 'lib64/libdrm.so'],
   ['lib/libdrm.so', 'lib/libdrm.so'],
-  // Real gap found on real hardware: see venus3dAccel.js's GUEST_SOCKET_PATH comment -- a
-  // single-file bind under /dev or /tmp does not survive Android's own tmpfs remount of both
-  // at boot, so the socket is bound under /vendor instead and every guest process needs
-  // VTEST_SOCKET_NAME exported globally (not just one hardcoded fixed path) to find it there.
-  ['venus3d.rc', 'etc/init/venus3d.rc'],
 ];
 
 function log(msg) { console.log(`[venus3dService] ${msg}`); }
@@ -86,6 +81,7 @@ async function installFiles(containerId) {
     await copyIntoContainer(containerId, path.join(ARTIFACTS_DIR, srcRel), destRel);
   }
   await patchGpuConfigSh(containerId);
+  await patchSurfaceflingerRc(containerId);
 }
 
 const GPU_CONFIG_SH_PATH = '/vendor/bin/gpu_config.sh';
@@ -145,6 +141,34 @@ function prepareCreate() {
 
 async function ensureHostInfraReady() {
   await venus3dAccel.ensureHostInfraReady();
+}
+
+const SURFACEFLINGER_RC_PATH = '/system/etc/init/surfaceflinger.rc';
+
+// Real gap found on real hardware: the venus3d.rc `export` approach (global init-level export,
+// meant to be inherited by every later-started process) never actually reached surfaceflinger --
+// confirmed via /proc/1/environ after boot, VTEST_SOCKET_NAME was simply absent, and no other
+// .rc file in this stock image uses `export` at all to compare against (no working precedent to
+// check the trigger-timing assumption against). `setenv NAME value` inside the specific
+// `service surfaceflinger` block (system/etc/init/surfaceflinger.rc) is the well-documented,
+// narrowly-scoped mechanism instead -- applies only to that one service's own forked process,
+// confirmed landing (this file is not under /vendor, but still writable the same way at stage 4).
+async function patchSurfaceflingerRc(containerId) {
+  const tmpPath = path.join(os.tmpdir(), `venus3d-${containerId.slice(0, 12)}-surfaceflinger.rc`);
+  await execFileAsync('docker', ['cp', `${containerId}:${SURFACEFLINGER_RC_PATH}`, tmpPath]);
+  const original = fs.readFileSync(tmpPath, 'utf-8');
+  const patched = original.replace(
+    /(\n\s*task_profiles HighPerformance\n)/,
+    '$1    setenv VTEST_SOCKET_NAME /vendor/venus.sock\n',
+  );
+  if (patched === original) {
+    throw new Error(`${tmpPath} (copied from ${SURFACEFLINGER_RC_PATH}) did not match the expected shape -- was the image's own script changed?`);
+  }
+  fs.writeFileSync(tmpPath, patched);
+  await execFileAsync('chown', ['root:root', tmpPath]);
+  await execFileAsync('chmod', ['0644', tmpPath]);
+  await execFileAsync('docker', ['cp', tmpPath, `${containerId}:${SURFACEFLINGER_RC_PATH}`]);
+  fs.unlinkSync(tmpPath);
 }
 
 module.exports = {

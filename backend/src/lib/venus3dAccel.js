@@ -32,10 +32,14 @@ const HOST_SOCKET_PATH = `${VENUS_ROOT}/${SOCKET_FILENAME}`;
 // type tmpfs", "tmpfs on /tmp type tmpfs"), which shadows whatever Docker bind-mounted there at
 // container-create time. /vendor is not remounted this way (it is the actual vendor partition
 // Docker itself backs, and this module's own installFiles() already proves files placed there
-// at stage 4 survive into the booted guest) -- so the socket is bound there instead, and
-// venus3d.rc (installFiles() below) exports VTEST_SOCKET_NAME globally via init's own `export`
-// directive so every guest process that touches Vulkan (not just one hardcoded service) picks
-// it up, since the fixed-default-path shortcut this comment used to describe does not survive.
+// at stage 4 survive into the booted guest) -- so the socket is bound there instead. A global
+// init-level `export` (tried first, via a new /vendor/etc/init/*.rc) never actually reached
+// surfaceflinger's own environment (confirmed via /proc/1/environ post-boot -- no other .rc
+// file in the stock image uses `export` at all, so there was no working precedent for its
+// trigger timing); venus3dService.js's patchSurfaceflingerRc() instead adds a
+// `setenv VTEST_SOCKET_NAME ...` line directly to surfaceflinger's own service block in
+// system/etc/init/surfaceflinger.rc, the well-documented, narrowly-scoped mechanism that is
+// confirmed to work.
 const GUEST_SOCKET_PATH = '/vendor/venus.sock';
 
 function socketAnswers(socketPath = HOST_SOCKET_PATH, timeoutMs = 1000) {
