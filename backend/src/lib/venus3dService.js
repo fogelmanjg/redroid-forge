@@ -69,6 +69,45 @@ async function installFiles(containerId) {
   for (const [srcRel, destRel] of FILES) {
     await copyIntoContainer(containerId, path.join(ARTIFACTS_DIR, srcRel), destRel);
   }
+  await patchGpuConfigSh(containerId);
+}
+
+const GPU_CONFIG_SH_PATH = '/vendor/bin/gpu_config.sh';
+
+// A real, load-bearing gap found deploying this against the stock image (31/10/2026): the
+// image's own /vendor/bin/gpu_config.sh picks the gralloc/Vulkan HAL from the host's real DRM
+// driver name (read from /sys/kernel/debug/dri/<N>/name) -- but its setup_vulkan() case
+// statement has no branch for "nvidia-drm" at all (only i915/amdgpu/virtio_gpu/v3d/vc4/
+// msm_drm/panfrost), and gpu_setup_host() unconditionally sets ro.hardware.gralloc=gbm
+// (Mesa's native GBM gralloc -- confirmed, on real hardware, that THIS is what was actually
+// loaded, not the minigbm/cros_gralloc backend installFiles() above patches; `gralloc.gbm.so`
+// fails outright against NVIDIA's proprietary stack with "failed to create gbm device", the
+// exact Tier-0 finding redroid-nvidia's own README already documents as the reason this whole
+// module exists). Patches both: a new "nvidia-drm" case in setup_vulkan() (ro.hardware.vulkan
+// = virtio, same ICD name virtio_gpu already uses -- Venus-over-vtest is the same wire protocol
+// regardless of what is behind the host daemon) and gpu_setup_host()'s own gralloc line, made
+// conditional so it does not clobber what the nvidia-drm case just set (setup_render_node, and
+// therefore setup_vulkan, always runs BEFORE gpu_setup_host in this script's own gpu_setup()).
+async function patchGpuConfigSh(containerId) {
+  const tmpPath = path.join(os.tmpdir(), `venus3d-${containerId.slice(0, 12)}-gpu_config.sh`);
+  await execFileAsync('docker', ['cp', `${containerId}:${GPU_CONFIG_SH_PATH}`, tmpPath]);
+  const original = fs.readFileSync(tmpPath, 'utf-8');
+  let patched = original.replace(
+    /(\n\s*panfrost\)\n\s*setprop ro\.hardware\.vulkan panfrost\n\s*;;\n)/,
+    '$1        nvidia-drm)\n            setprop ro.hardware.vulkan virtio\n            setprop ro.hardware.gralloc cros\n            ;;\n',
+  );
+  patched = patched.replace(
+    /(gpu_setup_host\(\) \{\n\s*echo "use GPU host mode"\n\n\s*setprop ro\.hardware\.egl mesa\n)\s*setprop ro\.hardware\.gralloc gbm\n/,
+    '$1    [ "$(getprop ro.hardware.gralloc)" = "cros" ] || setprop ro.hardware.gralloc gbm\n',
+  );
+  if (patched === original) {
+    throw new Error(`${tmpPath} (copied from ${GPU_CONFIG_SH_PATH}) did not match the expected shape -- was the image's own script changed?`);
+  }
+  fs.writeFileSync(tmpPath, patched);
+  await execFileAsync('chown', ['root:root', tmpPath]);
+  await execFileAsync('chmod', ['0755', tmpPath]);
+  await execFileAsync('docker', ['cp', tmpPath, `${containerId}:${GPU_CONFIG_SH_PATH}`]);
+  fs.unlinkSync(tmpPath);
 }
 
 // Stage 3: this module's own daemon socket bind, plus the boot flag the deployed, validated
