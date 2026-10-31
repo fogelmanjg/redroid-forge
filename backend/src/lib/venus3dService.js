@@ -153,13 +153,22 @@ const SURFACEFLINGER_RC_PATH = '/system/etc/init/surfaceflinger.rc';
 // `service surfaceflinger` block (system/etc/init/surfaceflinger.rc) is the well-documented,
 // narrowly-scoped mechanism instead -- applies only to that one service's own forked process,
 // confirmed landing (this file is not under /vendor, but still writable the same way at stage 4).
+//
+// A SECOND, deeper real gap found after that: setting VTEST_SOCKET_NAME alone was still not
+// enough -- vn_renderer_create() (src/virtio/vulkan/vn_renderer.h) only even ATTEMPTS the vtest
+// transport `if (VN_DEBUG(VTEST))`; without that debug flag it goes straight to
+// vn_renderer_create_virtgpu() (the real kernel virtio-gpu device path), which fails outright on
+// a host with no such kernel device at all -- producing the exact generic
+// VK_ERROR_INITIALIZATION_FAILED (err=-3) this port kept hitting, with ZERO activity on the host
+// daemon's own socket (confirmed: the vtest connect code was never reached). VN_DEBUG=vtest
+// (src/virtio/vulkan/vn_common.c's debug-string parser) is the real switch.
 async function patchSurfaceflingerRc(containerId) {
   const tmpPath = path.join(os.tmpdir(), `venus3d-${containerId.slice(0, 12)}-surfaceflinger.rc`);
   await execFileAsync('docker', ['cp', `${containerId}:${SURFACEFLINGER_RC_PATH}`, tmpPath]);
   const original = fs.readFileSync(tmpPath, 'utf-8');
   const patched = original.replace(
     /(\n\s*task_profiles HighPerformance\n)/,
-    '$1    setenv VTEST_SOCKET_NAME /vendor/venus.sock\n',
+    '$1    setenv VTEST_SOCKET_NAME /vendor/venus.sock\n    setenv VN_DEBUG vtest\n',
   );
   if (patched === original) {
     throw new Error(`${tmpPath} (copied from ${SURFACEFLINGER_RC_PATH}) did not match the expected shape -- was the image's own script changed?`);
