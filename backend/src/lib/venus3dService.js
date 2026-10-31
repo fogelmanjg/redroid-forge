@@ -39,6 +39,17 @@ const FILES = [
   ['lib64/libGLESv2_angle.so', 'lib64/egl/libGLESv2_angle.so'],
   ['lib/libEGL_angle.so', 'lib/egl/libEGL_angle.so'],
   ['lib/libGLESv2_angle.so', 'lib/egl/libGLESv2_angle.so'],
+  // Real gap found on real hardware: the standalone meson+NDK cross-build of vulkan.virtio.so
+  // (patches/mesa/README.md's own recipe, needed since no Soong module exists for it in this
+  // tree) links dynamically against a libdrm.so meson built itself via -Dforce_fallback_for --
+  // not shipped anywhere in the stock image (it does not ship ANY /vendor/lib64/libdrm.so by
+  // default; nvenc's own FILES list ships its own AOSP-tree-built copy for the exact same
+  // reason). dlopen() from the sphal linker namespace failed outright ("library libdrm.so not
+  // found") until this module shipped its own, from the SAME AOSP tree build everything else
+  // here comes from (confirmed ABI-compatible: it is the exact file nvenc's own, already-working
+  // service links against).
+  ['lib64/libdrm.so', 'lib64/libdrm.so'],
+  ['lib/libdrm.so', 'lib/libdrm.so'],
 ];
 
 function log(msg) { console.log(`[venus3dService] ${msg}`); }
