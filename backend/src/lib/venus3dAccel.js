@@ -24,12 +24,19 @@ const SOCKET_FILENAME = 'venus.sock';
 const HOST_SOCKET_PATH = `${VENUS_ROOT}/${SOCKET_FILENAME}`;
 // Mesa's guest Venus driver (vn_renderer_vtest.c) dials VTEST_SOCKET_NAME if set, else the
 // upstream default "/tmp/.virgl_test" (vtest_protocol.h's VTEST_DEFAULT_SOCKET_NAME -- this
-// project's own Mesa patch did not change that default, confirmed by diff). Rather than setting
-// an env var for every process that might touch Vulkan in the guest (surfaceflinger, apps,
-// hwcomposer), a single-file bind mount puts the host daemon's socket exactly at that fixed
-// path -- the same "dial a fixed path, no env var" shape nvenc's own guest component already
-// uses for its own socket.
-const GUEST_SOCKET_PATH = '/tmp/.virgl_test';
+// project's own Mesa patch did not change that default, confirmed by diff).
+//
+// Real gap found on real hardware (31/10/2026): a single-file bind mount under /dev or /tmp
+// does NOT survive to be visible inside the guest -- Android's own init remounts BOTH of those
+// as fresh tmpfs during boot (confirmed via `mount` inside a running instance: "tmpfs on /dev
+// type tmpfs", "tmpfs on /tmp type tmpfs"), which shadows whatever Docker bind-mounted there at
+// container-create time. /vendor is not remounted this way (it is the actual vendor partition
+// Docker itself backs, and this module's own installFiles() already proves files placed there
+// at stage 4 survive into the booted guest) -- so the socket is bound there instead, and
+// venus3d.rc (installFiles() below) exports VTEST_SOCKET_NAME globally via init's own `export`
+// directive so every guest process that touches Vulkan (not just one hardcoded service) picks
+// it up, since the fixed-default-path shortcut this comment used to describe does not survive.
+const GUEST_SOCKET_PATH = '/vendor/venus.sock';
 
 function socketAnswers(socketPath = HOST_SOCKET_PATH, timeoutMs = 1000) {
   return new Promise((resolve) => {

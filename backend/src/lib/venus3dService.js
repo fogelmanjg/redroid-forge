@@ -50,6 +50,11 @@ const FILES = [
   // service links against).
   ['lib64/libdrm.so', 'lib64/libdrm.so'],
   ['lib/libdrm.so', 'lib/libdrm.so'],
+  // Real gap found on real hardware: see venus3dAccel.js's GUEST_SOCKET_PATH comment -- a
+  // single-file bind under /dev or /tmp does not survive Android's own tmpfs remount of both
+  // at boot, so the socket is bound under /vendor instead and every guest process needs
+  // VTEST_SOCKET_NAME exported globally (not just one hardcoded fixed path) to find it there.
+  ['venus3d.rc', 'etc/init/venus3d.rc'],
 ];
 
 function log(msg) { console.log(`[venus3dService] ${msg}`); }
