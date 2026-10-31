@@ -30,6 +30,10 @@ services:
       # backend/src/modules/hwenc/integrate.js) -- empty by default so as not to
       # demand this AOSP tree from anyone who brings up redroid-forge.
       - REDROID_HWENC_ARTIFACTS_DIR=${REDROID_HWENC_ARTIFACTS_DIR:-}
+      # Only needed to really validate/use the "nvenc" module (see
+      # backend/src/modules/nvenc/integrate.js) -- empty by default, same reasoning as
+      # REDROID_HWENC_ARTIFACTS_DIR above.
+      - REDROID_NVENC_ARTIFACTS_DIR=${REDROID_NVENC_ARTIFACTS_DIR:-}
       # P-frames (see backend/native/vaapi-daemon/daemon.c) -- off (all-intra) unless set
       # to an integer > 1 (frames per IDR). Off by default in the repo's own compose
       # (nobody turned it on here yet); set in .env for this lab host, not committed.
@@ -100,6 +104,10 @@ services:
       - /lib/modules:/lib/modules:ro
       - /dev/binderfs:/dev/binderfs
       - /dev/vaapi-helper:/dev/vaapi-helper
+      # nvenc module (NVIDIA) -- unlike /dev/vaapi-helper above, this backend never spawns the
+      # daemon behind this socket (see backend/src/lib/nvencAccel.js), only connects to it; the
+      # bind still has to exist on this side so that connection can reach the real host socket.
+      - /dev/nvenc-helper:/dev/nvenc-helper
       # Read-only, same path, overriding the automatic private-cgroupns view Docker gives this
       # container by default -- meminfoFix.js needs the HOST's real cgroup v2 tree (every sibling
       # instance's own docker-<id>.scope/memory.current) to compute each instance's live
@@ -113,6 +121,8 @@ services:
       # variable is not set, it mounts /dev/null:/dev/null (a harmless no-op) instead
       # of breaking `docker compose up` for whoever does not have this tree.
       - ${REDROID_HWENC_ARTIFACTS_DIR:-/dev/null}:${REDROID_HWENC_ARTIFACTS_DIR:-/dev/null}:ro
+      # Same trick, for the nvenc module's own AOSP-built artifacts.
+      - ${REDROID_NVENC_ARTIFACTS_DIR:-/dev/null}:${REDROID_NVENC_ARTIFACTS_DIR:-/dev/null}:ro
       # Same trick, single file instead of a directory, for the virt_wifi.ko above.
       - ${REDROID_FORGE_VIRTWIFI_KO_PATH:-/dev/null}:${REDROID_FORGE_VIRTWIFI_KO_PATH:-/dev/null}:ro
       - ${REDROID_FORGE_BACKUPS_DIR:-${PWD}/backend/data/backups}:${REDROID_FORGE_BACKUPS_DIR:-${PWD}/backend/data/backups}

@@ -5,6 +5,7 @@ backend/data/*.json
 .claude/
 backend/native/vaapi-daemon/daemon
 backend/native/vaapi-daemon/hwdec-test
+backend/native/nvenc-daemon/nvenc_scm_daemon
 scenario-results/
 backend/data/gapps/
 backend/data/arm-translation/

@@ -21,6 +21,18 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
 
 ## [Unreleased]
 
+### Added
+
+- New module, `nvenc`: hardware H.264 encode on NVIDIA hosts, ported from
+  [`redroid-nvidia`](https://github.com/fogelmanjg/redroid-nvidia)'s Tier 7 (confirmed clean on a
+  GTX 1050 Ti). Unlike `hwenc` (VA-API, AMD/Intel, needs `gpuMode=host`), this one works on top of
+  plain `gpuMode=guest` -- the Codec2 component's Venus-resource path always fails cleanly in this
+  container architecture (no virtio-gpu device) and falls through by design to a plain SCM_RIGHTS
+  dma-buf transport, which is all a real `scrcpy`/screen-recording capture buffer ever needs. See
+  `backend/src/modules/nvenc/README.md` and `backend/native/nvenc-daemon/README.md` for the full
+  design (including why, unlike `hwenc`'s own VA-API daemon, this backend never spawns the NVENC
+  daemon itself -- it's a systemd unit on the host, not a child process of this Alpine/musl image).
+
 ## [0.4.1] - 2026-10-31
 
 ### Fixed

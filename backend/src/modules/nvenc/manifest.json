@@ -1,0 +1,45 @@
+{
+  "id": "nvenc",
+  "nombre": "Hardware video encode (NVENC, NVIDIA)",
+  "esTerceroNoLibre": false,
+  "descripcion": "H.264 encode on NVIDIA hosts for screen streaming/capture, via NVENC (a different mechanism from hwenc's VA-API -- NVIDIA never exposes an EncSlice VA-API entrypoint). Ported from redroid-nvidia's Tier 7, confirmed clean on a GTX 1050 Ti -- the one open item in that project (a driver-level artifact) is specific to the RTX 4060. Does NOT need gpuMode=host or redroid-nvidia's own Venus/3D pipeline: the Codec2 component falls back to a plain SCM_RIGHTS dma-buf transport for any real Surface-sourced capture buffer, which is exactly the case this module needs -- gpuMode=guest (the one that actually boots on NVIDIA) is enough.",
+  "queToca": [
+    "copies a service (compiled binary, .rc, seccomp policy, VINTF manifest) into the instance's /vendor -- BEFORE the first start, like hwenc",
+    "adds the encoder entry to /vendor/etc/media_codecs.xml (same entry name/type hwenc uses, c2.hardware.encoder.h264 -- the two are mutually exclusive by hostGpuVendor, never installed on the same host)",
+    "adds the boot flag androidboot.use_redroid_c2=1 (shared with hwenc/hwdec, it is the official redroid image's own flag, not VA-API-specific)",
+    "requires a process of its own on the HOST, outside any container AND outside the backend's own container -- unlike hwenc's VA-API daemon, this backend cannot spawn it itself (Alpine/musl vs. the daemon's proprietary glibc dlopen() targets, see backend/native/nvenc-daemon/README.md); install it as the systemd unit documented there before enabling this module",
+    "does a setprop + mediaserver restart after every fresh boot (stage 6), same mechanism as hwenc/hwdec"
+  ],
+  "compatibleCon": {
+    "androidVersion": [
+      15
+    ],
+    "gpuMode": [
+      "guest"
+    ],
+    "hostGpuVendor": [
+      "nvidia"
+    ]
+  },
+  "etapa": [
+    3,
+    4,
+    5,
+    6
+  ],
+  "entry": "./integrate.js",
+  "version": 1,
+  "i18n": {
+    "es": {
+      "nombre": "Encode de video por hardware (NVENC, NVIDIA)",
+      "descripcion": "Encode H.264 en hosts NVIDIA para streaming/captura de pantalla, via NVENC (un mecanismo distinto al VA-API de hwenc -- NVIDIA nunca expone un entrypoint EncSlice de VA-API). Portado de redroid-nvidia Tier 7, confirmado limpio en una GTX 1050 Ti -- el unico item abierto de ese proyecto (un artefacto a nivel driver) es especifico de la RTX 4060. NO necesita gpuMode=host ni el pipeline Venus/3D propio de redroid-nvidia: el componente Codec2 cae a un transporte SCM_RIGHTS de dma-buf plano para cualquier buffer de captura real tipo Surface, que es exactamente el caso que este modulo necesita -- gpuMode=guest (el que realmente bootea en NVIDIA) alcanza.",
+      "queToca": [
+        "copia un servicio (binario compilado, .rc, politica de seccomp, manifest VINTF) dentro de /vendor de la instancia -- ANTES del primer arranque, igual que hwenc",
+        "agrega la entrada del encoder a /vendor/etc/media_codecs.xml (misma entrada/tipo que usa hwenc, c2.hardware.encoder.h264 -- los dos son mutuamente excluyentes por hostGpuVendor, nunca instalados en el mismo host)",
+        "agrega el boot flag androidboot.use_redroid_c2=1 (compartido con hwenc/hwdec, es un flag de la imagen oficial de redroid, no especifico de VA-API)",
+        "requiere un proceso propio en el HOST, fuera de cualquier contenedor Y fuera del propio contenedor del backend -- a diferencia del daemon VA-API de hwenc, este backend no puede levantarlo solo (Alpine/musl vs los objetivos glibc propietarios que el daemon dlopenea, ver backend/native/nvenc-daemon/README.md); instalarlo como el servicio systemd documentado ahi antes de activar este modulo",
+        "hace un setprop + reinicio de mediaserver despues de cada boot fresco (etapa 6), mismo mecanismo que hwenc/hwdec"
+      ]
+    }
+  }
+}

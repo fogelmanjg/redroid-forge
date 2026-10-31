@@ -6,6 +6,7 @@ const { promisify } = require('util');
 const runtime = require('./dockerRuntime');
 const store = require('./store');
 const hwAccel = require('./hwAccel');
+const nvencAccel = require('./nvencAccel');
 const fwknop = require('./fwknop');
 const images = require('../../images.json');
 
@@ -198,7 +199,7 @@ async function checkHwAccel() {
   if (!hwAccel.encodeSupported(vendor)) {
     return {
       status: anyNeedsHwEnc ? 'warn' : 'ok',
-      detail: `GPU detected: ${vendor}. hwenc's VA-API daemon (encode) only supports AMD/Intel -- on NVIDIA the separate redroid-nvidia component is needed (Phase 2 step 2 of the roadmap), not ported yet. Instances with gpuMode=soft images or without hwEncCapable are not affected.`,
+      detail: `GPU detected: ${vendor}. hwenc's VA-API daemon (encode) only supports AMD/Intel -- on NVIDIA, use the separate "nvenc" module instead (see the "HW acceleration (nvenc, NVIDIA)" check below). Instances with gpuMode=soft images or without hwEncCapable are not affected.`,
     };
   }
 
@@ -228,6 +229,26 @@ async function checkHwAccel() {
       detail: `${vendor} GPU detected but the VA-API daemon could not start: ${e.message}`,
       fix: 'Confirm that the binary is built (backend/native/vaapi-daemon/daemon, see its Makefile) and that /dev/dri is accessible from the backend container.',
     };
+  }
+}
+
+// nvenc's own daemon is NEVER spawned by this backend (see nvencAccel.js's top comment) --
+// unlike checkHwAccel above, "fail" here never means "the backend itself could not start it".
+async function checkNvenc() {
+  const vendor = await hwAccel.detectGpuVendor();
+  if (vendor !== 'nvidia') {
+    return { status: 'ok', detail: `GPU detected: ${vendor}. The nvenc module is NVIDIA-only.` };
+  }
+  if (await nvencAccel.socketAnswers()) {
+    return {
+      status: 'ok',
+      detail: `NVIDIA GPU detected, nvenc daemon running at ${nvencAccel.SOCKET_PATH}.`,
+    };
+  }
+  return {
+    status: 'warn',
+    detail: `NVIDIA GPU detected, but no nvenc daemon answers at ${nvencAccel.SOCKET_PATH} yet -- only relevant if an instance has the "nvenc" module enabled.`,
+    fix: 'Install and start the systemd unit documented in backend/native/nvenc-daemon/README.md (it runs on the HOST, this backend cannot spawn it itself).',
   }
 }
 
@@ -442,11 +463,12 @@ function checkKnownDb() {
 }
 
 async function runAll() {
-  const [dockerSocket, hwsim, imagePresence, hwAccelCheck, grallocFix, fwknopCheck] = await Promise.all([
+  const [dockerSocket, hwsim, imagePresence, hwAccelCheck, nvencCheck, grallocFix, fwknopCheck] = await Promise.all([
     checkDockerSocket(),
     checkHwsim(),
     checkImagesPresent(),
     checkHwAccel(),
+    checkNvenc(),
     checkGrallocFix().catch((e) => [{ id: 'redroid-gralloc-fix', label: 'Known redroid bug: gralloc crash on 10-bit formats', status: 'warn', detail: `could not be checked: ${e.message}` }]),
     checkFwknop(),
   ]);
@@ -461,6 +483,7 @@ async function runAll() {
     { id: 'hwsim', label: 'mac80211_hwsim (fake WiFi)', ...hwsim },
     { id: 'gpu', label: 'GPU / /dev/dri', ...checkGpu() },
     { id: 'hw-accel', label: 'HW acceleration (hwenc, VA-API)', ...hwAccelCheck },
+    { id: 'hw-accel-nvenc', label: 'HW acceleration (nvenc, NVIDIA)', ...nvencCheck },
     { id: 'known-db', label: 'Known-combinations database', ...checkKnownDb() },
     { id: 'fwknop', label: 'Port-knocking (fwknop)', ...fwknopCheck },
     ...imagePresence,

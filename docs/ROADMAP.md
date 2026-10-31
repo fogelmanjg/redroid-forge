@@ -52,7 +52,15 @@ Venus-proxy, NVENC), with already-known driver quirks (e.g. the scanline artifac
 **Steps:**
 1. Port `redroid-hwenc` (AMD/Intel VA-API encode + NVDEC decode) as a component the backend can
    launch/monitor per instance.
-2. Port `redroid-nvidia` (Venus-proxy 3D + NVENC) the same way.
+2. ✅ **Port `redroid-nvidia`'s NVENC encode — done 31/10/2026, as the `nvenc` module, validated on a
+   GTX 1050 Ti (jgustavo47).** Scoped down from the full port originally imagined here: only Tier 7
+   (NVENC encode) is needed for this project's screen-capture use case, not Tier 4/5 (Venus-proxy 3D
+   acceleration) — the guest Codec2 component's Venus-resource-id path always fails cleanly in this
+   container architecture (no virtio-gpu device, only NVIDIA's real render node) and falls through by
+   design to a plain SCM_RIGHTS dma-buf transport, which is everything a real `scrcpy`/screen-recording
+   capture buffer needs. `gpuMode=guest` (the one that actually boots on NVIDIA) is enough; no patched
+   guest Mesa/minigbm image, no Venus/3D corruption bug exposure. See
+   `backend/src/modules/nvenc/README.md`.
 3. Add GPU mode selection (host/soft) and vendor detection to the instance creation flow.
 4. Validate on a real AMD/Intel host and on a real NVIDIA host.
    - ✅ **AMD Polaris (RX 480, jgustavo46) validated on 05/10/2026** with the official image
@@ -65,7 +73,10 @@ Venus-proxy, NVENC), with already-known driver quirks (e.g. the scanline artifac
      backend's image did not ship `intel-media-driver` (only `mesa-va-gallium`, which covers
      AMD/nouveau) and the daemon died in `vaInitialize`; (2) `iHD` emits Annex-B start codes of **3
      bytes** and radeonsi of 4, and `MPEG4Writer`'s CSD parser requires 4 (it aborted with `FORTIFY:
-     write: count -1`); the daemon now normalizes to 4 bytes. NVIDIA is still missing.
+     write: count -1`); the daemon now normalizes to 4 bytes.
+   - ✅ **NVIDIA (GTX 1050 Ti, jgustavo47) validated 31/10/2026** — via the separate `nvenc` module
+     (step 2 above), not this daemon: NVIDIA never exposes a VA-API `EncSlice` entrypoint at all, so
+     `hwenc`'s own daemon has nothing to talk to on this vendor regardless of host setup.
 5. **Hardware decoding (VA-API) on AMD and Intel** — a goal added on 05/10/2026 (not a port: it is new
    work), with the scope extended on 06/10/2026.
 

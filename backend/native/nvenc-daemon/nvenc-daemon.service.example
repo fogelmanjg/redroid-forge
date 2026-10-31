@@ -1,0 +1,12 @@
+[Unit]
+Description=redroid-forge NVENC encode daemon (nvenc module, NVIDIA hosts only)
+After=network.target
+
+[Service]
+ExecStartPre=/bin/mkdir -p /dev/nvenc-helper
+ExecStart=/home/jgustavo/redroid-forge/backend/native/nvenc-daemon/nvenc_scm_daemon /dev/nvenc-helper/socket
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target
