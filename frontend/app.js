@@ -523,14 +523,15 @@ function buildDisplayChip(inst) {
 function buildCodecChips(inst) {
   const frag = document.createDocumentFragment();
   const ids = inst.requiredModuleIds || [];
-  const mk = (label, active) => {
+  const mk = (label, mechanism) => {
     const chip = document.createElement('span');
     chip.className = 'resource-chip';
-    chip.textContent = `${label}: ${active ? 'hw' : 'off'}`;
+    chip.textContent = `${label}: ${mechanism}`;
     return chip;
   };
-  frag.appendChild(mk('encode', ids.includes('hwenc')));
-  frag.appendChild(mk('decode', ids.includes('hwdec')));
+  const encodeMechanism = ids.includes('nvenc') ? 'nvenc' : ids.includes('hwenc') ? 'hwenc' : 'soft';
+  frag.appendChild(mk('encode', encodeMechanism));
+  frag.appendChild(mk('decode', ids.includes('hwdec') ? 'hwdec' : 'soft'));
   return frag;
 }
 function buildWifiInternoChip(inst) {
