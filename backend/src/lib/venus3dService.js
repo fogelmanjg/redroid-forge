@@ -95,11 +95,15 @@ const LEGACY_GRALLOC_RC_PATH = '/vendor/etc/init/android.hardware.graphics.alloc
 // service block never had (only surfaceflinger's did). Without them it dials the vtest
 // *upstream default* path ("/tmp/.virgl_test", which this module moved away from -- see
 // venus3dAccel.js's GUEST_SOCKET_PATH) and fails ("failed to open gralloc0 device"). Its own
-// crash is not just cosmetic: init's generic "updatable components" crash-safety policy
-// (unrelated to this service's own `onrestart` line, which this patch also drops since it is
-// not needed once this service stops crashing) kills surfaceflinger and zygote outright after
-// 4 crashes, which is what actually blocked boot_completed. Not yet confirmed fully resolved on
-// real hardware at the time of this port -- see the module's own README "Validation" section.
+// crash is not just cosmetic: init's generic "updatable components" crash-safety policy kills
+// surfaceflinger and zygote outright after 4 crashes, which is what actually blocked
+// boot_completed. The setenv alone did NOT stop it from crashing on real hardware (confirmed:
+// still exited status 1 dozens of times with setenv applied, root cause not pinned down --
+// logd never captured any stderr from it, dying too fast to flush) -- `disabled` additionally
+// stops init's own automatic class-start from retriggering it every few seconds; its own
+// `onrestart` coupling to surfaceflinger is also dropped since it is no longer needed once this
+// service is not auto-started. Not yet confirmed to fully resolve boot_completed on real
+// hardware at the time of this port -- see the module's own README "Validation" section.
 async function patchLegacyGrallocRc(containerId) {
   const tmpPath = path.join(os.tmpdir(), `venus3d-${containerId.slice(0, 12)}-allocator2.0.rc`);
   await execFileAsync('docker', ['cp', `${containerId}:${LEGACY_GRALLOC_RC_PATH}`, tmpPath]);
@@ -107,7 +111,7 @@ async function patchLegacyGrallocRc(containerId) {
   let patched = original.replace(/\n\s*onrestart restart surfaceflinger\n/, '\n');
   patched = patched.replace(
     /(\n\s*capabilities SYS_NICE\n)/,
-    '$1    setenv VTEST_SOCKET_NAME /vendor/venus.sock\n    setenv VN_DEBUG vtest\n',
+    '$1    setenv VTEST_SOCKET_NAME /vendor/venus.sock\n    setenv VN_DEBUG vtest\n    disabled\n',
   );
   if (patched === original) {
     throw new Error(`${tmpPath} (copied from ${LEGACY_GRALLOC_RC_PATH}) did not match the expected shape -- was the image's own script changed?`);
