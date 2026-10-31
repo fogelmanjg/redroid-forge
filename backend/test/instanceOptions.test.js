@@ -49,6 +49,11 @@ test('hwdec cannot be requested on an image that does not support it either', ()
   assert.throws(() => moduleGate.requiredModuleIds(imgNoHw, ['hwdec']), (e) => e.httpStatus === 400 && /does not support hardware video acceleration/.test(e.message));
 });
 
+test('nvenc cannot be requested on an image that does not support hw accel either', () => {
+  assert.deepStrictEqual(moduleGate.requiredModuleIds(imgHw, ['nvenc']), ['nvenc']);
+  assert.throws(() => moduleGate.requiredModuleIds(imgNoHw, ['nvenc']), (e) => e.httpStatus === 400 && /does not support hardware video acceleration/.test(e.message));
+});
+
 test('only the optional modules can be requested', () => {
   for (const bad of [['magisk'], ['device-profile'], ['nope']]) {
     assert.throws(() => moduleGate.requiredModuleIds(imgHw, bad), (e) => e.httpStatus === 400, bad.join());

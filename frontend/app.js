@@ -2492,8 +2492,66 @@ async function refreshHwAccelOption(id) {
     setHwAccel(id, { enabled: false, text: t('common.error', { msg: e.message }), tone: 'fail-text' });
   }
 }
+// Encode is a single select (none/hwenc/nvenc), not a checkbox like hwdec: the two mechanisms
+// are mutually exclusive by host GPU vendor (hwenc: AMD/Intel, needs gpuMode=host; nvenc:
+// NVIDIA, needs gpuMode=guest -- NVIDIA's gpuMode=host does not even boot). Whichever vendor
+// this host does NOT have is hidden outright (it will never work on this hardware, not merely
+// "needs a setting changed"); the one that does apply is only disabled, with a hint, when
+// gpuMode does not match yet -- that is a live, user-adjustable choice in this same form.
+async function refreshEncodeOption() {
+  const img = imagesById[$('#image-select').value];
+  const select = $('#select-encode');
+  const optHwenc = $('#opt-encode-hwenc');
+  const optNvenc = $('#opt-encode-nvenc');
+  const status = $('#encode-status');
+  const setStatus = (text, tone) => {
+    status.hidden = !text;
+    status.className = tone || 'muted';
+    status.textContent = text || '';
+  };
+  if (!img || !img.hwEncCapable) {
+    optHwenc.hidden = true;
+    optNvenc.hidden = true;
+    select.value = '';
+    select.disabled = true;
+    setStatus(img ? t('new.encodeNoImage') : '', 'muted');
+    return;
+  }
+  select.disabled = false;
+  setStatus(t('new.hwencChecking'), 'muted');
+  let hwenc;
+  let nvenc;
+  try {
+    [hwenc, nvenc] = await Promise.all([
+      api(`/modules/hwenc?imageId=${encodeURIComponent(img.id)}`),
+      api(`/modules/nvenc?imageId=${encodeURIComponent(img.id)}`),
+    ]);
+  } catch (e) {
+    setStatus(t('common.error', { msg: e.message }), 'fail-text');
+    return;
+  }
+  if (imagesById[$('#image-select').value] !== img) return; // another image was chosen meanwhile
+
+  optHwenc.hidden = !hwenc.hostCompatible;
+  optNvenc.hidden = !nvenc.hostCompatible;
+  optHwenc.disabled = optHwenc.hidden || !hwenc.compatible;
+  optNvenc.disabled = optNvenc.hidden || !nvenc.compatible;
+  if ((select.value === 'hwenc' && optHwenc.disabled) || (select.value === 'nvenc' && optNvenc.disabled)) {
+    select.value = '';
+  }
+
+  if (optHwenc.hidden && optNvenc.hidden) {
+    setStatus(t('new.encodeNoVendor'), 'muted');
+  } else if (!optHwenc.hidden && optHwenc.disabled) {
+    setStatus(t('new.hwencNeedsHost'), 'warn-text');
+  } else if (!optNvenc.hidden && optNvenc.disabled) {
+    setStatus(t('new.nvencNeedsGuest'), 'warn-text');
+  } else {
+    setStatus(t('new.hwencOk', { vendor: hwenc.hostGpuVendor || nvenc.hostGpuVendor || '?' }), 'ok-text');
+  }
+}
 function refreshHwencOption() {
-  refreshHwAccelOption('hwenc');
+  refreshEncodeOption();
   refreshHwAccelOption('hwdec');
 }
 $('#image-select').addEventListener('change', refreshHwencOption);
@@ -2561,7 +2619,7 @@ $('#btn-new-instance').addEventListener('click', async () => {
   $('#chk-gapps').checked = false;
   $('#chk-arm').checked = false;
   $('#chk-aurora-store').checked = false;
-  $('#chk-hwenc').checked = false;
+  $('#select-encode').value = '';
   $('#chk-hwdec').checked = false;
   $('#chk-wifi-interno').checked = false;
   resetGappsStatus();
@@ -2605,9 +2663,11 @@ $('#new-instance-form').addEventListener('submit', async (e) => {
   const form = e.target;
   const name = normalizeInstanceName(form.name.value);
   const imageId = form.imageId.value;
-  // The list is explicit: what is not ticked is not installed (that is how hwenc is opted out of).
+  // The list is explicit: what is not ticked/selected is not installed (that is how hwenc/nvenc
+  // is opted out of). form.encode.value is '' (none), 'hwenc', or 'nvenc' -- the two encode
+  // mechanisms are mutually exclusive, never both pushed.
   const modules = [];
-  if (form.hwenc.checked) modules.push('hwenc');
+  if (form.encode.value) modules.push(form.encode.value);
   if (form.hwdec.checked) modules.push('hwdec');
   if (form.gapps.checked) modules.push('gapps');
   if (form.arm.checked) modules.push('arm-translation');

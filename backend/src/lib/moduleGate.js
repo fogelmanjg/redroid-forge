@@ -64,7 +64,7 @@ function requiredModuleIds(img, requested) {
         { httpStatus: 400 },
       );
     }
-    if ((id === 'hwenc' || id === 'hwdec') && !img.hwEncCapable) {
+    if ((id === 'hwenc' || id === 'hwdec' || id === 'nvenc') && !img.hwEncCapable) {
       throw Object.assign(new Error(`image "${img.id}" does not support hardware video acceleration (${id})`), { httpStatus: 400 });
     }
     if (!ids.includes(id)) ids.push(id);

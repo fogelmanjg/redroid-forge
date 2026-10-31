@@ -155,9 +155,14 @@ gunzip -c image.tar.gz | docker load</pre>
           </select>
         </label>
       </fieldset>
-      <label class="contract-checkbox"><input type="checkbox" name="hwenc" id="chk-hwenc" />
-        <span data-i18n="new.hwenc">Hardware encode (VA-API)</span></label>
-      <p id="hwenc-status" class="muted" hidden></p>
+      <label><span data-i18n="new.encodeLabel">Hardware encode</span>
+        <select name="encode" id="select-encode">
+          <option value="" data-i18n="new.encodeNone">None (software)</option>
+          <option value="hwenc" id="opt-encode-hwenc" data-i18n="new.encodeHwenc">VA-API (AMD/Intel)</option>
+          <option value="nvenc" id="opt-encode-nvenc" data-i18n="new.nvenc">NVENC (NVIDIA)</option>
+        </select>
+      </label>
+      <p id="encode-status" class="muted" hidden></p>
       <label class="contract-checkbox"><input type="checkbox" name="hwdec" id="chk-hwdec" />
         <span data-i18n="new.hwdec">Hardware decode (VA-API / NVDEC)</span></label>
       <p id="hwdec-status" class="muted" hidden></p>

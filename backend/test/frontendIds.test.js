@@ -26,7 +26,7 @@ test('every field of the new-instance form that app.js reads exists with that na
   const handlerMatch = app.match(/\$\('#new-instance-form'\)\.addEventListener\('submit'[\s\S]*?\n\}\);/);
   assert.ok(handlerMatch, 'the scan found the submit handler');
   const fields = [...new Set([...handlerMatch[0].matchAll(/\bform\.(\w+)\.(?:value|checked)\b/g)].map((m) => m[1]))];
-  assert.ok(fields.includes('width') && fields.includes('hwenc') && fields.includes('gapps'), 'the scan found the fields');
+  assert.ok(fields.includes('width') && fields.includes('encode') && fields.includes('gapps'), 'the scan found the fields');
   const missing = fields.filter((f) => !new RegExp(`name="${f}"`).test(form));
   assert.deepStrictEqual(missing, []);
 });
