@@ -20,14 +20,6 @@ process.env.REDROID_FORGE_CGROUP_ROOT = cgroupRoot;
 const meminfoFix = require('../src/lib/meminfoFix');
 // eslint-disable-next-line global-require
 const store = require('../src/lib/store');
-// eslint-disable-next-line global-require
-const runtime = require('../src/lib/dockerRuntime');
-
-function withMockExec(impl, fn) {
-  const restore = runtime.exec;
-  runtime.exec = impl;
-  return Promise.resolve(fn()).finally(() => { runtime.exec = restore; });
-}
 
 function withFakeStore(fn) {
   const fakeStore = new Map();
@@ -137,48 +129,29 @@ test('scheduleRefresh/release never throw and are idempotent to call repeatedly'
   meminfoFix.release(instance.id); // releasing twice must not throw
 });
 
-test('bindOnce runs the bind-mount command and succeeds on the first try', () => withMockExec(
-  async (containerId, cmd) => {
-    assert.strictEqual(containerId, 'c1');
-    assert.deepStrictEqual(cmd, ['mount', '--bind', meminfoFix.IN_CONTAINER_SRC, '/proc/meminfo']);
-    return '';
-  },
-  async () => {
-    const ok = await meminfoFix.bindOnce('c1', { retries: 3, delayMs: 1 });
-    assert.strictEqual(ok, true);
-  },
-));
-
-test('bindOnce retries while the container is not ready yet, then succeeds', () => {
-  let calls = 0;
-  return withMockExec(
-    async () => {
-      calls += 1;
-      if (calls < 3) throw new Error('container not ready');
-      return '';
-    },
-    async () => {
-      const ok = await meminfoFix.bindOnce('c2', { retries: 5, delayMs: 1 });
-      assert.strictEqual(ok, true);
-      assert.strictEqual(calls, 3);
-    },
-  );
+// installRcTrigger replaced the old docker-exec-retry mechanism (bindOnce/scheduleBindMount,
+// removed 31/10/2026 -- see git history and meminfoFix.js's own comment on why: found for real
+// that its 20s retry budget was not always enough, and nothing ever retried again after that).
+// Android's own init does the actual /proc/meminfo bind now, triggered by a `.rc` dropped into
+// /vendor/etc/init/ at stage 4 -- live-verified end to end against a real instance the same day,
+// see the memory note this links to for that verification; this is just the pure
+// copy-the-file-in call, same shape as redroid-gralloc-fix's own stage-4 `copyIn` pattern.
+test('installRcTrigger copies RC_SOURCE to RC_TARGET inside the container', async () => {
+  const calls = [];
+  await meminfoFix.installRcTrigger('c1', 2048, {
+    copyIn: async (src, dest) => { calls.push([src, dest]); },
+  });
+  assert.deepStrictEqual(calls, [[meminfoFix.RC_SOURCE, meminfoFix.RC_TARGET]]);
 });
 
-test('bindOnce gives up after exhausting its retries', () => withMockExec(
-  async () => { throw new Error('always fails'); },
-  async () => {
-    const ok = await meminfoFix.bindOnce('c3', { retries: 3, delayMs: 1 });
-    assert.strictEqual(ok, false);
-  },
-));
-
-test('scheduleBindMount is a no-op for an instance with no memory cap (never execs)', () => withMockExec(
-  async () => { throw new Error('exec must not be called'); },
-  () => {
-    assert.doesNotThrow(() => meminfoFix.scheduleBindMount({ id: 'x', memoryMb: null, containerId: 'c4' }));
-  },
-));
+test('installRcTrigger is a no-op for an instance with no memory cap (never copies)', async () => {
+  await meminfoFix.installRcTrigger('c2', null, {
+    copyIn: async () => { throw new Error('copyIn must not be called'); },
+  });
+  await meminfoFix.installRcTrigger('c2', undefined, {
+    copyIn: async () => { throw new Error('copyIn must not be called'); },
+  });
+});
 
 // Regression (30/10/2026): renaming an instance (routes/instances.js's PUT /:id/name) used to
 // also rename this module's on-disk directory to match the new `name`, reasoning that a bind

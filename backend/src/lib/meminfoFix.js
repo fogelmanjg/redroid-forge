@@ -31,15 +31,15 @@
 // remount: (1) prepareBinds() binds the host file at create time onto a STABLE path that is NOT
 // under /proc (IN_CONTAINER_SRC, below) -- Android's boot never touches this path, so the bind
 // (and therefore every later write to the host file, since a bind mount shares the underlying
-// inode, it is not a copy) survives boot intact; (2) scheduleBindMount(), called fire-and-forget
-// once Android is actually up (same post-boot-fixup timing as the other modules' stage 6), runs
-// `mount --bind` FROM INSIDE the container (docker exec, root, Privileged:true gives it
-// CAP_SYS_ADMIN) to lay that same file over /proc/meminfo -- a bind-mount made by a process
-// inside a container's mount namespace is visible namespace-wide (confirmed: a second, unrelated
-// `docker exec` afterwards saw the new content, and so did `dumpsys meminfo`), so this one
-// sticks. Live-verified end to end on 24/10/2026 against aurora-host-test (a real 4096 MB-capped
-// instance on this host): before, `dumpsys meminfo` reported "Total RAM: 63,646,788K"; after,
-// "Total RAM: 4,194,304K" -- exactly the cgroup limit, matching the pvz2-tv finding this fixes.
+// inode, it is not a copy) survives boot intact; (2) installRcTrigger() drops a `.rc` into
+// Android's own `/vendor/etc/init/` at stage 4 (same mechanism redroid-gralloc-fix already uses),
+// triggered `on post-fs-data` -- after Android's own procfs remount, confirmed by init's own
+// ordering, not a guess -- so Android's OWN init lays that same file over /proc/meminfo itself,
+// no host-side polling needed (see installRcTrigger's own comment for the full history: an
+// earlier docker-exec-retry version of this existed and was replaced on 31/10/2026). Live-verified
+// end to end on 24/10/2026 against aurora-host-test (a real 4096 MB-capped instance on this host):
+// before, `dumpsys meminfo` reported "Total RAM: 63,646,788K"; after, "Total RAM: 4,194,304K" --
+// exactly the cgroup limit, matching the pvz2-tv finding this fixes.
 //
 // Deliberately NOT a "etapa"/"entry" module (see moduleRunner.js): it has nothing to do with an
 // image or a user choice, it applies whenever an instance has a memory cap at all, the same way
@@ -47,8 +47,11 @@
 
 const fs = require('fs');
 const path = require('path');
+const { execFile } = require('child_process');
+const { promisify } = require('util');
 const store = require('./store');
-const runtime = require('./dockerRuntime');
+
+const execFileAsync = promisify(execFile);
 
 // Unlike the other REDROID_FORGE_*_DIR vars that are genuinely optional (REDROID_HWENC_ARTIFACTS_DIR,
 // REDROID_FORGE_VIRTWIFI_KO_PATH), this one is NOT optional once redroid-forge itself runs in a
@@ -85,7 +88,6 @@ const timers = new Map(); // instanceId -> NodeJS.Timeout
 
 function log(msg) { console.log(`[meminfo-fix] ${msg}`); }
 function warn(msg) { console.warn(`[meminfo-fix] ${msg}`); }
-function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
 
 // Keyed by volumeName, not instance.name -- found for real (30/10/2026) renaming an instance
 // (routes/instances.js's PUT /:id/name) and later restarting it: the bind mount in the
@@ -148,40 +150,46 @@ function prepareBinds(volumeName, memoryMb) {
   // the first tick once it is actually running.
   const file = writeFile(volumeName, { totalKb, freeKb: totalKb, cachedKb: 0 });
   // Onto IN_CONTAINER_SRC, not /proc/meminfo directly -- see the file comment on why the actual
-  // /proc/meminfo bind has to happen later, post-boot (scheduleBindMount).
+  // /proc/meminfo bind has to happen later, post-boot (installRcTrigger).
   return [`${file}:${IN_CONTAINER_SRC}`];
 }
 
-// Fire-and-forget, called once Android is actually up (same timing as the other modules' stage
-// 6 post-boot fixups) -- retries because the container's shell is not reachable the instant
-// start() returns. Not idempotent-safe to call repeatedly on a timer (each run stacks ANOTHER
-// bind mount on top instead of failing), unlike scheduleRefresh -- call it once per
-// create/start/restart/recreate, exactly where the route handlers already call scheduleRefresh.
-async function bindOnce(containerId, { retries = 10, delayMs = 2000 } = {}) {
-  for (let attempt = 1; attempt <= retries; attempt++) {
-    try {
-      // eslint-disable-next-line no-await-in-loop
-      await runtime.exec(containerId, ['mount', '--bind', IN_CONTAINER_SRC, '/proc/meminfo']);
-      log(`bound ${IN_CONTAINER_SRC} over /proc/meminfo in ${containerId} (attempt ${attempt})`);
-      return true;
-    } catch (e) {
-      if (attempt === retries) {
-        warn(`could not bind /proc/meminfo in ${containerId} after ${retries} attempts: ${e.message}`);
-        return false;
-      }
-      // eslint-disable-next-line no-await-in-loop
-      await sleep(delayMs);
-    }
-  }
-  return false;
-}
+// The actual /proc/meminfo bind, done natively by Android's OWN init instead of a host-side
+// docker-exec retry loop. Earlier version of this (bindOnce/scheduleBindMount, removed
+// 31/10/2026, see git history if it is ever needed again) ran `mount --bind` via `docker exec`,
+// fire-and-forget, retried every 2s for up to 20s on the theory that the container's shell was
+// not reachable yet right after start() -- found for real against a live instance with a heavier
+// first boot (gapps+aurora+arm-translation+wifi-interno, a lot to install/start) that 20s was not
+// always enough, and nothing ever retried again after that: Android was stuck reporting the
+// host's full RAM until the next full recreate. Same race every OTHER stage-6 fixup in this
+// project already has (see androidExec.js's execAndroidWithRetry, 60s) -- but there is a cleaner
+// answer specific to this one action: Android's own init can do the mount itself. Stage-4 modules
+// (redroid-gralloc-fix is the existing example) already drop a `.rc` file into
+// `/vendor/etc/init/` while the container is stopped and Android picks it up automatically on its
+// next boot -- this reuses exactly that mechanism instead of inventing a second one.
+// RC_SOURCE's trigger (`on post-fs-data`) runs after Android's own stock init.rc remounts a fresh
+// procfs over /proc (the thing that forced this to be a two-step bind in the first place, see the
+// top-of-file comment) -- init's own trigger ordering guarantees that, no polling needed.
+// Live-verified end to end on 31/10/2026 against a disposable test instance: booted with the .rc
+// installed and NO docker-exec bind call from this project at all, and `/proc/meminfo` inside
+// already showed the right MemTotal. The one real unknown going in -- would SELinux block init's
+// own domain (`u:r:init:s0`) from doing a mount that a root shell exec can -- was NOT the
+// problem; the actual blocker was simpler: `docker cp` preserves the source file's host
+// permissions, and Android's init refuses to even parse a `.rc` that is group/other-writable
+// ("Skipping insecure file") -- RC_SOURCE is kept at 644 on disk for exactly this reason, do not
+// loosen it.
+const RC_SOURCE = path.join(__dirname, 'redroid-forge-meminfo.rc');
+const RC_TARGET = '/vendor/etc/init/redroid-forge-meminfo.rc';
 
-// Same guard and calling convention as scheduleRefresh (instance, not a bare containerId) --
-// nothing to bind for an instance with no memory cap, there is no IN_CONTAINER_SRC for it.
-function scheduleBindMount(instance) {
-  if (!instance.memoryMb) return;
-  const { containerId } = instance;
-  bindOnce(containerId).catch((e) => warn(`unexpected error binding /proc/meminfo in ${containerId}: ${e.message}`));
+// Stage 4 (between runtime.create() and runtime.start(), the only window /vendor is writable --
+// same timing as redroid-gralloc-fix's own RC injection). No-op for an instance with no memory
+// cap, same guard as prepareBinds -- there would be nothing at IN_CONTAINER_SRC for the .rc to
+// bind from.
+async function installRcTrigger(containerId, memoryMb, { copyIn } = {}) {
+  if (!memoryMb) return;
+  const put = copyIn || ((src, dest) => execFileAsync('docker', ['cp', src, `${containerId}:${dest}`]));
+  await put(RC_SOURCE, RC_TARGET);
+  log(`installed ${RC_TARGET} in ${containerId} (Android's own init will bind /proc/meminfo after post-fs-data)`);
 }
 
 // The two cgroup v2 layouts a container's scope can show up under, depending on Docker's cgroup
@@ -250,6 +258,6 @@ function cleanup(volumeName) {
 }
 
 module.exports = {
-  prepareBinds, scheduleRefresh, scheduleBindMount, bindOnce, release, refresh, cleanup,
-  render, hostFilePath, cgroupPath, DATA_DIR, REFRESH_MS, IN_CONTAINER_SRC,
+  prepareBinds, installRcTrigger, scheduleRefresh, release, refresh, cleanup,
+  render, hostFilePath, cgroupPath, DATA_DIR, REFRESH_MS, IN_CONTAINER_SRC, RC_SOURCE, RC_TARGET,
 };

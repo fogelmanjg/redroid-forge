@@ -21,6 +21,26 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-10-31
+
+### Fixed
+
+- The `/proc/meminfo` fix (an instance's reported RAM matching its real Docker cap, see
+  `backend/src/lib/meminfoFix.js`) could silently never apply on a heavier-boot instance.
+  The final bind-mount ran via `docker exec` right after start, retried for ~20s on the theory
+  that Android's shell just was not reachable yet -- found for real against a real instance
+  with a lot to install/start on first boot (gapps+aurora+arm-translation+wifi-interno) that
+  20s was not always enough, and nothing ever retried again: Android was stuck reporting the
+  host's full RAM (not its 3072MB cap) until the next full recreate, with no error surfaced
+  anywhere. Confirmed no actual OOM kill had happened yet (`memory.events`' `oom_kill: 0`) before
+  fixing it, but the mechanism was silently broken regardless.
+- Replaced with a cleaner mechanism instead of just a bigger retry budget: a `.rc` file dropped
+  into `/vendor/etc/init/` at stage 4 (same mechanism `redroid-gralloc-fix` already uses), which
+  Android's own init runs natively on `post-fs-data` -- after Android's own procfs remount, with
+  init's own ordering guarantee, no host-side polling race at all. Live-verified end to end on
+  two hosts (server01, jgustavo46) through the real creation route, and against the actual
+  previously-broken instance (`cifi-nuevo-nuevo`) after a recreate.
+
 ## [0.4.0] - 2026-10-30
 
 A second real install (jgustavo46, AMD Polaris) brought up from scratch and exercised end to end

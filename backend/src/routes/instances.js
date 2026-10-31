@@ -348,6 +348,10 @@ router.post('/', async (req, res) => {
       await moduleRunner.integrate(requiredModuleIds, containerId, {
         display: { width: display.width, height: display.height },
       });
+      // Not a module (see meminfoFix.js's own comment on why), but the same stage-4 window --
+      // Android's own init does the actual /proc/meminfo bind on boot from this, no docker-exec
+      // retry loop needed afterwards.
+      await meminfoFix.installRcTrigger(containerId, resources.memoryMb);
     } catch (e) {
       await runtime.remove(containerId, { force: true }).catch(() => {});
       await runtime.removeVolume(volumeName).catch(() => {});
@@ -386,7 +390,6 @@ router.post('/', async (req, res) => {
     await runtime.start(containerId);
     scheduleWifiFixes(instance);
     meminfoFix.scheduleRefresh(instance);
-    meminfoFix.scheduleBindMount(instance);
     // Stage 6: fire-and-forget post-boot fixups (the same pattern as
     // scheduleWifiFixes), they do not block the response.
     moduleRunner.scheduleRuntimeFixups(requiredModuleIds, containerId);
@@ -416,7 +419,6 @@ router.post('/:id/start', async (req, res) => {
     const reconciled = await reconcileDeviceProfile(instance);
     scheduleWifiFixes(reconciled);
     meminfoFix.scheduleRefresh(reconciled);
-    meminfoFix.scheduleBindMount(reconciled);
     moduleRunner.scheduleRuntimeFixups(requiredModuleIds, reconciled.containerId);
     moduleScheduler.start(reconciled.id, reconciled.containerId, requiredModuleIds);
     await applyKnockGuards(reconciled);
@@ -460,7 +462,6 @@ router.post('/:id/restart', async (req, res) => {
     const reconciled = await reconcileDeviceProfile(instance);
     scheduleWifiFixes(reconciled);
     meminfoFix.scheduleRefresh(reconciled);
-    meminfoFix.scheduleBindMount(reconciled);
     moduleRunner.scheduleRuntimeFixups(requiredModuleIds, reconciled.containerId);
     moduleScheduler.start(reconciled.id, reconciled.containerId, requiredModuleIds);
     await applyKnockGuards(reconciled);
@@ -779,6 +780,9 @@ router.post('/:id/display', async (req, res) => {
       await moduleRunner.integrate(requiredModuleIds, containerId, {
         display: { width: display.width, height: display.height },
       });
+      // Recreate means a brand new container -- the .rc installed in the old one is gone with
+      // it, needs reinstalling here same as the create route.
+      await meminfoFix.installRcTrigger(containerId, instance.memoryMb);
     } catch (e) {
       await runtime.remove(containerId, { force: true }).catch(() => {});
       throw e;
@@ -813,7 +817,6 @@ router.post('/:id/display', async (req, res) => {
       updated = await reconcileDeviceProfile(updated);
       scheduleWifiFixes(updated);
       meminfoFix.scheduleRefresh(updated);
-      meminfoFix.scheduleBindMount(updated);
       moduleRunner.scheduleRuntimeFixups(requiredModuleIds, containerId);
       moduleScheduler.start(updated.id, containerId, requiredModuleIds);
       // Same gate as the create route -- but there it is the ONLY place that ever calls this,

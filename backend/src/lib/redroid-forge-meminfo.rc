@@ -1,0 +1,8 @@
+# Part of meminfoFix.js's /proc/meminfo workaround (see that file's own comment for the full
+# story). Android's stock init.rc remounts a fresh procfs over /proc very early in boot (on
+# init/on fs) -- this trigger runs after that, in post-fs-data, and lays the real file (already
+# bind-mounted at container-create time onto /vendor/.redroid-forge-meminfo, a path Android's own
+# boot never touches) over /proc/meminfo itself, natively, with init's own ordering guarantee
+# instead of a host-side docker-exec retry loop racing against an unknown boot duration.
+on post-fs-data
+    mount none /vendor/.redroid-forge-meminfo /proc/meminfo bind
