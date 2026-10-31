@@ -634,33 +634,62 @@ function buildRestartEditRow(inst) {
   panel.appendChild(codecHeader);
 
   const ids = inst.requiredModuleIds || [];
+
+  // Encode: same mutually-exclusive-by-vendor select as the new-instance dialog (see
+  // updateEncodeSelect) -- this instance's own imageId/hwEncCapable are already on `inst`
+  // (set at creation, routes/instances.js), no catalog lookup needed.
+  const encodeWrap = document.createElement('label');
+  encodeWrap.className = 'display-edit-field';
+  const encodeSpan = document.createElement('span');
+  encodeSpan.textContent = t('new.encodeLabel');
+  const encodeSelect = document.createElement('select');
+  for (const [value, textKey] of [['', 'new.encodeNone'], ['hwenc', 'new.encodeHwenc'], ['nvenc', 'new.nvenc']]) {
+    const opt = document.createElement('option');
+    opt.value = value;
+    opt.textContent = t(textKey);
+    encodeSelect.appendChild(opt);
+  }
+  const optHwenc = encodeSelect.options[1];
+  const optNvenc = encodeSelect.options[2];
+  encodeSelect.value = ids.includes('nvenc') ? 'nvenc' : ids.includes('hwenc') ? 'hwenc' : '';
+  encodeWrap.appendChild(encodeSpan);
+  encodeWrap.appendChild(encodeSelect);
+  panel.appendChild(encodeWrap);
+  const encodeStatus = document.createElement('p');
+  encodeStatus.className = 'muted';
+  encodeStatus.hidden = true;
+  panel.appendChild(encodeStatus);
+
+  // Decode (hwdec): no vendor split -- the same module id works on AMD/Intel (VA-API) and
+  // NVIDIA (NVDEC), both only via gpuMode=host.
   const codecWarn = document.createElement('div');
   codecWarn.className = 'resources-warn';
   codecWarn.textContent = t('instances.codec.needsHost');
   panel.appendChild(codecWarn);
   const checks = {};
-  for (const [key, label] of [['hwenc', t('new.hwenc')], ['hwdec', t('new.hwdec')]]) {
-    const wrap = document.createElement('label');
-    wrap.className = 'display-edit-field';
-    wrap.style.flexDirection = 'row';
-    const chk = document.createElement('input');
-    chk.type = 'checkbox';
-    chk.checked = ids.includes(key);
-    checks[key] = chk;
-    wrap.appendChild(chk);
-    wrap.appendChild(document.createTextNode(label));
-    panel.appendChild(wrap);
-  }
-  // Mirrors the "new instance" form's setHwAccel: a module requiring gpuMode=host must not
-  // stay checkable (or checked) once the select is switched to guest, instead of only warning
+  const hwdecWrap = document.createElement('label');
+  hwdecWrap.className = 'display-edit-field';
+  hwdecWrap.style.flexDirection = 'row';
+  const hwdecChk = document.createElement('input');
+  hwdecChk.type = 'checkbox';
+  hwdecChk.checked = ids.includes('hwdec');
+  checks.hwdec = hwdecChk;
+  hwdecWrap.appendChild(hwdecChk);
+  hwdecWrap.appendChild(document.createTextNode(t('new.hwdec')));
+  panel.appendChild(hwdecWrap);
+
+  // Mirrors the "new instance" form: a module requiring a specific gpuMode must not stay
+  // checkable/selectable once the select is switched away from it, instead of only warning
   // and letting the apply fail server-side with a 409 from moduleGate.check.
   function refreshCodecAvailability() {
     const needsHost = gpuSelect.value !== 'host';
     codecWarn.hidden = !needsHost;
-    for (const chk of Object.values(checks)) {
-      chk.disabled = needsHost;
-      if (needsHost) chk.checked = false;
-    }
+    checks.hwdec.disabled = needsHost;
+    if (needsHost) checks.hwdec.checked = false;
+    updateEncodeSelect({
+      select: encodeSelect, optHwenc, optNvenc, status: encodeStatus,
+      imageId: inst.imageId, hwEncCapable: inst.hwEncCapable, gpuMode: gpuSelect.value,
+    });
   }
   gpuSelect.addEventListener('change', refreshCodecAvailability);
   refreshCodecAvailability();
@@ -854,7 +883,7 @@ function buildRestartEditRow(inst) {
   applyBtn.addEventListener('click', async () => {
     if (inst.status === 'running' && !confirm(t('instances.display.confirmRunning'))) return;
     const modules = ids.filter((id) => id === 'wifi-interno-virtwifi');
-    if (checks.hwenc.checked) modules.push('hwenc');
+    if (encodeSelect.value) modules.push(encodeSelect.value);
     if (checks.hwdec.checked) modules.push('hwdec');
     if (wifiChk.checked) modules.push('wifi-interno');
     if (gappsChk.checked) modules.push('gapps');
@@ -2497,24 +2526,29 @@ async function refreshHwAccelOption(id) {
 // NVIDIA, needs gpuMode=guest -- NVIDIA's gpuMode=host does not even boot). Whichever vendor
 // this host does NOT have is hidden outright (it will never work on this hardware, not merely
 // "needs a setting changed"); the one that does apply is only disabled, with a hint, when
-// gpuMode does not match yet -- that is a live, user-adjustable choice in this same form.
-async function refreshEncodeOption() {
-  const img = imagesById[$('#image-select').value];
-  const select = $('#select-encode');
-  const optHwenc = $('#opt-encode-hwenc');
-  const optNvenc = $('#opt-encode-nvenc');
-  const status = $('#encode-status');
+// gpuMode does not match yet -- that is a live, user-adjustable choice, in either form that uses
+// this (the new-instance dialog and the per-instance Configure panel, see buildRestartEditRow).
+//
+// gpuMode here must already be the EFFECTIVE value ('host'/'guest', never '' / image-default) --
+// callers resolve that themselves, since what "default" means differs between the two forms.
+// Compared against `compatibleCon.gpuMode` from the API response (the manifest's own declared
+// requirement) rather than its `compatible` field: that field is computed server-side against
+// the catalog image's own DEFAULT gpuMode, not whatever the user has live-selected in the form.
+// `isStale`, if given, is checked right after the API calls resolve (before touching the DOM)
+// so a caller whose own selection can change while this is in flight (the new-instance dialog's
+// image picker) can bail out instead of applying a now-outdated result.
+async function updateEncodeSelect({ select, optHwenc, optNvenc, status, imageId, hwEncCapable, gpuMode, isStale }) {
   const setStatus = (text, tone) => {
     status.hidden = !text;
     status.className = tone || 'muted';
     status.textContent = text || '';
   };
-  if (!img || !img.hwEncCapable) {
+  if (!imageId || !hwEncCapable) {
     optHwenc.hidden = true;
     optNvenc.hidden = true;
     select.value = '';
     select.disabled = true;
-    setStatus(img ? t('new.encodeNoImage') : '', 'muted');
+    setStatus(imageId ? t('new.encodeNoImage') : '', 'muted');
     return;
   }
   select.disabled = false;
@@ -2523,19 +2557,19 @@ async function refreshEncodeOption() {
   let nvenc;
   try {
     [hwenc, nvenc] = await Promise.all([
-      api(`/modules/hwenc?imageId=${encodeURIComponent(img.id)}`),
-      api(`/modules/nvenc?imageId=${encodeURIComponent(img.id)}`),
+      api(`/modules/hwenc?imageId=${encodeURIComponent(imageId)}`),
+      api(`/modules/nvenc?imageId=${encodeURIComponent(imageId)}`),
     ]);
   } catch (e) {
     setStatus(t('common.error', { msg: e.message }), 'fail-text');
     return;
   }
-  if (imagesById[$('#image-select').value] !== img) return; // another image was chosen meanwhile
+  if (isStale && isStale()) return;
 
   optHwenc.hidden = !hwenc.hostCompatible;
   optNvenc.hidden = !nvenc.hostCompatible;
-  optHwenc.disabled = optHwenc.hidden || !hwenc.compatible;
-  optNvenc.disabled = optNvenc.hidden || !nvenc.compatible;
+  optHwenc.disabled = optHwenc.hidden || !hwenc.compatibleCon.gpuMode.includes(gpuMode);
+  optNvenc.disabled = optNvenc.hidden || !nvenc.compatibleCon.gpuMode.includes(gpuMode);
   if ((select.value === 'hwenc' && optHwenc.disabled) || (select.value === 'nvenc' && optNvenc.disabled)) {
     select.value = '';
   }
@@ -2549,6 +2583,22 @@ async function refreshEncodeOption() {
   } else {
     setStatus(t('new.hwencOk', { vendor: hwenc.hostGpuVendor || nvenc.hostGpuVendor || '?' }), 'ok-text');
   }
+}
+async function refreshEncodeOption() {
+  const img = imagesById[$('#image-select').value];
+  if (!img) {
+    await updateEncodeSelect({
+      select: $('#select-encode'), optHwenc: $('#opt-encode-hwenc'), optNvenc: $('#opt-encode-nvenc'),
+      status: $('#encode-status'), imageId: null, hwEncCapable: false, gpuMode: null,
+    });
+    return;
+  }
+  const effectiveGpuMode = $('#new-instance-form').gpuMode.value || img.gpuMode;
+  await updateEncodeSelect({
+    select: $('#select-encode'), optHwenc: $('#opt-encode-hwenc'), optNvenc: $('#opt-encode-nvenc'),
+    status: $('#encode-status'), imageId: img.id, hwEncCapable: img.hwEncCapable, gpuMode: effectiveGpuMode,
+    isStale: () => imagesById[$('#image-select').value] !== img,
+  });
 }
 function refreshHwencOption() {
   refreshEncodeOption();
