@@ -92,9 +92,15 @@ async function patchGpuConfigSh(containerId) {
   const tmpPath = path.join(os.tmpdir(), `venus3d-${containerId.slice(0, 12)}-gpu_config.sh`);
   await execFileAsync('docker', ['cp', `${containerId}:${GPU_CONFIG_SH_PATH}`, tmpPath]);
   const original = fs.readFileSync(tmpPath, 'utf-8');
+  // Also forces SurfaceFlinger's RenderEngine to the Vulkan backend (debug.renderengine.backend,
+  // see frameworks/native/services/surfaceflinger/SurfaceFlinger.cpp) -- its own default
+  // auto-detect still picked the GL backend in this tree (confirmed: SkiaGLRenderEngine, not
+  // SkiaVkRenderEngine, was what actually crashed trying classic DRI2/GBM against /dev/dri/card0,
+  // completely bypassing the Venus/vtest Vulkan ICD this module installs). This is the real,
+  // final piece that makes the guest's Vulkan path the one actually exercised at all.
   let patched = original.replace(
     /(\n\s*panfrost\)\n\s*setprop ro\.hardware\.vulkan panfrost\n\s*;;\n)/,
-    '$1        nvidia-drm)\n            setprop ro.hardware.vulkan virtio\n            setprop ro.hardware.gralloc cros\n            ;;\n',
+    '$1        nvidia-drm)\n            setprop ro.hardware.vulkan virtio\n            setprop ro.hardware.gralloc cros\n            setprop debug.renderengine.backend skiavkthreaded\n            ;;\n',
   );
   patched = patched.replace(
     /(gpu_setup_host\(\) \{\n\s*echo "use GPU host mode"\n\n\s*setprop ro\.hardware\.egl mesa\n)\s*setprop ro\.hardware\.gralloc gbm\n/,
