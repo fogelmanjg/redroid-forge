@@ -634,13 +634,10 @@ function buildRestartEditRow(inst) {
   panel.appendChild(codecHeader);
 
   const ids = inst.requiredModuleIds || [];
-  const needsHost = gpuSelect.value !== 'host';
-  if (needsHost) {
-    const warn = document.createElement('div');
-    warn.className = 'resources-warn';
-    warn.textContent = t('instances.codec.needsHost');
-    panel.appendChild(warn);
-  }
+  const codecWarn = document.createElement('div');
+  codecWarn.className = 'resources-warn';
+  codecWarn.textContent = t('instances.codec.needsHost');
+  panel.appendChild(codecWarn);
   const checks = {};
   for (const [key, label] of [['hwenc', t('new.hwenc')], ['hwdec', t('new.hwdec')]]) {
     const wrap = document.createElement('label');
@@ -654,6 +651,19 @@ function buildRestartEditRow(inst) {
     wrap.appendChild(document.createTextNode(label));
     panel.appendChild(wrap);
   }
+  // Mirrors the "new instance" form's setHwAccel: a module requiring gpuMode=host must not
+  // stay checkable (or checked) once the select is switched to guest, instead of only warning
+  // and letting the apply fail server-side with a 409 from moduleGate.check.
+  function refreshCodecAvailability() {
+    const needsHost = gpuSelect.value !== 'host';
+    codecWarn.hidden = !needsHost;
+    for (const chk of Object.values(checks)) {
+      chk.disabled = needsHost;
+      if (needsHost) chk.checked = false;
+    }
+  }
+  gpuSelect.addEventListener('change', refreshCodecAvailability);
+  refreshCodecAvailability();
 
   // --- Internal WiFi ---
   const wifiHeader = document.createElement('div');
