@@ -20,8 +20,12 @@ const hwAccel = require('./hwAccel');
 
 const execFileAsync = promisify(execFile);
 
-const ARTIFACTS_DIR = process.env.REDROID_HWENC_ARTIFACTS_DIR
-  || '/home/jgustavo/aosp-out-redroid15/target/product/redroid_x86_64/vendor';
+// No hardcoded fallback on purpose -- this used to default to this project's own author's
+// personal AOSP build path, which silently "worked" only on machines that happened to share
+// that exact username and folder layout, and gave a confusing "artifact is missing" error
+// (pointing at a path that was never meant to exist) on every other host. See installFiles()
+// below for the explicit "not configured at all" error this now produces instead.
+const ARTIFACTS_DIR = process.env.REDROID_HWENC_ARTIFACTS_DIR || null;
 
 // Relative path inside ARTIFACTS_DIR -> the same path inside the instance's /vendor.
 // Transitive closure of dependencies computed by hand (readelf -d on the binary + its .so
@@ -205,6 +209,11 @@ async function copyIntoContainer(containerId, srcPath, destRelPath) {
 // both hwenc and hwdec are active on the same instance, the second call just re-copies the
 // same files.
 async function installFiles(containerId) {
+  if (!ARTIFACTS_DIR) {
+    throw new Error('REDROID_HWENC_ARTIFACTS_DIR is not set -- hwenc/hwdec need a local folder with the '
+      + 'AOSP-built Codec2 VA-API artifacts (see backend/src/modules/hwenc/README.md, "Pending"), and there '
+      + 'is no default to fall back to.');
+  }
   log(`injecting ${FILES.length} files into ${containerId}...`);
   for (const relPath of FILES) {
     await copyIntoContainer(containerId, path.join(ARTIFACTS_DIR, relPath), relPath);

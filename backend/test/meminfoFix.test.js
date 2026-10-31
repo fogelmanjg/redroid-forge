@@ -104,13 +104,13 @@ test("refresh reads the container's real cgroup usage and rewrites the host file
     fs.writeFileSync(path.join(cg, 'memory.current'), '1073741824\n'); // 1 GiB used
     fs.writeFileSync(path.join(cg, 'memory.stat'), 'anon 536870912\nfile 268435456\nkernel_stack 1000\n');
 
-    const instance = { id: 'inst-1', name: 'refresh-instance', memoryMb: 4096, containerId };
+    const instance = { id: 'inst-1', name: 'refresh-instance', volumeName: 'redroid-forge-refresh-instance', memoryMb: 4096, containerId };
     store.upsert(instance);
-    meminfoFix.prepareBinds(instance.name, instance.memoryMb);
+    meminfoFix.prepareBinds(instance.volumeName, instance.memoryMb);
 
     meminfoFix.refresh(instance.id);
 
-    const content = fs.readFileSync(meminfoFix.hostFilePath(instance.name), 'utf8');
+    const content = fs.readFileSync(meminfoFix.hostFilePath(instance.volumeName), 'utf8');
     assert.match(content, /MemTotal:\s+4194304 kB/);
     assert.match(content, /MemFree:\s+3145728 kB/); // 4096MB - 1GB used, in kB
     assert.match(content, /Cached:\s+262144 kB/); // the "file" line of memory.stat, in kB
@@ -179,6 +179,28 @@ test('scheduleBindMount is a no-op for an instance with no memory cap (never exe
     assert.doesNotThrow(() => meminfoFix.scheduleBindMount({ id: 'x', memoryMb: null, containerId: 'c4' }));
   },
 ));
+
+// Regression (30/10/2026): renaming an instance (routes/instances.js's PUT /:id/name) used to
+// also rename this module's on-disk directory to match the new `name`, reasoning that a bind
+// mount follows the inode, not the path -- true only while that exact mount stays continuously
+// active. The container's HostConfig.Binds is a path STRING frozen at create time; the next time
+// Docker has to (re)mount it (any stop/restart after the rename), it re-resolves that frozen old
+// path, finds nothing there any more, and silently creates a DIRECTORY in its place -- which then
+// fails to bind-mount onto a file target and the container can never start again. Found for real
+// on a live instance. Fixed by keying everything off volumeName (immutable once set at creation,
+// never re-derived from the renamable `name`) instead, so a rename has nothing to keep in sync.
+test("prepareBinds/hostFilePath are keyed by volumeName, which an instance rename never touches -- renaming `name` alone can't orphan the bind", () => {
+  const instance = { id: 'inst-5', name: 'original-name', volumeName: 'redroid-forge-original-name', memoryMb: 2048, containerId: null };
+  meminfoFix.prepareBinds(instance.volumeName, instance.memoryMb);
+  const fileBeforeRename = meminfoFix.hostFilePath(instance.volumeName);
+  assert.ok(fs.existsSync(fileBeforeRename));
+
+  // Simulate the rename route: only `name` changes, volumeName (and therefore every meminfoFix
+  // path) stays exactly as it was -- nothing here needs renaming or moving.
+  const renamed = { ...instance, name: 'renamed-name' };
+  assert.strictEqual(meminfoFix.hostFilePath(renamed.volumeName), fileBeforeRename);
+  assert.ok(fs.existsSync(meminfoFix.hostFilePath(renamed.volumeName)), 'still the same file, nothing moved');
+});
 
 test("cleanup removes the instance's generated directory", () => {
   meminfoFix.prepareBinds('to-delete', 2048);

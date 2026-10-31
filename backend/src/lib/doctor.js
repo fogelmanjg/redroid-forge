@@ -204,6 +204,20 @@ async function checkHwAccel() {
 
   try {
     await hwAccel.ensureDaemonRunning();
+    // Found for real (30/10/2026): a second install (not this project's own dev host) never had
+    // this set, defaulting to all-intra (every frame a full IDR) -- fine at a high bitrate, but
+    // visibly degraded at the low bitrates this project's typical use (scrcpy over a slow link)
+    // actually needs. It was live-misdiagnosed as a colour bug before this env var turned out to
+    // be the real cause (see CHANGELOG). Validated so far on AMD only (gop_config_init in
+    // daemon.c disables it on Intel's iHD driver unless forced) -- not suggested for other
+    // vendors until that is tried too.
+    const idrPeriod = Number(process.env.REDROID_FORGE_ENCODE_IDR_PERIOD || '1');
+    if (vendor === 'amd' && anyNeedsHwEnc && !(idrPeriod > 1)) {
+      return {
+        status: 'warn',
+        detail: `${vendor} GPU detected, VA-API daemon (hwenc) running at ${hwAccel.SOCKET_PATH}, but encoding all-intra (every frame a full IDR) -- fine at a high bitrate, visibly worse at a low one. Set REDROID_FORGE_ENCODE_IDR_PERIOD=120 in .env and restart to enable P-frames (validated on AMD; see docs/ROADMAP.md Phase 2).`,
+      };
+    }
     return {
       status: 'ok',
       detail: `${vendor} GPU detected, VA-API daemon (hwenc) running at ${hwAccel.SOCKET_PATH}.`,

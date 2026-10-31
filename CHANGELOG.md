@@ -21,8 +21,55 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-10-30
+
+A second real install (jgustavo46, AMD Polaris) brought up from scratch and exercised end to end
+against this release line -- not just server01 any more. Every bug below was found live on that
+second machine, several only because it exists: a hardcoded personal path, a missing per-host env
+var, a rename-then-restart sequence nobody had tried yet.
+
+### Added
+
+- Instance rename (pencil icon next to the name, `PUT /api/instances/:id/name`): renames the
+  instance and, cosmetically, the underlying Docker container's own `--name` too (nothing in this
+  codebase looks a container up by name). Validates and uniqueness-checks the new name; id, data
+  volume and running state are untouched either way. Names are normalized automatically instead of
+  being rejected outright (lowercased, spaces/underscores to hyphens, disallowed characters
+  stripped) -- applies at creation too, not just rename.
+- RAM can now actually be lowered on a running instance: stops it, applies the lower cap, restarts
+  it, with a confirmation prompt first. Previously this was simply blocked ("does not reliably take
+  effect"). Raising RAM live is unchanged.
+- Doctor warns when hwenc is encoding all-intra (`REDROID_FORGE_ENCODE_IDR_PERIOD` unset, AMD only
+  for now) instead of using P-frames -- see the colour-matrix misdiagnosis below, this is the real
+  fix for it, and the next install should not have to rediscover it live.
+
 ### Fixed
 
+- Renaming an instance could permanently break its ability to ever restart. `meminfoFix`'s
+  bind-mounted file was keyed by the renamable `name`, but a container's `HostConfig.Binds` is a
+  path string frozen at creation time -- the next (re)start after a rename re-resolved that
+  now-missing old path, and Docker silently created a *directory* there instead of finding the
+  expected file, which then fails to bind-mount at all. Keyed everything off `volumeName` instead,
+  which a rename never touches, so there is nothing left to keep in sync.
+- An instance that gained the `gapps` module after creation (via the Configure panel) never had
+  `hasGapps` recomputed on recreate -- hid the Android-ID registration UI and never scheduled the
+  Android ID fetch. The `/display` recreate route now recomputes it the same way it already did
+  `needsHwsimWifi`, and schedules the fetch when it newly becomes true.
+- The auto-refresh poll (every few seconds) closed the inline rename editor mid-type.
+- A washed-out/low-quality picture over scrcpy, reported live against the second install, was
+  live-misdiagnosed first as an H.264 colour-matrix bug (missing VUI signalling in the SPS) --
+  two different VUI/matrix attempts changed nothing, which was the tell. The real cause: hwenc
+  defaults to all-intra (every frame a full IDR) until `REDROID_FORGE_ENCODE_IDR_PERIOD` is set
+  per host, and the second install never had it -- fine at a high bitrate, visibly degraded at the
+  low ones this project's typical use (scrcpy over a slow link) actually needs. Confirmed live at
+  both 8Mbps and 1Mbps once set. See the new Doctor warning above.
+- `REDROID_HWENC_ARTIFACTS_DIR` silently defaulted to this project's own author's personal AOSP
+  build path when unset -- worked by accident only on a machine with that exact username and
+  folder layout, and gave a confusing "artifact is missing" error pointing at a path that was
+  never meant to exist on every other host. Now required explicitly, with a clear error naming
+  what is actually missing.
+- VA-API daemon's native build (`Makefile`) was missing `-lm`, a link failure on at least one
+  host's toolchain (unresolved `exp` symbol from the H.264 decoder).
 - Doctor's fix message for a missing catalog image, and the README's "Bringing the redroid image
   to this PC" section, both assumed the image had to be custom-built elsewhere or pushed to your
   own registry -- neither ever mentioned that the catalog's default image
@@ -30,6 +77,11 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
   anyone needs. Found doing a from-scratch install on a machine with nothing pre-configured,
   following only the public README (no fleet-specific shortcuts) -- the README was also missing
   the `git clone` step entirely, jumping straight to `docker compose up -d --build`.
+- README's feature table now flags AMD Polaris as not recommended for hardware decode at the same
+  time as hwenc -- known driver instability (GPU reset, `VRAM is lost`) already documented in
+  `docs/ROADMAP.md` Phase 2, repeated enough times in real use to move from "investigate root
+  cause" to an operational recommendation. Encode alone is unaffected; this does not change any
+  code (`HWDEC` stays a build-time choice either way).
 
 ## [0.3.1] - 2026-10-30
 

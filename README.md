@@ -35,7 +35,7 @@ means validated with evidence on real hardware, not a guarantee.
 |---|---|---|
 | **Instance lifecycle** | ✅ | Create/start/stop/restart/delete from a web UI. Live CPU/RAM resize (no restart). Resolution/DPI/FPS/GPU-mode changes recreate the container but keep its data. |
 | **Hardware video encode** | ✅ AMD · Intel | VA-API, validated on real Polaris/Vega/Iris Xe hardware. "Every instance uses in hardware everything the host's GPU offers" — nothing hidden behind one fixed capability tier. |
-| **Hardware video decode** | ✅ AMD · Intel | H.264/HEVC/VP9/VP8 depending on what the host's GPU actually supports (Doctor shows which). |
+| **Hardware video decode** | ✅ AMD · Intel | H.264/HEVC/VP9/VP8 depending on what the host's GPU actually supports (Doctor shows which). **Not recommended on AMD Polaris at the same time as hwenc** — known driver instability when both run concurrently (see `docs/ROADMAP.md` Phase 2); encode alone is unaffected. |
 | | 🧪 NVIDIA | NVENC/NVDEC exist as a proof of the mechanism (single intra frame, no B-frames) — not production use yet. |
 | **Compatibility database** | ✅ | Signed, versioned, anti-rollback database of which image+module combinations are actually validated. Checked automatically, shown per instance, never blocks — an unvalidated combo still runs, just marked "community". |
 | **Optional modules, with consent** | ✅ | Google Apps/Play Store, ARM translation (arm64 apps on x86), fake WiFi, device profile spoofing, GPU mode — each behind an explicit contract dialog the first time it's used, never silently enabled. |

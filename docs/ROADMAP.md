@@ -243,6 +243,21 @@ Venus-proxy, NVENC), with already-known driver quirks (e.g. the scanline artifac
      (1 s, doubling up to 30 s; back to 1 s if it lived more than a minute). Tested by killing it with
      SIGKILL: it comes back in 1 s.
 
+   **30/10/2026 — escalated from "investigate root cause" to an operational recommendation: do not
+   enable `HWDEC` on AMD Polaris.** The user has since reproduced this same Polaris VCE hang/GPU-reset
+   enough times in real use (independently of this specific test) to be confident it is not a fluke of
+   that one session, and decided it is not worth chasing the exact root cause (power gating reactivation
+   vs the memory clock jump, both still unverified above) before recommending against the combination.
+   This is specifically about **hardware decode and hardware encode running at the same time on Polaris**
+   -- the paragraph above already notes "no repro with decode alone", and this does not affect hwenc by
+   itself (the far more valuable half for this project: every scrcpy session needs it, while hardware
+   decode only matters for in-instance video playback, e.g. YouTube/SmartTube, a use case with much less
+   real demand). On AMD Polaris specifically: build with `HWDEC=0`, or leave it on but do not enable
+   hardware decode in whatever consumes the stream, and keep hwenc. **Not yet investigated: whether
+   software decode (Android's own) alongside hwenc is actually stable on Polaris** -- the user's own next
+   step, to be verified in real use before writing it up as confirmed, not assumed from this not having
+   crashed yet.
+
    **Intel Iris Xe (n02, 07/10/2026): all verified.** H.264 720p/1080p, HEVC 1080p, HEVC Main10, VP9 and VP9
    profile 2 (10-bit): frames identical to the reference (0 different) in the three codecs, with shared
    memory and the direct download through `vaDeriveImage`+SSE: **on Intel it did not fall back to the ffmpeg

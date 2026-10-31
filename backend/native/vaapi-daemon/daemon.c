@@ -161,8 +161,22 @@ static void build_sps_rbsp(bitstream_t *bs, const VAEncSequenceParameterBufferH2
         bs_put_ue(bs, seq->frame_crop_top_offset);
         bs_put_ue(bs, seq->frame_crop_bottom_offset);
     }
+    /* vui_parameters_present_flag. Reverted (30/10/2026): tried declaring the VUI colour matrix
+     * explicitly (first BT.601 to match convert_rgba_to_nv12's conversion, then BT.709 to test
+     * whether scrcpy's renderer ignores VUI and assumes a fixed matrix instead) -- neither
+     * version changed the washed-out picture reported live against cifi-nuevo-nuevo on
+     * jgustavo46, so colour matrix is being ruled out as the cause for now, isolated back out to
+     * retest the GOP/P-frames angle (REDROID_FORGE_ENCODE_IDR_PERIOD) on its own. Revisit if that
+     * doesn't fix it either -- the two VUI attempts are recoverable from git history/this comment
+     * if colour needs a second look. Deliberately NOT calling bs_rbsp_trailing_bits(bs) here:
+     * adding it (30/10/2026, same session) broke scrcpy's own SPS parsing for recording
+     * ("Failed to write header", reproducible on a warm daemon, not a cold-start race) even
+     * though the live --no-window path and the confirmed-working P-frames test both predate that
+     * change. Root cause not investigated -- reverted to match the exact bitstream the user
+     * already validated live (8Mbps and 1Mbps, both "perfecto") rather than chase it further
+     * live. Investigate bs_rbsp_trailing_bits() / how this RBSP's bit length is used downstream
+     * before trying this again. */
     bs_put_bit(bs, 0);
-    bs_rbsp_trailing_bits(bs);
 }
 
 static void build_pps_rbsp(bitstream_t *bs, const VAEncPictureParameterBufferH264 *pic) {
@@ -538,6 +552,10 @@ static int convert_rgba_to_nv12(vaapi_state_t *st, VASurfaceID rgba_surface,
     pipeline_param.surface_region = &region;
     pipeline_param.output_region = &region;
     pipeline_param.surface_color_standard = VAProcColorStandardNone;
+    /* Reverted to BT601 (30/10/2026): neither this nor a BT709 + matching VUI attempt changed the
+     * washed-out picture reported live against cifi-nuevo-nuevo on jgustavo46 -- see
+     * build_sps_rbsp's comment. Colour matrix ruled out for now; isolating the GOP/P-frames
+     * angle next. */
     pipeline_param.output_color_standard = VAProcColorStandardBT601;
 
     VABufferID pipeline_buf;

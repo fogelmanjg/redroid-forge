@@ -86,6 +86,13 @@ async function restart(containerId) {
   await docker.getContainer(containerId).restart();
 }
 
+// Unlike anything touching HostConfig (binds, resources at creation, ...), the container's
+// own --name is just a label Docker lets you change on a live object -- works running or
+// stopped, no recreate, no downtime.
+async function rename(containerId, newName) {
+  await docker.getContainer(containerId).rename({ name: newName });
+}
+
 async function remove(containerId, { force = false } = {}) {
   const c = docker.getContainer(containerId);
   if (force) await c.stop().catch(() => {});
@@ -243,6 +250,6 @@ async function runEphemeral(image, cmd, binds, timeoutMs = 30000) {
 }
 
 module.exports = {
-  docker, listLocalImageTags, create, start, stop, restart, remove, removeVolume,
+  docker, listLocalImageTags, create, start, stop, restart, remove, removeVolume, rename,
   inspect, inspectVolume, getImageDigest, getPid, getBridgeIp, exec, runEphemeral, readLogs, readFile, updateResources,
 };

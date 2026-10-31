@@ -38,6 +38,22 @@ async function api(path, opts) {
   return res.json();
 }
 
+// Matches the backend's own name rule (routes/instances.js, both at creation and at
+// PUT /:id/name): lowercase letters, digits and hyphens, 1-40 chars, not starting with a
+// hyphen. Rather than reject "cifi nuevo nuevo" outright, turn whitespace/underscores into
+// hyphens and drop anything else not allowed -- the same one-time papercut otherwise hits both
+// the create form and the rename field for the exact same rule.
+function normalizeInstanceName(raw) {
+  return raw
+    .trim()
+    .toLowerCase()
+    .replace(/[\s_]+/g, '-')
+    .replace(/[^a-z0-9-]/g, '')
+    .replace(/-+/g, '-')
+    .replace(/^-+/, '')
+    .slice(0, 40);
+}
+
 // Copies text to the clipboard. navigator.clipboard only exists in a "secure context" (https or
 // localhost): when the UI is opened by IP over plain http (e.g. through Tailscale) it is missing, so
 // there is a fallback that uses a temporary textarea. Both have to be called from a user gesture.
@@ -132,6 +148,10 @@ async function loadHostCoreCount() {
 let openNoRestartId = null;
 let openRestartId = null;
 let openOwnersId = null;
+// Same purpose as the others above but for the inline name edit (pencil next to the name,
+// buildInstanceRow below): without this, the background auto-poll's loadInstances({silent:true})
+// rebuilds the row mid-edit and silently throws away whatever the user had just typed.
+let openRenameId = null;
 // {id, username} for every known account/identity -- fetched lazily the first time the Owners
 // panel opens (see its toggle button below), same pattern as userModulesCache/
 // networkInterfacesCache for the other edit panels.
@@ -397,28 +417,16 @@ function buildResourcesEditRow(inst, allInstances) {
   renderWarnings();
   panel.appendChild(warnBox);
 
-  const cpuApplyBtn = document.createElement('button');
-  cpuApplyBtn.type = 'button';
-  cpuApplyBtn.className = 'secondary';
-  cpuApplyBtn.textContent = t('instances.resources.apply');
-  cpuApplyBtn.addEventListener('click', async () => {
-    if (selected.size === 0) return;
-    cpuApplyBtn.disabled = true;
-    try {
-      await applyResources(inst.id, { cpusetCpus: coreSetToCpuset(selected) });
-      openNoRestartId = null;
-    } catch (e) {
-      alert(e.message);
-    } finally {
-      cpuApplyBtn.disabled = false;
-      await loadInstances({ silent: true });
-    }
-  });
-  panel.appendChild(cpuApplyBtn);
-
-  // --- RAM: a plain MB input, but it can only be RAISED live (same rule jg-dashboard already
-  // learned: Docker's Update API lowering a running cgroup's limit below what it may already be
-  // using is not something to do blind from here -- lowering needs a real recreate instead).
+  // --- RAM: unlike cpuset, raising it is always a plain Docker live update. Lowering a RUNNING
+  // container's memory.max means the kernel has to reclaim pages the instance is already using
+  // right now -- confirmed for real against jg-dashboard (user tested it directly): it also just
+  // calls Docker's live update for a lower value, no separate recreate path despite its own UI
+  // text -- and in practice it does not take effect while running (the call is wrapped in
+  // try/catch there and the failure is only logged, never surfaced, which from the UI looks
+  // exactly like "no me deja bajarla"). So here: raising while running goes straight through;
+  // lowering while running is confirmed first, then done as stop -> apply -> start (both values
+  // just become the next start()'s container creation, no live-update risk at all) -- never a
+  // silent attempt the user can't tell failed.
   const ramHeader = document.createElement('div');
   ramHeader.className = 'resources-edit-header';
   ramHeader.textContent = t('instances.resources.ramHeader');
@@ -426,54 +434,47 @@ function buildResourcesEditRow(inst, allInstances) {
 
   const ramInput = document.createElement('input');
   ramInput.type = 'number';
-  ramInput.min = '256'; // matches jg-dashboard's rd-input-sm (min/step 256)
+  ramInput.min = '1024'; // starting point, not 256: redroid under 1 GB is not a realistic choice
   ramInput.max = '65536';
-  ramInput.step = '256';
-  ramInput.placeholder = 'MB';
+  ramInput.step = '256'; // matches jg-dashboard's rd-input-sm
+  ramInput.placeholder = t('instances.resources.ramNoLimit');
   ramInput.value = inst.memoryMb || '';
   panel.appendChild(ramInput);
+  panel.appendChild(document.createTextNode(' MB'));
 
-  const ramWarn = document.createElement('div');
-  panel.appendChild(ramWarn);
-
-  const ramApplyBtn = document.createElement('button');
-  ramApplyBtn.type = 'button';
-  ramApplyBtn.className = 'secondary';
-  ramApplyBtn.textContent = t('instances.resources.apply');
-
-  // Lowering a RUNNING container's memory.max means the kernel has to reclaim pages the
-  // instance is already using right now to get under the new limit -- confirmed for real
-  // against jg-dashboard (user tested it directly): it also just calls Docker's live update
-  // for a lower value, no separate recreate path despite its own UI text -- and in practice
-  // it does not take effect while running (the call is wrapped in try/catch there and the
-  // failure is only logged, never surfaced, which from the UI looks exactly like "no me deja
-  // bajarla"). So: block it the same way, but say why, and point at the real fix -- stop the
-  // instance (then raising OR lowering both just become the next start()'s container creation,
-  // no live-update risk at all).
-  function isLowering(v) {
-    return !!inst.memoryMb && v > 0 && v < inst.memoryMb;
+  if (inst.status === 'running') {
+    const ramHint = document.createElement('div');
+    ramHint.className = 'resources-warn';
+    ramHint.textContent = t('instances.resources.ramLowerHint');
+    panel.appendChild(ramHint);
   }
-  function refreshRamState() {
-    const v = Number(ramInput.value);
-    const blocked = isLowering(v) && inst.status === 'running';
-    ramWarn.innerHTML = blocked ? `<div class="resources-warn">${t('instances.resources.ramLowerBlocked')}</div>` : '';
-    ramApplyBtn.disabled = !v || blocked;
-  }
-  ramInput.addEventListener('input', refreshRamState);
-  refreshRamState();
 
-  ramApplyBtn.addEventListener('click', async () => {
-    ramApplyBtn.disabled = true;
+  const applyBtn = document.createElement('button');
+  applyBtn.type = 'button';
+  applyBtn.className = 'secondary';
+  applyBtn.textContent = t('instances.resources.apply');
+  applyBtn.addEventListener('click', async () => {
+    if (selected.size === 0) return;
+    const memoryMb = ramInput.value === '' ? undefined : Number(ramInput.value);
+    const lowering = memoryMb !== undefined && !!inst.memoryMb && memoryMb < inst.memoryMb;
+    if (lowering && inst.status === 'running' && !confirm(t('instances.resources.ramLowerConfirm'))) return;
+    applyBtn.disabled = true;
     try {
-      await applyResources(inst.id, { memoryMb: Number(ramInput.value) });
+      if (lowering && inst.status === 'running') {
+        await api(`/instances/${inst.id}/stop`, { method: 'POST' });
+        await applyResources(inst.id, { cpusetCpus: coreSetToCpuset(selected), memoryMb });
+        await api(`/instances/${inst.id}/start`, { method: 'POST' });
+      } else {
+        await applyResources(inst.id, { cpusetCpus: coreSetToCpuset(selected), memoryMb });
+      }
       openNoRestartId = null;
+      await loadInstances({ silent: true });
     } catch (e) {
       alert(e.message);
-    } finally {
-      await loadInstances({ silent: true });
+      applyBtn.disabled = false;
     }
   });
-  panel.appendChild(ramApplyBtn);
+  panel.appendChild(applyBtn);
 
   const cancelBtn = document.createElement('button');
   cancelBtn.type = 'button';
@@ -728,8 +729,10 @@ function buildRestartEditRow(inst) {
 
   // --- Port-knocking (docs/ROADMAP.md Phase 9): per bound interface (localhost/wildcard
   // excluded -- see instanceParams.parseKnockRequiredHosts for why), whether the ADB port
-  // requires a knock before it answers at all. Saved independently of the "Apply" button
-  // above -- unlike bindHosts, this never needs a container recreate (lib/fwknop.js).
+  // requires a knock before it answers at all. Applied together with everything else below
+  // (single "Apply" button) even though, unlike bindHosts, this alone never needs a container
+  // recreate (lib/fwknop.js) -- two "Apply"/"Guardar" buttons on the same panel was the exact
+  // confusion already fixed once for device profile; no reason to leave a second one here.
   const knockHeader = document.createElement('div');
   knockHeader.className = 'resources-edit-header';
   knockHeader.textContent = t('instances.knock.header');
@@ -751,27 +754,11 @@ function buildRestartEditRow(inst) {
     panel.appendChild(wrap);
   }
 
-  if (knockChecks.length) {
-    // Opening access itself is a routine, frequent action (every time someone wants to
-    // connect), not a configuration change -- it lives in its own top-level row
-    // (buildAdbAccessEditRow, next to the "Storage" button) instead of here. This panel only
-    // ever decides WHICH interfaces are gated at all, which is the rare, admin-y part.
-    const knockSaveBtn = document.createElement('button');
-    knockSaveBtn.type = 'button';
-    knockSaveBtn.className = 'secondary';
-    knockSaveBtn.textContent = t('instances.knock.save');
-    knockSaveBtn.addEventListener('click', async () => {
-      knockSaveBtn.disabled = true;
-      try {
-        const knockRequiredHosts = knockChecks.filter(({ chk }) => chk.checked).map(({ address }) => address);
-        await api(`/instances/${inst.id}/knock-hosts`, { method: 'PUT', body: JSON.stringify({ knockRequiredHosts }) });
-      } finally {
-        knockSaveBtn.disabled = false;
-        await loadInstances({ silent: true });
-      }
-    });
-    panel.appendChild(knockSaveBtn);
-  }
+  // Opening access itself is a routine, frequent action (every time someone wants to
+  // connect), not a configuration change -- it lives in its own top-level row
+  // (buildAdbAccessEditRow, next to the "Storage" button) instead of here. This panel only
+  // ever decides WHICH interfaces are gated at all, which is the rare, admin-y part -- saved
+  // by the single "Apply" button further down, not its own button.
 
   // --- Optional modules: gapps/arm-translation (hardcoded, same as the create form) plus
   // whatever stage-7 "user modules" the catalog has (CIFI today, see loadUserModulesCache) --
@@ -827,46 +814,12 @@ function buildRestartEditRow(inst) {
     panel.appendChild(wrap);
   }
 
-  const applyBtn = document.createElement('button');
-  applyBtn.type = 'button';
-  applyBtn.className = 'secondary';
-  applyBtn.textContent = t('instances.resources.apply');
-  applyBtn.addEventListener('click', async () => {
-    if (inst.status === 'running' && !confirm(t('instances.display.confirmRunning'))) return;
-    applyBtn.disabled = true;
-    try {
-      const modules = ids.filter((id) => id === 'wifi-interno-virtwifi');
-      if (checks.hwenc.checked) modules.push('hwenc');
-      if (checks.hwdec.checked) modules.push('hwdec');
-      if (wifiChk.checked) modules.push('wifi-interno');
-      if (gappsChk.checked) modules.push('gapps');
-      if (armChk.checked) modules.push('arm-translation');
-      if (auroraChk.checked) modules.push('aurora-store');
-      for (const { id, chk } of userModuleChecks) if (chk.checked) modules.push(id);
-      const bindHosts = netChecks.filter(({ chk }) => chk.checked).map(({ address }) => address);
-      if (bindHosts.length === 0) { alert(t('instances.network.selectAtLeastOne')); return; }
-      await applyInstanceConfig(inst.id, {
-        width: Number(inputs.width.value),
-        height: Number(inputs.height.value),
-        dpi: Number(inputs.dpi.value),
-        fps: Number(inputs.fps.value),
-        gpuMode: gpuSelect.value,
-        modules,
-        bindHosts,
-      });
-      openRestartId = null;
-    } catch (e) {
-      alert(e.message);
-    } finally {
-      applyBtn.disabled = false;
-      await loadInstances({ silent: true });
-    }
-  });
-  panel.appendChild(applyBtn);
-
   // --- Device profile: a different backend route (restarts the container instead of
-  // recreating it), kept as its own sub-section with its own Apply button rather than folded
-  // into the payload above.
+  // recreating it) than the resources/modules/network payload below, but both now apply from
+  // the single button further down -- having two separate "Apply" buttons on the same panel
+  // (one general, one device-profile-only) was confusing and gave no indication of which one
+  // covered what. Only called when actually changed, so picking "no change" never forces an
+  // extra restart on top of whatever the main payload already triggers.
   const profileHeader = document.createElement('div');
   profileHeader.className = 'resources-edit-header';
   profileHeader.textContent = t('instances.deviceProfile.header');
@@ -881,24 +834,54 @@ function buildRestartEditRow(inst) {
     if (value === current) opt.selected = true;
     profileSelect.appendChild(opt);
   }
-  const profileBtn = document.createElement('button');
-  profileBtn.type = 'button';
-  profileBtn.className = 'secondary';
-  profileBtn.textContent = t('instances.deviceProfile.apply');
-  profileBtn.title = inst.status === 'running' ? t('instances.deviceProfile.applyNowHint') : t('instances.deviceProfile.applyNextStartHint');
-  profileBtn.addEventListener('click', async () => {
-    profileBtn.disabled = true;
+  panel.appendChild(profileSelect);
+
+  const applyBtn = document.createElement('button');
+  applyBtn.type = 'button';
+  applyBtn.className = 'secondary';
+  applyBtn.textContent = t('instances.resources.apply');
+  applyBtn.addEventListener('click', async () => {
+    if (inst.status === 'running' && !confirm(t('instances.display.confirmRunning'))) return;
+    const modules = ids.filter((id) => id === 'wifi-interno-virtwifi');
+    if (checks.hwenc.checked) modules.push('hwenc');
+    if (checks.hwdec.checked) modules.push('hwdec');
+    if (wifiChk.checked) modules.push('wifi-interno');
+    if (gappsChk.checked) modules.push('gapps');
+    if (armChk.checked) modules.push('arm-translation');
+    if (auroraChk.checked) modules.push('aurora-store');
+    for (const { id, chk } of userModuleChecks) if (chk.checked) modules.push(id);
+    const bindHosts = netChecks.filter(({ chk }) => chk.checked).map(({ address }) => address);
+    // Checked BEFORE disabling the button/calling the API -- this is a form mistake the user
+    // can fix immediately, not a reason to touch the panel at all.
+    if (bindHosts.length === 0) { alert(t('instances.network.selectAtLeastOne')); return; }
+    applyBtn.disabled = true;
     try {
-      await applyDeviceProfile(inst.id, profileSelect.value);
+      await applyInstanceConfig(inst.id, {
+        width: Number(inputs.width.value),
+        height: Number(inputs.height.value),
+        dpi: Number(inputs.dpi.value),
+        fps: Number(inputs.fps.value),
+        gpuMode: gpuSelect.value,
+        modules,
+        bindHosts,
+      });
+      if (profileSelect.value !== current) await applyDeviceProfile(inst.id, profileSelect.value);
+      if (knockChecks.length) {
+        const knockRequiredHosts = knockChecks.filter(({ chk }) => chk.checked).map(({ address }) => address);
+        await api(`/instances/${inst.id}/knock-hosts`, { method: 'PUT', body: JSON.stringify({ knockRequiredHosts }) });
+      }
+      // Only close/reload on success. On failure (e.g. a missing hwenc artifact) the panel
+      // must stay exactly as the user left it -- reloading on every outcome used to rebuild
+      // this panel from the instance's still-unchanged data, silently wiping every checkbox
+      // the user had just ticked and making it look like "nothing happened" with no clue why.
+      openRestartId = null;
+      await loadInstances({ silent: true });
     } catch (e) {
       alert(e.message);
-    } finally {
-      profileBtn.disabled = false;
-      await loadInstances({ silent: true });
+      applyBtn.disabled = false;
     }
   });
-  panel.appendChild(profileSelect);
-  panel.appendChild(profileBtn);
+  panel.appendChild(applyBtn);
 
   const cancelBtn = document.createElement('button');
   cancelBtn.type = 'button';
@@ -1313,6 +1296,66 @@ async function loadInstances({ silent = false } = {}) {
       nameSpan.className = 'instance-name';
       nameSpan.textContent = inst.name;
       primary.appendChild(nameSpan);
+
+      // Renaming is a plain metadata update on the backend (PUT /:id/name, no recreate) --
+      // same permission tier as the rest of the Configure panel, not its own capability.
+      if (AuthUi.can('configure')) {
+        const renameBtn = document.createElement('button');
+        renameBtn.type = 'button';
+        renameBtn.className = 'icon-button';
+        renameBtn.textContent = '✎';
+        renameBtn.title = t('instances.rename.hint');
+        renameBtn.addEventListener('click', () => {
+          const nameInput = document.createElement('input');
+          nameInput.type = 'text';
+          nameInput.value = inst.name;
+          nameInput.className = 'instance-name-edit';
+          nameInput.maxLength = 40;
+
+          const saveBtn = document.createElement('button');
+          saveBtn.type = 'button';
+          saveBtn.textContent = t('common.save');
+          const cancelEditBtn = document.createElement('button');
+          cancelEditBtn.type = 'button';
+          cancelEditBtn.textContent = t('common.cancel');
+
+          openRenameId = inst.id;
+          const restore = () => {
+            openRenameId = null;
+            nameInput.replaceWith(nameSpan);
+            saveBtn.remove();
+            cancelEditBtn.remove();
+            renameBtn.hidden = false;
+          };
+          cancelEditBtn.addEventListener('click', restore);
+
+          const save = async () => {
+            const newName = normalizeInstanceName(nameInput.value);
+            if (!newName || newName === inst.name) { restore(); return; }
+            saveBtn.disabled = true;
+            try {
+              await api(`/instances/${inst.id}/name`, { method: 'PUT', body: JSON.stringify({ name: newName }) });
+              openRenameId = null;
+              await loadInstances({ silent: true });
+            } catch (e) {
+              alert(e.message);
+              saveBtn.disabled = false;
+            }
+          };
+          saveBtn.addEventListener('click', save);
+          nameInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') save();
+            if (e.key === 'Escape') restore();
+          });
+
+          nameSpan.replaceWith(nameInput);
+          renameBtn.hidden = true;
+          nameInput.after(saveBtn, cancelEditBtn);
+          nameInput.focus();
+          nameInput.select();
+        });
+        primary.appendChild(renameBtn);
+      }
 
       const statusSpan = document.createElement('span');
       statusSpan.className = 'instance-status';
@@ -2549,7 +2592,7 @@ async function createInstance(name, imageId, form, modules, display) {
 $('#new-instance-form').addEventListener('submit', async (e) => {
   e.preventDefault();
   const form = e.target;
-  const name = form.name.value.trim();
+  const name = normalizeInstanceName(form.name.value);
   const imageId = form.imageId.value;
   // The list is explicit: what is not ticked is not installed (that is how hwenc is opted out of).
   const modules = [];
@@ -2651,6 +2694,6 @@ AuthUi.ready.then(() => {
   setInterval(() => {
     const onInstances = $('.tab-btn.active')?.dataset.tab === 'instances';
     const dialogOpen = $$('dialog').some((d) => d.open);
-    if (onInstances && !dialogOpen && openNoRestartId === null && openRestartId === null && openOwnersId === null && openStorageId === null && openAdbAccessId === null && !document.hidden) loadInstances({ silent: true });
+    if (onInstances && !dialogOpen && openNoRestartId === null && openRestartId === null && openOwnersId === null && openStorageId === null && openAdbAccessId === null && openRenameId === null && !document.hidden) loadInstances({ silent: true });
   }, 4000);
 });

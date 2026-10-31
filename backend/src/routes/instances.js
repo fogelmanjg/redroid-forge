@@ -307,7 +307,7 @@ router.post('/', async (req, res) => {
     const adbPort = portAllocator.nextPort();
     const slot = binder.nextFreeSlot({ inUse: await binder.slotsInUseOnHost(runtime.docker).catch(() => []) });
     const volumeName = `redroid-forge-${name}`;
-    const binds = [...binder.binderBinds(slot), `${volumeName}:/data`, ...meminfoFix.prepareBinds(name, resources.memoryMb)];
+    const binds = [...binder.binderBinds(slot), `${volumeName}:/data`, ...meminfoFix.prepareBinds(volumeName, resources.memoryMb)];
 
     const cmd = [
       `androidboot.redroid_width=${display.width}`,
@@ -520,6 +520,47 @@ router.post('/:id/device-profile', async (req, res) => {
   }
 });
 
+// Renaming is a plain metadata update, not a disguised recreate -- the container's own --name
+// (cosmetic, nothing in this codebase looks containers up by name) moves with it, but nothing
+// else does: volumeName (already stored on the instance rather than re-derived from name) and
+// the container id/data never change, running or stopped. meminfoFix is deliberately NOT
+// touched here any more (it used to try to rename its bind-mounted file alongside the
+// container's name, which seemed safe -- a bind mount follows the inode, not the path -- but
+// broke for real on the instance's next stop/restart: Docker re-resolves HostConfig.Binds'
+// frozen path string from scratch on every (re)start, found the old name gone, and silently
+// created a directory there instead of a file, which then fails to (re)mount at all. Fixed at
+// the root instead: meminfoFix now keys its files by volumeName, which a rename never touches,
+// so there is nothing left to keep in sync here.
+router.put('/:id/name', async (req, res) => {
+  const instance = store.get(req.params.id);
+  if (!instance) return res.status(404).json({ error: 'Instancia no encontrada' });
+  try {
+    permissions.assertCan(req.user, 'configure', instance);
+    const { name } = req.body || {};
+    if (typeof name !== 'string' || !/^[a-z0-9][a-z0-9-]{0,39}$/.test(name)) {
+      throw httpError('"name" must be lowercase letters, digits and hyphens (1-40 characters, not starting with a hyphen)', 400);
+    }
+    if (name === instance.name) {
+      res.json(await withRuntimeStatus(instance));
+      return;
+    }
+    if (store.readAll().some((i) => i.id !== instance.id && i.name === name)) {
+      throw httpError(`An instance named "${name}" already exists`, 409);
+    }
+    if (instance.containerId) {
+      try {
+        await runtime.rename(instance.containerId, `redroid-${name}`);
+      } catch (e) {
+        throw httpError(`Could not rename the underlying container: ${e.message}`, 502);
+      }
+    }
+    const updated = store.upsert({ ...instance, name });
+    res.json(await withRuntimeStatus(updated));
+  } catch (e) {
+    sendError(res, e);
+  }
+});
+
 router.get('/:id/android-id', async (req, res) => {
   const instance = store.get(req.params.id);
   if (!instance) return res.status(404).json({ error: 'Instancia no encontrada' });
@@ -710,7 +751,7 @@ router.post('/:id/display', async (req, res) => {
     const binds = [
       ...binder.binderBinds(instance.binderSlot),
       `${instance.volumeName}:/data`,
-      ...meminfoFix.prepareBinds(instance.name, instance.memoryMb),
+      ...meminfoFix.prepareBinds(instance.volumeName, instance.memoryMb),
     ];
     const cmd = [
       `androidboot.redroid_width=${display.width}`,
@@ -756,6 +797,13 @@ router.post('/:id/display', async (req, res) => {
       gpuMode: img.gpuMode,
       requiredModuleIds,
       needsHwsimWifi: !!img.needsHwsimWifi || requiredModuleIds.includes('wifi-interno'),
+      // Same "declared by the image OR requested as a module" pattern as needsHwsimWifi right
+      // above -- missing here until 30/10/2026 (found for real: gapps added to an existing
+      // instance through this same route's `modules` param left hasGapps stuck at its
+      // original, stale value, which hid the Android ID registration flow in the frontend and
+      // skipped the gapps-aware backup/restore logic in backup.js/instanceSupport.js, both of
+      // which read instance.hasGapps rather than re-deriving it from requiredModuleIds).
+      hasGapps: !!img.hasGapps || requiredModuleIds.includes('gapps'),
       deviceProfileApplied: null,
     });
 
@@ -768,6 +816,12 @@ router.post('/:id/display', async (req, res) => {
       meminfoFix.scheduleBindMount(updated);
       moduleRunner.scheduleRuntimeFixups(requiredModuleIds, containerId);
       moduleScheduler.start(updated.id, containerId, requiredModuleIds);
+      // Same gate as the create route -- but there it is the ONLY place that ever calls this,
+      // so an instance that gained gapps HERE instead (module added after creation, through
+      // this same route's `modules` param) would otherwise never get its Android ID fetched at
+      // all. scheduleFetch is idempotent (no-ops once instance.androidId is already set), so
+      // this is harmless to call again for an instance that already had gapps before.
+      if (updated.hasGapps) androidIdentity.scheduleFetch(updated.id);
       // The NEW container almost certainly got a different bridge IP than the one just
       // removed above -- re-apply against whatever it actually is now, same reasoning as
       // scheduleWifiFixes right above it.
@@ -974,7 +1028,7 @@ router.delete('/:id', async (req, res) => {
     await releaseWifiFixes(instance);
     await runtime.remove(instance.containerId, { force: true });
     if (instance.volumeName) await runtime.removeVolume(instance.volumeName);
-    meminfoFix.cleanup(instance.name);
+    meminfoFix.cleanup(instance.volumeName);
     store.remove(instance.id);
     res.status(204).end();
   } catch (e) {

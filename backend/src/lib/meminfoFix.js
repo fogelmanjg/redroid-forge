@@ -87,8 +87,18 @@ function log(msg) { console.log(`[meminfo-fix] ${msg}`); }
 function warn(msg) { console.warn(`[meminfo-fix] ${msg}`); }
 function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
 
-function hostFilePath(name) {
-  return path.join(DATA_DIR, name, 'meminfo');
+// Keyed by volumeName, not instance.name -- found for real (30/10/2026) renaming an instance
+// (routes/instances.js's PUT /:id/name) and later restarting it: the bind mount in the
+// container's HostConfig is a path string frozen at CREATE time, it only "follows the inode"
+// while that exact mount stays continuously active. The moment the container stops and Docker
+// has to remount it fresh, it re-resolves the OLD path from HostConfig.Binds, finds nothing
+// there any more, and Docker auto-creates a DIRECTORY at that missing path -- which then fails
+// to bind-mount onto a file target ("not a directory") and the container can never start again.
+// volumeName is immutable once set at creation (never re-derived from the renamable `name`,
+// same property instances.js already relies on for the Docker volume itself), so using it here
+// instead avoids the whole class of bug without needing to keep any file in sync on rename.
+function hostFilePath(volumeName) {
+  return path.join(DATA_DIR, volumeName, 'meminfo');
 }
 
 // Pure. Clamped so the fields stay internally consistent (free+cached <= total) even if a read
@@ -119,8 +129,8 @@ function render({ totalKb, freeKb, cachedKb }) {
   );
 }
 
-function writeFile(name, fields) {
-  const file = hostFilePath(name);
+function writeFile(volumeName, fields) {
+  const file = hostFilePath(volumeName);
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, render(fields));
   return file;
@@ -129,13 +139,14 @@ function writeFile(name, fields) {
 // Called from the create/recreate handlers, before runtime.create() -- the bind has to be part
 // of HostConfig.Binds at creation time, Docker has no live-attach for a new mount. Returns []
 // (no bind added) when the instance has no memory cap: Android seeing the real host RAM is not
-// wrong when nothing is capping it below that, there is nothing to correct.
-function prepareBinds(name, memoryMb) {
+// wrong when nothing is capping it below that, there is nothing to correct. `volumeName`, not
+// `name` -- see hostFilePath's own comment on why this has to be the immutable one.
+function prepareBinds(volumeName, memoryMb) {
   if (!memoryMb) return [];
   const totalKb = memoryMb * 1024;
   // A freshly created container has ~0 used yet -- refresh() corrects this within REFRESH_MS of
   // the first tick once it is actually running.
-  const file = writeFile(name, { totalKb, freeKb: totalKb, cachedKb: 0 });
+  const file = writeFile(volumeName, { totalKb, freeKb: totalKb, cachedKb: 0 });
   // Onto IN_CONTAINER_SRC, not /proc/meminfo directly -- see the file comment on why the actual
   // /proc/meminfo bind has to happen later, post-boot (scheduleBindMount).
   return [`${file}:${IN_CONTAINER_SRC}`];
@@ -210,7 +221,7 @@ function refresh(instanceId) {
   const totalKb = instance.memoryMb * 1024;
   const cachedKb = fileBytes / 1024;
   const freeKb = totalKb - currentBytes / 1024;
-  writeFile(instance.name, { totalKb, freeKb, cachedKb });
+  writeFile(instance.volumeName, { totalKb, freeKb, cachedKb });
 }
 
 // Idempotent and safe to call on every create/start/restart/recreate, same style as
@@ -234,8 +245,8 @@ function release(instanceId) {
 
 // Mirrors the instance's own volume removal on delete -- the generated file is derived state,
 // not something worth keeping around once the instance it was for is gone.
-function cleanup(name) {
-  fs.rmSync(path.join(DATA_DIR, name), { recursive: true, force: true });
+function cleanup(volumeName) {
+  fs.rmSync(path.join(DATA_DIR, volumeName), { recursive: true, force: true });
 }
 
 module.exports = {

@@ -1,6 +1,6 @@
 {
   "name": "redroid-forge",
-  "version": "0.3.1",
+  "version": "0.4.0",
   "description": "App standalone (instancias + diagnostico de host + aceleracion HW) para imagenes redroid",
   "private": true,
   "main": "src/server.js",

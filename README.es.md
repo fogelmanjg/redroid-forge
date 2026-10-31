@@ -37,7 +37,7 @@ oficial significa validado con evidencia en hardware real, no una garantía.
 |---|---|---|
 | **Ciclo de vida de instancias** | ✅ | Crear/arrancar/parar/reiniciar/borrar desde una UI web. Resize de CPU/RAM en vivo (sin restart). Cambios de resolución/DPI/FPS/modo GPU recrean el contenedor pero conservan sus datos. |
 | **Encode de video por hardware** | ✅ AMD · Intel | VA-API, validado en hardware real Polaris/Vega/Iris Xe. "Cada instancia usa en hardware todo lo que ofrece la GPU del host" — nada escondido detrás de un tier fijo de capacidad. |
-| **Decode de video por hardware** | ✅ AMD · Intel | H.264/HEVC/VP9/VP8 según lo que realmente soporte la GPU del host (Doctor muestra cuáles). |
+| **Decode de video por hardware** | ✅ AMD · Intel | H.264/HEVC/VP9/VP8 según lo que realmente soporte la GPU del host (Doctor muestra cuáles). **No recomendado en AMD Polaris al mismo tiempo que hwenc** — inestabilidad de driver conocida cuando corren los dos juntos (ver `docs/ROADMAP.md` Fase 2); encode solo no se ve afectado. |
 | | 🧪 NVIDIA | NVENC/NVDEC existen como prueba del mecanismo (un solo frame intra, sin B-frames) — todavía no para uso real. |
 | **Base de combinaciones conocidas** | ✅ | Base firmada, versionada, anti-rollback de qué combinaciones imagen+módulo están realmente validadas. Se chequea sola, se muestra por instancia, nunca bloquea — una combinación no validada igual corre, solo queda marcada "comunidad". |
 | **Módulos opcionales, con consentimiento** | ✅ | Google Apps/Play Store, traducción ARM (apps arm64 en x86), WiFi falso, device profile spoofing, modo GPU — cada uno detrás de un diálogo de contrato explícito la primera vez que se usa, nunca habilitado en silencio. |
