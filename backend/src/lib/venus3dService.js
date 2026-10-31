@@ -82,6 +82,41 @@ async function installFiles(containerId) {
   }
   await patchGpuConfigSh(containerId);
   await patchSurfaceflingerRc(containerId);
+  await patchLegacyGrallocRc(containerId);
+}
+
+const LEGACY_GRALLOC_RC_PATH = '/vendor/etc/init/android.hardware.graphics.allocator@2.0-service.rc';
+
+// A third real gap, found after the first two: the stock image's legacy HIDL 2.0 Allocator
+// service (vendor.gralloc-2-0 -- superseded by the modern AIDL/Gralloc4 path gralloc.cros.so
+// already provides, which installFiles() above confirms is what actually serves EGL/Vulkan) is
+// still started on demand by some lazy-HAL client and shares the SAME cros_gralloc_driver.cc
+// code this module patches -- so it also needs VTEST_SOCKET_NAME/VN_DEBUG, which its own
+// service block never had (only surfaceflinger's did). Without them it dials the vtest
+// *upstream default* path ("/tmp/.virgl_test", which this module moved away from -- see
+// venus3dAccel.js's GUEST_SOCKET_PATH) and fails ("failed to open gralloc0 device"). Its own
+// crash is not just cosmetic: init's generic "updatable components" crash-safety policy
+// (unrelated to this service's own `onrestart` line, which this patch also drops since it is
+// not needed once this service stops crashing) kills surfaceflinger and zygote outright after
+// 4 crashes, which is what actually blocked boot_completed. Not yet confirmed fully resolved on
+// real hardware at the time of this port -- see the module's own README "Validation" section.
+async function patchLegacyGrallocRc(containerId) {
+  const tmpPath = path.join(os.tmpdir(), `venus3d-${containerId.slice(0, 12)}-allocator2.0.rc`);
+  await execFileAsync('docker', ['cp', `${containerId}:${LEGACY_GRALLOC_RC_PATH}`, tmpPath]);
+  const original = fs.readFileSync(tmpPath, 'utf-8');
+  let patched = original.replace(/\n\s*onrestart restart surfaceflinger\n/, '\n');
+  patched = patched.replace(
+    /(\n\s*capabilities SYS_NICE\n)/,
+    '$1    setenv VTEST_SOCKET_NAME /vendor/venus.sock\n    setenv VN_DEBUG vtest\n',
+  );
+  if (patched === original) {
+    throw new Error(`${tmpPath} (copied from ${LEGACY_GRALLOC_RC_PATH}) did not match the expected shape -- was the image's own script changed?`);
+  }
+  fs.writeFileSync(tmpPath, patched);
+  await execFileAsync('chown', ['root:root', tmpPath]);
+  await execFileAsync('chmod', ['0644', tmpPath]);
+  await execFileAsync('docker', ['cp', tmpPath, `${containerId}:${LEGACY_GRALLOC_RC_PATH}`]);
+  fs.unlinkSync(tmpPath);
 }
 
 const GPU_CONFIG_SH_PATH = '/vendor/bin/gpu_config.sh';
