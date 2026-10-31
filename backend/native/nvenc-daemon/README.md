@@ -40,7 +40,7 @@ unit instead of trying to `spawn()` a binary redroid-forge's own container canno
 ## Running it
 
 ```sh
-./nvenc_scm_daemon /dev/nvenc-helper/socket
+./nvenc_scm_daemon /dev/nvenc-helper/nvenc-scm.sock
 ```
 
 The directory (`/dev/nvenc-helper` by default, `REDROID_FORGE_NVENC_DIR` to override — same

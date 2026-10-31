@@ -4,7 +4,7 @@ After=network.target
 
 [Service]
 ExecStartPre=/bin/mkdir -p /dev/nvenc-helper
-ExecStart=/home/jgustavo/redroid-forge/backend/native/nvenc-daemon/nvenc_scm_daemon /dev/nvenc-helper/socket
+ExecStart=/home/jgustavo/redroid-forge/backend/native/nvenc-daemon/nvenc_scm_daemon /dev/nvenc-helper/nvenc-scm.sock
 Restart=on-failure
 RestartSec=2
 

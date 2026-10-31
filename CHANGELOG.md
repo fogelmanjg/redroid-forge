@@ -32,6 +32,13 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
   `backend/src/modules/nvenc/README.md` and `backend/native/nvenc-daemon/README.md` for the full
   design (including why, unlike `hwenc`'s own VA-API daemon, this backend never spawns the NVENC
   daemon itself -- it's a systemd unit on the host, not a child process of this Alpine/musl image).
+  Validated end to end on a GTX 1050 Ti (jgustavo47): `scrcpy --list-encoders` reports the hardware
+  encoder, and a real recording produces a correct, `ffprobe`-valid, visually undistorted clip. The
+  stock image's capture buffer turned out to be a plain `memfd` (not a dma-buf as on
+  `redroid-nvidia`'s own patched image) -- the daemon's GPU upload path was rewritten to `mmap()` +
+  stage through a host-visible buffer instead of a Vulkan external-memory import; see
+  `backend/src/modules/nvenc/README.md`'s "Three real gaps" section for this and two smaller fixes
+  (the render node's real group GID, the SCM socket's exact filename) found getting there.
 
 ## [0.4.1] - 2026-10-31
 

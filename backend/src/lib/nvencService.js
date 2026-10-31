@@ -104,7 +104,17 @@ async function copyIntoContainer(containerId, srcPath, destRelPath) {
   fs.unlinkSync(tmpPath);
 }
 
-// Same /vendor-is-writable-only-before-first-boot constraint as codec2Service.js's installFiles.
+const SERVICE_RC_REL_PATH = 'etc/init/android.hardware.media.c2-nvenc-service.rc';
+const RENDER_NODE_PATH = '/dev/dri/renderD128';
+
+// The .rc's own "group camera mediadrm drmrpc" line (see its comment) is missing the render
+// node's real group on purpose -- patched in here with the actual numeric GID, read straight
+// off the host's device node, since that GID has no relationship to whatever Android's own
+// compiled-in AID table resolves the *name* "render" to (confirmed empirically on jgustavo47,
+// 31/10/2026: the service had groups 1026/1031 with a plain "render" in the .rc, while the
+// bind-mounted node itself is owned by the host's real render GID, 992 on that machine -- two
+// completely different numbers. Android's init DOES accept a bare numeric GID in a service's
+// "group" line, not just AID names, so appending it here is enough).
 async function installFiles(containerId) {
   if (!ARTIFACTS_DIR) {
     throw new Error('REDROID_NVENC_ARTIFACTS_DIR is not set -- the nvenc module needs a local folder with the '
@@ -113,8 +123,37 @@ async function installFiles(containerId) {
   }
   log(`injecting ${FILES.length} files into ${containerId}...`);
   for (const relPath of FILES) {
+    if (relPath === SERVICE_RC_REL_PATH) continue;
     await copyIntoContainer(containerId, path.join(ARTIFACTS_DIR, relPath), relPath);
   }
+  await installPatchedServiceRc(containerId);
+}
+
+async function installPatchedServiceRc(containerId) {
+  const srcPath = path.join(ARTIFACTS_DIR, SERVICE_RC_REL_PATH);
+  if (!fs.existsSync(srcPath)) {
+    throw new Error(`Artifact ${srcPath} is missing -- is REDROID_NVENC_ARTIFACTS_DIR (${ARTIFACTS_DIR}) the right one?`);
+  }
+  let renderGid;
+  try {
+    renderGid = fs.statSync(RENDER_NODE_PATH).gid;
+  } catch (err) {
+    throw new Error(`Could not stat ${RENDER_NODE_PATH} on the host to read its real group id: ${err.message}`);
+  }
+  const original = fs.readFileSync(srcPath, 'utf-8');
+  const patched = original.replace(
+    /^(\s*group camera mediadrm drmrpc)\s*$/m,
+    `$1 ${renderGid}`,
+  );
+  if (patched === original) {
+    throw new Error(`${srcPath} does not have the expected "group camera mediadrm drmrpc" line -- was it hand-edited?`);
+  }
+  const tmpPath = path.join(os.tmpdir(), `nvenc-${containerId.slice(0, 12)}-service.rc`);
+  fs.writeFileSync(tmpPath, patched);
+  await execFileAsync('chown', ['root:root', tmpPath]);
+  await execFileAsync('chmod', ['0644', tmpPath]);
+  await execFileAsync('docker', ['cp', tmpPath, `${containerId}:/vendor/${SERVICE_RC_REL_PATH}`]);
+  fs.unlinkSync(tmpPath);
 }
 
 // Reuses codec2Service's own addCodecsToXml (pure, generic, already tested) instead of

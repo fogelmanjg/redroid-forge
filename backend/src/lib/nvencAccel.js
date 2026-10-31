@@ -10,10 +10,14 @@ const net = require('net');
 // the same "adopt, never replace" path hwAccel.js already has for a second forge's daemon on
 // the same host (see its own socketAnswers()/ensureDaemonRunning() comment).
 const NVENC_ROOT = process.env.REDROID_FORGE_NVENC_DIR || '/dev/nvenc-helper';
-const SOCKET_PATH = `${NVENC_ROOT}/socket`;
-// The guest component dials a fixed path, /dev/venus/nvenc-scm.sock (see android/nvenc_codec2/
-// component/vtest_encode_client.cpp) -- this project's own instances never run a real Venus
-// socket alongside it (gpuMode stays "guest"), so /dev/venus only ever has this one file in it.
+// The guest component dials a FIXED filename, /dev/venus/nvenc-scm.sock (see
+// nvenc_scm_protocol.h's own NVENC_SCM_SOCKET_PATH) -- the daemon's listen path has to end in
+// that same filename, since NVENC_ROOT is bind-mounted straight at /dev/venus inside every
+// instance (see daemonBind() below) and whatever name the socket has on the host is exactly the
+// name it has in the guest too.
+const SOCKET_PATH = `${NVENC_ROOT}/nvenc-scm.sock`;
+// This project's own instances never run a real Venus socket alongside it (gpuMode stays
+// "guest"), so /dev/venus only ever has this one file in it.
 const INSTANCE_NVENC_DIR = '/dev/venus';
 
 function socketAnswers(socketPath = SOCKET_PATH, timeoutMs = 1000) {

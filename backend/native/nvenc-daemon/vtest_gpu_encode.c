@@ -11,6 +11,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/mman.h>
 #include <unistd.h>
 
 #define VK_NO_PROTOTYPES
@@ -99,6 +100,23 @@ struct encode_state {
    PFN_vkQueueWaitIdle QueueWaitIdle;
    PFN_vkGetDeviceQueue GetDeviceQueue;
    PFN_vkResetCommandBuffer ResetCommandBuffer;
+   /* Staging-buffer path (31/10/2026): a real GraphicBufferSource capture buffer on redroid's
+    * OWN gralloc (gralloc.redroid.so, the one gpuMode=guest -- this module's whole reason to
+    * exist on NVIDIA -- actually uses) is backed by a plain memfd, confirmed via readlink on
+    * the received fd ("/memfd:gralloc-buffer (deleted)"), NOT a real dma-buf/GEM allocation.
+    * The imported_image path below (VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT) is for a
+    * driver-backed dma-buf (what cros_gralloc/minigbm would hand over on a real GPU, gpuMode=
+    * host) and fails outright (AllocateMemory -EIO) on a memfd -- there is no GPU-side object
+    * behind it to import. A memfd is plain CPU-visible shared memory instead: mmap() it
+    * directly and upload via an ordinary host-visible staging buffer + vkCmdCopyBufferToImage,
+    * the same way any CPU-side pixel source reaches a GPU image. */
+   PFN_vkCreateBuffer CreateBuffer;
+   PFN_vkDestroyBuffer DestroyBuffer;
+   PFN_vkGetBufferMemoryRequirements GetBufferMemoryRequirements;
+   PFN_vkBindBufferMemory BindBufferMemory;
+   PFN_vkMapMemory MapMemory;
+   PFN_vkUnmapMemory UnmapMemory;
+   PFN_vkCmdCopyBufferToImage CmdCopyBufferToImage;
 
    /* CUDA */
    void *cuda_lib;
@@ -127,6 +145,15 @@ struct encode_state {
    uint32_t cur_w, cur_h;
    VkImage copy_image;
    VkDeviceMemory copy_memory;
+   /* Whether copy_image already holds a previous frame's content (i.e. is in
+    * VK_IMAGE_LAYOUT_GENERAL, where the end of Step 3 below always leaves it) - cleared
+    * whenever it's (re)created in encode_reconfigure_locked(). Using VK_IMAGE_LAYOUT_UNDEFINED
+    * as oldLayout on every call regardless (the previous, buggy version of this barrier) is a
+    * real correctness issue, not just a validation nag: it told the driver the image's
+    * existing content/layout state is unknown/to be discarded even on the SECOND+ call, when
+    * it is actually GENERAL from the end of the call before - confirmed as the actual cause of
+    * a real VK_ERROR_DEVICE_LOST on every QueueSubmit() after the first, 31/10/2026. */
+   bool copy_image_has_content;
    NV_ENC_REGISTERED_PTR registered;
    void *mapped;
    void *bitstream_buf;
@@ -254,11 +281,12 @@ encode_vk_init_locked(void)
       "VK_KHR_external_memory_fd",
       "VK_EXT_external_memory_dma_buf",
       "VK_EXT_image_drm_format_modifier",
+      "VK_KHR_image_format_list", /* required by VK_EXT_image_drm_format_modifier itself */
    };
    const VkDeviceCreateInfo dev_info = {
       .sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
       .queueCreateInfoCount = 1, .pQueueCreateInfos = &queue_info,
-      .enabledExtensionCount = 3, .ppEnabledExtensionNames = dev_exts,
+      .enabledExtensionCount = 4, .ppEnabledExtensionNames = dev_exts,
    };
    if (CreateDevice(best, &dev_info, NULL, &enc.dev) != VK_SUCCESS)
       return -ENODEV;
@@ -282,6 +310,13 @@ encode_vk_init_locked(void)
    GET_DEV(QueueWaitIdle);
    GET_DEV(GetDeviceQueue);
    GET_DEV(ResetCommandBuffer);
+   GET_DEV(CreateBuffer);
+   GET_DEV(DestroyBuffer);
+   GET_DEV(GetBufferMemoryRequirements);
+   GET_DEV(BindBufferMemory);
+   GET_DEV(MapMemory);
+   GET_DEV(UnmapMemory);
+   GET_DEV(CmdCopyBufferToImage);
 #undef GET_DEV
 #undef GET_INST
 #undef GET_GLOBAL
@@ -293,6 +328,11 @@ encode_vk_init_locked(void)
 
    const VkCommandPoolCreateInfo poolinfo = {
       .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO, .queueFamilyIndex = 0,
+      /* Without this, vkResetCommandBuffer() (called on every single encode_dmabuf() call,
+       * i.e. every call after the first) is undefined behavior per spec - confirmed as a real
+       * cause of the VK_ERROR_DEVICE_LOST hit on every QueueSubmit() after the first real
+       * encode, 31/10/2026 (caught via VK_LAYER_KHRONOS_validation, not visible without it). */
+      .flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
    };
    if (enc.CreateCommandPool(enc.dev, &poolinfo, NULL, &enc.pool) != VK_SUCCESS)
       return -ENODEV;
@@ -416,6 +456,7 @@ encode_reconfigure_locked(uint32_t width, uint32_t height, VkFormat format, uint
       enc.DestroyImage(enc.dev, enc.copy_image, NULL);
       enc.copy_image = VK_NULL_HANDLE;
    }
+   enc.copy_image_has_content = false;
    if (enc.copy_memory) {
       enc.FreeMemory(enc.dev, enc.copy_memory, NULL);
       enc.copy_memory = VK_NULL_HANDLE;
@@ -786,120 +827,88 @@ vtest_gpu_encode_dmabuf(int fd, uint32_t width, uint32_t height,
     * out of the wider real buffer.
     */
    const uint32_t bpp = drm_format_bpp(drm_format);
-   uint32_t bufWidth = width;
-   if (stride && bpp && stride / bpp > width)
-      bufWidth = stride / bpp;
+   /* `stride` (the sender's plain gralloc stride) is in PIXELS, same convention as
+    * ANativeWindowBuffer::stride - confirmed empirically (both measured samples had
+    * stride == width exactly: 720 at width 720, 450 at width 450) and by the validation
+    * layer rejecting an earlier version of this code that treated it as a byte count
+    * (bufferRowLength must be in texels, and a /bpp there produced an impossible
+    * bufferRowLength smaller than imageExtent.width). */
+   const uint32_t rowPixels = stride ? stride : width;
+   const uint32_t rowBytes = rowPixels * bpp;
+   const size_t bufSize = (size_t)rowBytes * height;
 
-   /* Step 1: plain-import the foreign fd - self-compatible, no export
-    * chained (see DEVLOG for why chaining one here silently corrupts data
-    * on this driver instead of failing outright).
-    *
-    * Real, load-bearing finding (2026-09-26): for a NON-LINEAR modifier,
-    * VkSubresourceLayout::rowPitch in the explicit import below is NOT a
-    * plain "bytes per row" the way a linear image's would be - it's this
-    * driver's own internal tiled/block-linear pitch, a value this daemon
-    * has no way to derive from `stride` (the sender's plain gralloc
-    * stride, a linear-image concept) with any arithmetic. Using `stride`
-    * there anyway (this function's own earlier version) fed the driver a
-    * layout that doesn't describe the real memory at all, producing
-    * exactly the "recognizable but smeared/noisy" corruption this
-    * project's own Tier 5 investigation already caught in a different
-    * shape. Fixed by asking the SAME driver for the real layout: create a
-    * throwaway image at this exact width/height/format with this exact
-    * modifier (deterministic - same driver, same inputs, same layout as
-    * any other image it allocates this way) and read back its real
-    * rowPitch/offset via vkGetImageSubresourceLayout(), instead of
-    * guessing. For modifier 0 (LINEAR), `stride` is exactly the right
-    * concept and is used as given - only non-linear modifiers need this. */
-   VkSubresourceLayout layout = { .offset = 0, .rowPitch = stride, .size = 0, .arrayPitch = 0, .depthPitch = 0 };
-   if (modifier != 0) {
-      const VkImageDrmFormatModifierListCreateInfoEXT probe_mod_list = {
-         .sType = VK_STRUCTURE_TYPE_IMAGE_DRM_FORMAT_MODIFIER_LIST_CREATE_INFO_EXT,
-         .drmFormatModifierCount = 1,
-         .pDrmFormatModifiers = &modifier,
-      };
-      const VkImageCreateInfo probe_info = {
-         .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
-         .pNext = &probe_mod_list,
-         .imageType = VK_IMAGE_TYPE_2D,
-         .format = format,
-         .extent = { bufWidth, height, 1 },
-         .mipLevels = 1,
-         .arrayLayers = 1,
-         .samples = VK_SAMPLE_COUNT_1_BIT,
-         .tiling = VK_IMAGE_TILING_DRM_FORMAT_MODIFIER_EXT,
-         .usage = VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
-         .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
-         .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
-      };
-      VkImage probe = VK_NULL_HANDLE;
-      if (enc.CreateImage(enc.dev, &probe_info, NULL, &probe) == VK_SUCCESS) {
-         const VkImageSubresource sub = { .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .mipLevel = 0, .arrayLayer = 0 };
-         VkSubresourceLayout real_layout;
-         enc.GetImageSubresourceLayout(enc.dev, probe, &sub, &real_layout);
-         layout = real_layout;
-         enc.DestroyImage(enc.dev, probe, NULL);
-      } else {
-         fprintf(stderr, "encode_dmabuf: probe CreateImage FAILED for modifier=0x%llx\n",
-                 (unsigned long long)modifier);
-      }
-   }
-   const VkExternalMemoryImageCreateInfo imported_ext = {
-      .sType = VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMAGE_CREATE_INFO,
-      .handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT,
-   };
-   const VkImageDrmFormatModifierExplicitCreateInfoEXT explicit_mod = {
-      .sType = VK_STRUCTURE_TYPE_IMAGE_DRM_FORMAT_MODIFIER_EXPLICIT_CREATE_INFO_EXT,
-      .pNext = &imported_ext, .drmFormatModifier = modifier,
-      .drmFormatModifierPlaneCount = 1, .pPlaneLayouts = &layout,
-   };
-   const VkImageCreateInfo imported_imginfo = {
-      .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO, .pNext = &explicit_mod,
-      .imageType = VK_IMAGE_TYPE_2D, .format = format, .extent = { bufWidth, height, 1 },
-      .mipLevels = 1, .arrayLayers = 1, .samples = VK_SAMPLE_COUNT_1_BIT,
-      .tiling = VK_IMAGE_TILING_DRM_FORMAT_MODIFIER_EXT,
-      .usage = VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
-      .sharingMode = VK_SHARING_MODE_EXCLUSIVE, .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
-   };
-   VkImage imported_image = VK_NULL_HANDLE;
-   VkDeviceMemory imported_memory = VK_NULL_HANDLE;
+   /* Step 1: this buffer is a plain memfd (confirmed on real hardware,
+    * 31/10/2026, via readlink("/proc/self/fd/N") on the received fd:
+    * "/memfd:gralloc-buffer (deleted)") - redroid's own gralloc
+    * (gralloc.redroid.so, the one gpuMode=guest actually uses - the whole
+    * reason this module targets that mode on NVIDIA) allocates plain CPU
+    * shared memory here, not a real dma-buf/GEM object the way cros_gralloc/
+    * minigbm would on a real GPU (gpuMode=host). There is no GPU-side
+    * object behind a memfd to import via VK_EXTERNAL_MEMORY_HANDLE_TYPE_
+    * DMA_BUF_BIT_EXT (confirmed: that path's AllocateMemory fails outright,
+    * -EIO, every single call). Treated instead as what it actually is -
+    * plain CPU-visible memory - mmap()'d directly and uploaded through an
+    * ordinary host-visible staging buffer. */
+   void *src = mmap(NULL, bufSize, PROT_READ, MAP_SHARED, fd, 0);
+   close(fd); /* mmap() took its own reference; the fd itself is no longer needed */
    ret = -EIO;
-   VkResult vr = enc.CreateImage(enc.dev, &imported_imginfo, NULL, &imported_image);
-   if (vr != VK_SUCCESS) {
-      close(fd); /* not yet handed to Vulkan */
+   if (src == MAP_FAILED) {
+      fprintf(stderr, "encode_dmabuf: mmap(memfd, %zu) failed: %s\n", bufSize, strerror(errno));
       goto out;
    }
 
-   VkMemoryRequirements imported_reqs;
-   enc.GetImageMemoryRequirements(enc.dev, imported_image, &imported_reqs);
-   uint32_t imported_mem_type = UINT32_MAX;
+   const VkBufferCreateInfo staging_info = {
+      .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, .size = bufSize,
+      .usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT, .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+   };
+   VkBuffer staging_buf = VK_NULL_HANDLE;
+   VkDeviceMemory staging_mem = VK_NULL_HANDLE;
+   VkResult vr = enc.CreateBuffer(enc.dev, &staging_info, NULL, &staging_buf);
+   if (vr != VK_SUCCESS) {
+      munmap(src, bufSize);
+      fprintf(stderr, "encode_dmabuf FAIL: CreateBuffer(staging) failed (vr=%d)\n", vr);
+      goto out;
+   }
+
+   VkMemoryRequirements staging_reqs;
+   enc.GetBufferMemoryRequirements(enc.dev, staging_buf, &staging_reqs);
+   uint32_t staging_mem_type = UINT32_MAX;
+   const VkMemoryPropertyFlags want = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
    for (uint32_t i = 0; i < enc.mem_props.memoryTypeCount; i++)
-      if ((imported_reqs.memoryTypeBits & (1u << i)) &&
-          (enc.mem_props.memoryTypes[i].propertyFlags & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT))
-         { imported_mem_type = i; break; }
-   if (imported_mem_type == UINT32_MAX)
-      imported_mem_type = ffs(imported_reqs.memoryTypeBits) - 1;
-
-   const VkImportMemoryFdInfoKHR import_info = {
-      .sType = VK_STRUCTURE_TYPE_IMPORT_MEMORY_FD_INFO_KHR,
-      .handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT, .fd = fd,
-   };
-   const VkMemoryDedicatedAllocateInfo imported_ded = {
-      .sType = VK_STRUCTURE_TYPE_MEMORY_DEDICATED_ALLOCATE_INFO, .pNext = &import_info, .image = imported_image,
-   };
-   const VkMemoryAllocateInfo imported_alloc = {
-      .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO, .pNext = &imported_ded,
-      .allocationSize = imported_reqs.size, .memoryTypeIndex = imported_mem_type,
-   };
-   vr = enc.AllocateMemory(enc.dev, &imported_alloc, NULL, &imported_memory);
-   if (vr != VK_SUCCESS) {
-      /* fd ownership only transfers to Vulkan on success */
-      close(fd);
+      if ((staging_reqs.memoryTypeBits & (1u << i)) &&
+          (enc.mem_props.memoryTypes[i].propertyFlags & want) == want)
+         { staging_mem_type = i; break; }
+   if (staging_mem_type == UINT32_MAX) {
+      munmap(src, bufSize);
+      fprintf(stderr, "encode_dmabuf FAIL: no host-visible+coherent memory type for staging buffer\n");
       goto out;
    }
-   vr = enc.BindImageMemory(enc.dev, imported_image, imported_memory, 0);
-   if (vr != VK_SUCCESS)
+   const VkMemoryAllocateInfo staging_alloc = {
+      .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+      .allocationSize = staging_reqs.size, .memoryTypeIndex = staging_mem_type,
+   };
+   vr = enc.AllocateMemory(enc.dev, &staging_alloc, NULL, &staging_mem);
+   if (vr != VK_SUCCESS) {
+      munmap(src, bufSize);
+      fprintf(stderr, "encode_dmabuf FAIL: AllocateMemory(staging) failed (vr=%d)\n", vr);
       goto out;
+   }
+   vr = enc.BindBufferMemory(enc.dev, staging_buf, staging_mem, 0);
+   if (vr != VK_SUCCESS) {
+      munmap(src, bufSize);
+      fprintf(stderr, "encode_dmabuf FAIL: BindBufferMemory(staging) failed (vr=%d)\n", vr);
+      goto out;
+   }
+   void *dst = NULL;
+   vr = enc.MapMemory(enc.dev, staging_mem, 0, bufSize, 0, &dst);
+   if (vr != VK_SUCCESS) {
+      munmap(src, bufSize);
+      fprintf(stderr, "encode_dmabuf FAIL: MapMemory(staging) failed (vr=%d)\n", vr);
+      goto out;
+   }
+   memcpy(dst, src, bufSize);
+   enc.UnmapMemory(enc.dev, staging_mem);
+   munmap(src, bufSize);
 
    /*
     * Step 2: (re)configure the persistent copy target if the resolution
@@ -935,62 +944,72 @@ vtest_gpu_encode_dmabuf(int fd, uint32_t width, uint32_t height,
       uint64_t copy_modifier = discover_modifier_locked(format, width, height, copy_usage);
       uint64_t mods[1] = { copy_modifier };
       ret = encode_reconfigure_locked(width, height, format, copy_modifier, mods, 1);
-      if (ret)
+      if (ret) {
+         fprintf(stderr, "encode_dmabuf FAIL: encode_reconfigure_locked failed (ret=%d)\n", ret);
          goto out;
+      }
    }
 
-   /* Step 3: real GPU-to-GPU copy, both images OPTIMAL/tiled throughout. */
+   /* Step 3: upload the staged frame into copy_image (buffer -> tiled image, instead of the
+    * image -> image copy an actual dma-buf import would have allowed - see Step 1's comment). */
    enc.ResetCommandBuffer(enc.cmd, 0);
    const VkCommandBufferBeginInfo begininfo = { .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
    enc.BeginCommandBuffer(enc.cmd, &begininfo);
 
-   VkImageMemoryBarrier imported_to_src = {
-      .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER, .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
-      .newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-      .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED, .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-      .image = imported_image, .subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 },
-      .dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT,
-   };
    VkImageMemoryBarrier copy_to_dst = {
-      .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER, .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+      .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+      .oldLayout = enc.copy_image_has_content ? VK_IMAGE_LAYOUT_GENERAL : VK_IMAGE_LAYOUT_UNDEFINED,
       .newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
       .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED, .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
       .image = enc.copy_image, .subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 },
+      /* 0 either way: srcStageMask here is TOP_OF_PIPE, which can't carry SHADER_READ_BIT
+       * (same validation rule as copy_to_general's own dstAccessMask below) - the actual
+       * previous reader was CUDA/NVENC, outside Vulkan, already fenced by QueueWaitIdle(). */
+      .srcAccessMask = 0,
       .dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
    };
-   VkImageMemoryBarrier both[2] = { imported_to_src, copy_to_dst };
    enc.CmdPipelineBarrier(enc.cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
-                          0, 0, NULL, 0, NULL, 2, both);
+                          0, 0, NULL, 0, NULL, 1, &copy_to_dst);
 
-   const VkImageCopy region = {
-      .srcSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 }, .srcOffset = { 0, 0, 0 },
-      .dstSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 }, .dstOffset = { 0, 0, 0 },
-      .extent = { width, height, 1 },
+   const VkBufferImageCopy region = {
+      .bufferOffset = 0, .bufferRowLength = rowPixels, .bufferImageHeight = height,
+      .imageSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 }, .imageOffset = { 0, 0, 0 },
+      .imageExtent = { width, height, 1 },
    };
-   enc.CmdCopyImage(enc.cmd, imported_image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-                    enc.copy_image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
+   enc.CmdCopyBufferToImage(enc.cmd, staging_buf, enc.copy_image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                             1, &region);
 
    VkImageMemoryBarrier copy_to_general = copy_to_dst;
    copy_to_general.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
    copy_to_general.newLayout = VK_IMAGE_LAYOUT_GENERAL;
    copy_to_general.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-   copy_to_general.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+   /* 0, not VK_ACCESS_SHADER_READ_BIT (rejected by the validation layer: SHADER_READ isn't a
+    * valid access type for VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT) - the actual reader is CUDA/
+    * NVENC via the external-memory export below, entirely outside Vulkan's own pipeline;
+    * synchronization with it is QueueWaitIdle() right after submit, not this access mask. */
+   copy_to_general.dstAccessMask = 0;
    enc.CmdPipelineBarrier(enc.cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
                           0, 0, NULL, 0, NULL, 1, &copy_to_general);
    enc.EndCommandBuffer(enc.cmd);
 
    const VkSubmitInfo submit = { .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO, .commandBufferCount = 1, .pCommandBuffers = &enc.cmd };
-   if (enc.QueueSubmit(enc.queue, 1, &submit, VK_NULL_HANDLE) != VK_SUCCESS)
+   VkResult submit_vr = enc.QueueSubmit(enc.queue, 1, &submit, VK_NULL_HANDLE);
+   if (submit_vr != VK_SUCCESS) {
+      fprintf(stderr, "encode_dmabuf FAIL: QueueSubmit failed (vr=%d)\n", submit_vr);
       goto out;
+   }
    enc.QueueWaitIdle(enc.queue);
+   enc.copy_image_has_content = true;
 
    /* Step 4: encode the (persistent, already-registered) copy target. */
    NV_ENC_MAP_INPUT_RESOURCE map;
    memset(&map, 0, sizeof(map));
    map.version = MKVER(4);
    map.registeredResource = enc.registered;
-   if (enc.fn.nvEncMapInputResource(enc.encoder, &map) != NV_ENC_SUCCESS)
+   if (enc.fn.nvEncMapInputResource(enc.encoder, &map) != NV_ENC_SUCCESS) {
+      fprintf(stderr, "encode_dmabuf FAIL: nvEncMapInputResource failed\n");
       goto out;
+   }
    enc.mapped = map.mappedResource;
 
    NV_ENC_PIC_PARAMS pic;
@@ -1007,6 +1026,7 @@ vtest_gpu_encode_dmabuf(int fd, uint32_t width, uint32_t height,
    if (enc_status != NV_ENC_SUCCESS && enc_status != NV_ENC_ERR_NEED_MORE_INPUT) {
       enc.fn.nvEncUnmapInputResource(enc.encoder, enc.mapped);
       enc.mapped = NULL;
+      fprintf(stderr, "encode_dmabuf FAIL: nvEncEncodePicture failed\n");
       goto out;
    }
 
@@ -1017,6 +1037,7 @@ vtest_gpu_encode_dmabuf(int fd, uint32_t width, uint32_t height,
    if (enc.fn.nvEncLockBitstream(enc.encoder, &lock) != NV_ENC_SUCCESS) {
       enc.fn.nvEncUnmapInputResource(enc.encoder, enc.mapped);
       enc.mapped = NULL;
+      fprintf(stderr, "encode_dmabuf FAIL: nvEncLockBitstream failed\n");
       goto out;
    }
    uint32_t len = lock.bitstreamSizeInBytes;
@@ -1032,10 +1053,10 @@ vtest_gpu_encode_dmabuf(int fd, uint32_t width, uint32_t height,
    ret = 0;
 
 out:
-   if (imported_image)
-      enc.DestroyImage(enc.dev, imported_image, NULL);
-   if (imported_memory)
-      enc.FreeMemory(enc.dev, imported_memory, NULL);
+   if (staging_buf)
+      enc.DestroyBuffer(enc.dev, staging_buf, NULL);
+   if (staging_mem)
+      enc.FreeMemory(enc.dev, staging_mem, NULL);
    pthread_mutex_unlock(&enc_mutex);
    return ret;
 }

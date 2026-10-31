@@ -1,6 +1,13 @@
 service android-hardware-media-c2-nvenc-hal /vendor/bin/hw/android.hardware.media.c2-nvenc-service
     class hal
     user mediacodec
+    # No "render" group here on purpose: the real /dev/dri/renderD128 is bind-mounted straight
+    # through from the host (container shares the host's actual device nodes), so its real
+    # owning group is the HOST's own "render" GID -- a number with no relationship to whatever
+    # Android's own compiled-in AID table resolves the *name* "render" to internally. There is
+    # no single correct value to bake in at build time; nvencService.js's installFiles() patches
+    # this line in with the real numeric GID (read from the host node itself) before each
+    # instance's first boot.
     group camera mediadrm drmrpc
     ioprio rt 4
     task_profiles ProcessCapacityHigh

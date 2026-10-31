@@ -236,6 +236,25 @@ void NvencEncComponent::process(const std::unique_ptr<C2Work> &work,
         height = (uint32_t)ints[18];
         drmFormat = (uint32_t)ints[19];
         formatModifier = 0; /* not identifiable in this wrapper, see above */
+    } else if (handle->numFds == 1 && handle->numInts == 19) {
+        /* The official redroid image's own stock gpuMode=guest gralloc wrapper (confirmed on
+         * jgustavo47, 31/10/2026, by dumping every int across two scrcpy-driven resolutions,
+         * 720x1280 and a -m800-constrained 450x800): one int field short of the numInts>=20
+         * wrapper above, with width/height/stride living at different offsets --
+         * ints[8]/ints[9]/ints[13] exactly matched both resolutions' real dimensions (and
+         * ints[13] == ints[8] in both samples: this wrapper carries no row padding, stride ==
+         * width). No format field was identifiable in the dump (every other int was either a
+         * resolution-independent constant or an allocation-size-shaped value) -- same AB24/
+         * ABGR8888 as the numInts>=20 branch above is used instead, since both wrappers carry
+         * the same underlying GraphicBufferSource-produced RGBA_8888 capture frame; only the
+         * wrapper shape differs, not the pixel format it carries. */
+        const int32_t *ints = &handle->data[handle->numFds];
+        dmabufFd = handle->data[0];
+        width = (uint32_t)ints[8];
+        height = (uint32_t)ints[9];
+        stride = (uint32_t)ints[13];
+        drmFormat = 0x34324241; /* DRM_FORMAT_ABGR8888 ('AB24') */
+        formatModifier = 0;
     } else {
         ALOGE("input handle matches neither known layout (numFds=%d numInts=%d)", handle->numFds,
               handle->numInts);
