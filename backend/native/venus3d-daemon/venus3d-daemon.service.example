@@ -1,0 +1,14 @@
+[Unit]
+Description=redroid-forge Venus 3D renderer daemon (venus3d module, NVIDIA hosts only)
+After=network.target
+
+[Service]
+ExecStartPre=/bin/mkdir -p /dev/nvenc-helper
+WorkingDirectory=/opt/redroid-forge/venus3d-daemon
+Environment=LD_LIBRARY_PATH=/opt/redroid-forge/venus3d-daemon
+ExecStart=/opt/redroid-forge/venus3d-daemon/virgl_test_server --venus --rendernode /dev/dri/renderD128 --socket-path /dev/nvenc-helper/venus.sock
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

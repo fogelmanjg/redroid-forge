@@ -42,7 +42,7 @@ function defaultModuleIdsForImage(img) {
 // requiredModuleIdsForImage above) for apps that do not work at all without it, but any OTHER
 // image can also have it opted into per instance (e.g. to test a WiFi-dependent app on an image
 // that does not declare it by default) -- same dual pattern as gapps/hasGapps.
-const OPTIONAL_PER_INSTANCE = ['gapps', 'hwenc', 'hwdec', 'nvenc', 'arm-translation', 'cifi', 'wifi-interno', 'wifi-interno-virtwifi', 'aurora-store'];
+const OPTIONAL_PER_INSTANCE = ['gapps', 'hwenc', 'hwdec', 'nvenc', 'venus3d', 'arm-translation', 'cifi', 'wifi-interno', 'wifi-interno-virtwifi', 'aurora-store'];
 
 // The modules of an instance: what the image is bound to, plus the optional ones.
 //  - `requested` omitted (undefined/null): the image's defaults (hwenc if it supports it).
@@ -64,7 +64,11 @@ function requiredModuleIds(img, requested) {
         { httpStatus: 400 },
       );
     }
-    if ((id === 'hwenc' || id === 'hwdec' || id === 'nvenc') && !img.hwEncCapable) {
+    // venus3d (real 3D rendering) shares this same single per-image capability flag rather than
+    // getting its own in images.json, which only ever lists one image today -- a second flag
+    // for a catalog of one would be a premature split; revisit if a second image's hardware
+    // acceleration support genuinely diverges from its video encode/decode support.
+    if ((id === 'hwenc' || id === 'hwdec' || id === 'nvenc' || id === 'venus3d') && !img.hwEncCapable) {
       throw Object.assign(new Error(`image "${img.id}" does not support hardware video acceleration (${id})`), { httpStatus: 400 });
     }
     if (!ids.includes(id)) ids.push(id);

@@ -54,6 +54,16 @@ test('nvenc cannot be requested on an image that does not support hw accel eithe
   assert.throws(() => moduleGate.requiredModuleIds(imgNoHw, ['nvenc']), (e) => e.httpStatus === 400 && /does not support hardware video acceleration/.test(e.message));
 });
 
+test('venus3d (real 3D) cannot be requested on an image that does not support hw accel either, and is independent of nvenc', () => {
+  assert.deepStrictEqual(moduleGate.requiredModuleIds(imgHw, ['venus3d']), ['venus3d']);
+  assert.throws(() => moduleGate.requiredModuleIds(imgNoHw, ['venus3d']), (e) => e.httpStatus === 400 && /does not support hardware video acceleration/.test(e.message));
+  // Both can be requested together today (moduleGate itself does not forbid it) even though
+  // their manifests need opposite gpuMode values -- see venus3d's own README for why that
+  // combination is not yet wired to actually work end to end, and manifests.incompatibilityReason
+  // (checked elsewhere, not here) is what would actually reject it for a specific gpuMode.
+  assert.deepStrictEqual(moduleGate.requiredModuleIds(imgHw, ['venus3d', 'nvenc']), ['venus3d', 'nvenc']);
+});
+
 test('only the optional modules can be requested', () => {
   for (const bad of [['magisk'], ['device-profile'], ['nope']]) {
     assert.throws(() => moduleGate.requiredModuleIds(imgHw, bad), (e) => e.httpStatus === 400, bad.join());
