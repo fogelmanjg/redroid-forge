@@ -86,13 +86,60 @@ whichever one does not match the instance's actual `gpuMode`, same mechanism tha
 
 ## Validation (jgustavo47, GTX 1050 Ti, 31/10/2026)
 
-See the port's own session notes for the exact boot/Vulkan-probe result. Not attempted on an
-RTX 4060 — that GPU's known, currently-open NVIDIA driver VA-space bug (see this module's own
-manifest description) already ruled it out of scope for this pass, independent of anything in
-this module's own code.
+**The core goal is confirmed working; full boot is not, yet.** Five real, load-bearing
+integration gaps were found and fixed against the live stock image, each one a genuine blocker
+(not a config nicety) — in the order hit:
+
+1. `/vendor/bin/gpu_config.sh` has no `nvidia-drm` case in `setup_vulkan()` and unconditionally
+   forces `ro.hardware.gralloc=gbm` (Mesa's native GBM, which fails outright against NVIDIA) —
+   patched to set `gralloc=cros`/`vulkan=virtio` for that driver name instead.
+2. SurfaceFlinger's RenderEngine auto-detect picked the GL backend, not Vulkan — needs
+   `debug.renderengine.backend=skiavkthreaded` forced explicitly.
+3. The standalone meson+NDK build of `vulkan.virtio.so` (no Soong module exists for it) links a
+   `libdrm.so` meson built itself via `-Dforce_fallback_for`, not shipped anywhere in the stock
+   image — ships the AOSP-tree-built one `nvenc` already proved works instead.
+4. A single-file bind mount under `/dev` or `/tmp` does not survive — Android's own init
+   remounts both as fresh tmpfs during boot. The socket lives under `/vendor` instead (not
+   remounted), and **two** env vars have to reach the guest's Vulkan ICD for it to even try the
+   vtest transport at all: `VTEST_SOCKET_NAME` (the socket path) and, the real root cause of a
+   generic `vkCreateInstance` `err=-3` that produced zero traffic on the host daemon's own
+   socket, `VN_DEBUG=vtest` (`vn_renderer_create()` only attempts vtest at all when this debug
+   flag is set — without it, it goes straight to the real kernel virtio-gpu device path, which
+   doesn't exist here, and fails immediately). Both are `setenv`'d directly on surfaceflinger's
+   own service block (a global init-level `export` was tried first and confirmed, via
+   `/proc/1/environ` after boot, to never actually reach it).
+
+With all four of those in place, **the actual target is confirmed real and working**: the host
+daemon's own log shows a genuine vtest client context being created, and SurfaceFlinger logs
+`RenderEngine: Vulkan device supports sufficient external semaphore sync fd features` followed by
+`GaneshVkRenderEngine::create: successfully initialized GaneshVkRenderEngine` — real Venus-backed
+Vulkan, not software, is what SurfaceFlinger's RenderEngine is running on. This is the module's
+whole point, and it is real, not simulated or assumed.
+
+5. **Still unresolved, and still blocking `sys.boot_completed`**: the stock image's legacy HIDL
+   2.0 Allocator HAL (`vendor.gralloc-2-0`, superseded by the AIDL/Gralloc4 path `gralloc.cros.so`
+   already provides — confirmed it is NOT what RenderEngine actually uses, per point 4 above)
+   crash-loops persistently (`exited with status 1`, dozens of times per boot; logd never
+   captures any stderr from it, it dies too fast to flush one). Giving it the same
+   `VTEST_SOCKET_NAME`/`VN_DEBUG` env vars did not stop the crash. Marking it `disabled` (which
+   should stop init's own automatic class-start) reduced but did **not** eliminate the restart
+   frequency — something still explicitly `start`s it by name repeatedly, bypassing `disabled`
+   (which only blocks the class-triggered path). Each crash trips init's own generic
+   "updatable components crashed 4 times" safety policy, which kills `surfaceflinger` and
+   `zygote` by name regardless of which specific instance currently holds those service slots —
+   this is what actually prevents `sys.boot_completed` from ever being set, even though the one,
+   stable, real `surfaceflinger` process (confirmed via the Vulkan/Venus init success above) is
+   never itself the thing that fails.
 
 ## Pending
 
+- **The `vendor.gralloc-2-0` crash loop above — the single concrete next step.** Next
+  diagnostics to try: capture its stderr directly (`strace -f` wrapping its binary, since logd
+  does not capture it) rather than guessing from `setenv`/`disabled` alone; check whether some
+  other HIDL/AIDL client in this image hardcodes a `start vendor.gralloc-2-0` call outside the
+  normal class-start/lazy-HAL paths (both already ruled out); consider whether removing the
+  service's binary/`.rc` file entirely (vs. `disabled`) is cleaner than fighting whatever keeps
+  restarting it.
 - The `nvenc` + `venus3d` simultaneous case above (needs a `vtest_gpu_encode_dmabuf()` dma-buf
   branch, untested on real hardware yet).
 - `REDROID_VENUS3D_ARTIFACTS_DIR` points at a local build folder today, same "download a
