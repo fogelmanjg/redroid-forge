@@ -1,0 +1,11 @@
+# Part of the "venus3d" module -- see venus3dService.js's installVtestSocketProp() for the
+# full story. minigbm's own patched NVIDIA backend (external/minigbm/nvidia_venus.c in this
+# project's AOSP tree, nvidia_venus_connect()) does not read the VTEST_SOCKET_NAME environment
+# variable Mesa's Vulkan ICD uses (vn_renderer_create_vtest(), set via surfaceflinger.rc's own
+# setenv) -- it reads this system property instead, via __system_property_get(), falling back to
+# a hardcoded /dev/venus/venus.sock (not this module's actual socket path) if unset. Without this,
+# any gralloc.cros.so consumer -- most importantly the legacy HIDL 2.0 Allocator service
+# SurfaceFlinger's own GraphicBufferAllocator depends on for real display buffers -- fails with
+# ENODEV ("no vtest connection") and crash-loops.
+on early-init
+    setprop mesa.vtest.socket.name /vendor/venus.sock

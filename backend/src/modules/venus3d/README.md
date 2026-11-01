@@ -116,30 +116,75 @@ daemon's own log shows a genuine vtest client context being created, and Surface
 Vulkan, not software, is what SurfaceFlinger's RenderEngine is running on. This is the module's
 whole point, and it is real, not simulated or assumed.
 
-5. **Still unresolved, and still blocking `sys.boot_completed`**: the stock image's legacy HIDL
-   2.0 Allocator HAL (`vendor.gralloc-2-0`, superseded by the AIDL/Gralloc4 path `gralloc.cros.so`
-   already provides — confirmed it is NOT what RenderEngine actually uses, per point 4 above)
-   crash-loops persistently (`exited with status 1`, dozens of times per boot; logd never
-   captures any stderr from it, it dies too fast to flush one). Giving it the same
-   `VTEST_SOCKET_NAME`/`VN_DEBUG` env vars did not stop the crash. Marking it `disabled` (which
-   should stop init's own automatic class-start) reduced but did **not** eliminate the restart
-   frequency — something still explicitly `start`s it by name repeatedly, bypassing `disabled`
-   (which only blocks the class-triggered path). Each crash trips init's own generic
-   "updatable components crashed 4 times" safety policy, which kills `surfaceflinger` and
-   `zygote` by name regardless of which specific instance currently holds those service slots —
-   this is what actually prevents `sys.boot_completed` from ever being set, even though the one,
-   stable, real `surfaceflinger` process (confirmed via the Vulkan/Venus init success above) is
-   never itself the thing that fails.
+5. **Still unresolved, and still blocking `sys.boot_completed` — root cause now actually found
+   (second pass, 31/10/2026 later the same day), overturning point 5's own original framing
+   above.** The legacy HIDL 2.0 Allocator (`vendor.gralloc-2-0`) is **not** superseded by anything
+   in this image — `find /vendor /system -iname '*allocator*'` confirms there is no AIDL
+   allocator *service* binary at all, only the AIDL client stub library. It is the only
+   `IAllocator` this image has, and `SurfaceFlinger::GraphicBufferAllocator` (display/BufferQueue
+   buffers — a different consumer than `RenderEngine`'s own direct Vulkan path, which bypasses
+   gralloc entirely) genuinely needs it. Removing the service (tried this pass) only trades the
+   crash loop for a clean `SIGABRT` in `surfaceflinger` itself (`Failed to load matching allocator
+   for mapper version 2`) — worse, not better.
+   
+   The crash itself (`AllocatorHal: failed to open gralloc0 device: No such device`) traces to
+   **two separate, real bugs**, both confirmed by reading code and by `strace`/`readelf` against
+   the actual files on disk, not assumed:
+   
+   - `nvidia_venus_connect()` (`external/minigbm/nvidia_venus.c`) reads the socket path from the
+     **system property** `mesa.vtest.socket.name` (`__system_property_get`), not the
+     `VTEST_SOCKET_NAME` **environment variable** `patchSurfaceflingerRc()` sets (that env var is
+     Mesa's own `vn_renderer_create_vtest()` convention — a different author/mechanism within the
+     same `redroid-nvidia` source tree). No amount of `setenv` in any `.rc` could ever have
+     reached this specific consumer. **Fixed this pass**: `installVtestSocketProp()` adds a
+     standalone `on early-init` trigger `.rc` (`venus3d-vtest-prop.rc`) that `setprop`s it to
+     `/vendor/venus.sock`, confirmed present system-wide after boot via `getprop`.
+   - **Bigger, still unresolved**: fixing the property above did **not** stop the crash, because
+     `nvidia_venus_connect()` is never actually reached. `strace -f` on the real service binary
+     shows it opens `/dev/dri/renderD128` fine (confirmed separately with a standalone C program
+     linked against the host's own `libdrm.so.2`: `drmGetVersion()` on that exact node genuinely
+     reports driver name `"nvidia-drm"`, matching `backend_nvidia_venus`'s `.name` field) — but
+     `drv_create()` still returns `NULL` ("Failed to initialize driver.", `cros_gralloc_driver.cc`'s
+     own log line) and falls through to probing every `/dev/dri/card*` node in vain. The reason:
+     **the stock `/vendor/lib64/hw/gralloc.cros.so` actually on this image is not the file this
+     module's artifacts are meant to patch at all.** `readelf -d`/`strings` on the real file
+     confirms it is a monolithic, statically-linked, *unpatched* minigbm build whose own
+     `drv_backend_list[]` only contains `backend_virtgpu`/`backend_i915`/`backend_amdgpu`/
+     `backend_radeon` — no `nvidia`/`nvidia-drm`/`nvidia_venus` string anywhere in it, and (the
+     README's own prior premise, now disproven by direct inspection) **it never `dlopen()`s a
+     separate `libminigbm_gralloc.so` at runtime at all** — a full `strace -f` of its startup
+     shows zero attempts to open any file by that name. The `libminigbm_gralloc.so` this module
+     *does* deploy (built via `m gralloc.minigbm`) is real and does contain
+     `backend_nvidia_venus`/`nvidia-drm` (confirmed via `strings`) — but it is architecturally the
+     **wrong kind of artifact** for either consumer in this image: `readelf --dyn-syms` shows it
+     exports the modern `cros_gralloc_driver` C++ class API (`get_instance`, `allocate`, `lock`,
+     `retain`, …) meant to be linked directly into a modern AIDL IAllocator/IMapper4 *service*
+     binary's own code — it has **no `HAL_MODULE_INFO_SYM`** (the `HMI` symbol `hw_get_module()`
+     requires), so it could never be loaded as a drop-in `gralloc.<name>.so` replacement even if
+     renamed and pointed at directly via `ro.hardware.gralloc`. Put simply: **no code path in this
+     stock image can ever reach `nvidia_venus.c` through gralloc, full stop** — independent of any
+     `.rc`/env-var/property fix, which is why three separate patch attempts across two passes
+     (`disabled`, env vars, now the correct property) all failed to produce a working allocator.
+     This is also why, even after this pass's one genuinely new, confirmed-correct property fix,
+     `vendor.gralloc-2-0` keeps crash-looping (395 times, unstopped, over one ~4-minute boot
+     window) and `system_server` itself keeps restarting too — a cascading symptom of the same
+     root cause, not a new, separate bug.
 
 ## Pending
 
-- **The `vendor.gralloc-2-0` crash loop above — the single concrete next step.** Next
-  diagnostics to try: capture its stderr directly (`strace -f` wrapping its binary, since logd
-  does not capture it) rather than guessing from `setenv`/`disabled` alone; check whether some
-  other HIDL/AIDL client in this image hardcodes a `start vendor.gralloc-2-0` call outside the
-  normal class-start/lazy-HAL paths (both already ruled out); consider whether removing the
-  service's binary/`.rc` file entirely (vs. `disabled`) is cleaner than fighting whatever keeps
-  restarting it.
+- **The real next step, now properly scoped (was previously "strace it", now actually traced
+  all the way through): either (a) extend `external/minigbm`'s own `Android.bp` with a *new*
+  Soong module that statically links this project's patched minigbm sources (including
+  `nvidia_venus.c`) behind a legacy `HAL_MODULE_INFO_SYM`-exporting shim — mirroring the stock
+  `gralloc.cros.so`'s own monolithic design closely enough to be a real drop-in replacement for
+  it — or (b) build and ship the modern AIDL allocator *service* binary this image never had in
+  the first place (its own `.rc` + VINTF manifest entry), linking the already-correctly-built
+  `libminigbm_gralloc.so` through its real C++ API, and let it replace
+  `android.hardware.graphics.allocator@2.0-service` outright instead of patching it. Either one
+  is a real AOSP build/porting task, not a config change — out of scope for a config-only pass.**
+- The `mesa.vtest.socket.name` property fix (`installVtestSocketProp()`) is real, tested, and
+  necessary regardless of which of the two options above gets picked — keep it; it just is not
+  sufficient on its own, since `nvidia_venus_connect()` is never reached today.
 - The `nvenc` + `venus3d` simultaneous case above (needs a `vtest_gpu_encode_dmabuf()` dma-buf
   branch, untested on real hardware yet).
 - `REDROID_VENUS3D_ARTIFACTS_DIR` points at a local build folder today, same "download a

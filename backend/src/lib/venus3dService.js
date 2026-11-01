@@ -83,27 +83,63 @@ async function installFiles(containerId) {
   await patchGpuConfigSh(containerId);
   await patchSurfaceflingerRc(containerId);
   await patchLegacyGrallocRc(containerId);
+  await installVtestSocketProp(containerId);
+}
+
+const VTEST_PROP_RC_SOURCE = path.join(__dirname, '..', 'modules', 'venus3d', 'venus3d-vtest-prop.rc');
+
+// A fourth real gap, and the actual root cause of what two earlier passes misdiagnosed as "the
+// legacy HIDL 2.0 Allocator service is dead/superseded code" (it is NOT -- it is the ONLY
+// IAllocator implementation this stock image ships at all; no AIDL allocator SERVICE binary
+// exists anywhere in it, confirmed via `find /vendor /system -iname '*allocator*'` -- only the
+// AIDL *client* stub library, `android.hardware.graphics.allocator-V2-ndk.so`, with nothing to
+// talk to). Deleting it (an earlier attempt in this same pass) only traded one failure mode for
+// a worse one: SurfaceFlinger's own `GraphicBufferAllocator` -- used for real display/BufferQueue
+// buffers, a completely different consumer than the Venus/Vulkan `RenderEngine` path validated
+// separately -- then aborts outright: `Abort message: 'Failed to load matching allocator for
+// mapper version 2'`, confirmed via a real tombstone backtrace
+// (`GraphicBufferAllocator::GraphicBufferAllocator()` <- `GraphicBuffer::initWithSize()` <-
+// `SurfaceFlinger::processDisplayAdded()`). So the service has to actually WORK, not disappear.
+//
+// Why it was crashing (`AllocatorHal: failed to open gralloc0 device: No such device`, i.e.
+// ENODEV): traced into `nvidia_venus_bo_create()` in minigbm's own patched backend
+// (`external/minigbm/nvidia_venus.c` in this project's AOSP tree) -- it returns `-ENODEV`
+// verbatim ("no vtest connection") when `nvidia_venus_connect()` fails to reach the host Venus
+// daemon. That function does NOT read the `VTEST_SOCKET_NAME` environment variable Mesa's own
+// `vn_renderer_create_vtest()` uses (the one `patchSurfaceflingerRc()` above sets, confirmed
+// working for the separate Vulkan/RenderEngine path) -- it reads the **system property**
+// `mesa.vtest.socket.name` via `__system_property_get()`, falling back to a hardcoded
+// `/dev/venus/venus.sock` if unset (neither path this module actually uses,
+// `venus3dAccel.js`'s own `GUEST_SOCKET_PATH` is `/vendor/venus.sock`) -- a different
+// author/convention within the same `redroid-nvidia` source tree, confirmed by reading the
+// function itself rather than assumed. No `setenv`/`export` in any `.rc` could ever have fixed
+// this: it was never an environment-variable problem for this specific consumer. The real fix is
+// a plain `setprop`, which -- unlike the `export` propagation-timing gap `venus3dAccel.js`'s own
+// comment already documents -- reaches every process equally since it is a global property, not
+// inherited environment: `installVtestSocketProp()` below adds a standalone trigger `.rc`
+// (`on early-init`, same convention as `redroid-gralloc-fix`'s own `redroid-no-rgb10.rc`) that
+// sets `mesa.vtest.socket.name` to the module's real socket path before anything can race it.
+async function installVtestSocketProp(containerId) {
+  await copyIntoContainer(containerId, VTEST_PROP_RC_SOURCE, 'etc/init/venus3d-vtest-prop.rc');
 }
 
 const LEGACY_GRALLOC_RC_PATH = '/vendor/etc/init/android.hardware.graphics.allocator@2.0-service.rc';
 
 // A third real gap, found after the first two: the stock image's legacy HIDL 2.0 Allocator
-// service (vendor.gralloc-2-0 -- superseded by the modern AIDL/Gralloc4 path gralloc.cros.so
-// already provides, which installFiles() above confirms is what actually serves EGL/Vulkan) is
-// still started on demand by some lazy-HAL client and shares the SAME cros_gralloc_driver.cc
-// code this module patches -- so it also needs VTEST_SOCKET_NAME/VN_DEBUG, which its own
-// service block never had (only surfaceflinger's did). Without them it dials the vtest
-// *upstream default* path ("/tmp/.virgl_test", which this module moved away from -- see
-// venus3dAccel.js's GUEST_SOCKET_PATH) and fails ("failed to open gralloc0 device"). Its own
-// crash is not just cosmetic: init's generic "updatable components" crash-safety policy kills
-// surfaceflinger and zygote outright after 4 crashes, which is what actually blocked
-// boot_completed. The setenv alone did NOT stop it from crashing on real hardware (confirmed:
-// still exited status 1 dozens of times with setenv applied, root cause not pinned down --
-// logd never captured any stderr from it, dying too fast to flush) -- `disabled` additionally
-// stops init's own automatic class-start from retriggering it every few seconds; its own
-// `onrestart` coupling to surfaceflinger is also dropped since it is no longer needed once this
-// service is not auto-started. Not yet confirmed to fully resolve boot_completed on real
-// hardware at the time of this port -- see the module's own README "Validation" section.
+// service (vendor.gralloc-2-0) is the ONLY IAllocator implementation this image ships (see
+// installVtestSocketProp()'s own comment above for why it is required, not superseded) -- but
+// it is lazy-HAL started by `hwservicemanager` on demand, and the actual client asking for it is
+// **SurfaceFlinger itself** (confirmed via `logcat`: pid 167, the very first surfaceflinger
+// instance, is the one spamming "Waited one second for
+// android.hardware.graphics.allocator@2.0::IAllocator/default" / "trying to start it as a lazy
+// HAL"). It shares the SAME cros_gralloc_driver.cc code this module patches -- so it also needs
+// VTEST_SOCKET_NAME/VN_DEBUG, which its own service block never had (only surfaceflinger's did;
+// harmless to also set here even though this specific consumer turned out to need the
+// `mesa.vtest.socket.name` property instead, per installVtestSocketProp() -- other code paths
+// inside the same .so may still consult the env vars). `disabled` additionally stops init's own
+// automatic class-start from retriggering it every few seconds; it does NOT stop the lazy-HAL
+// `ctl.interface_start` path (confirmed in logcat), which is what actually restarts it on demand
+// -- kept anyway since it is harmless and avoids one redundant class-triggered start attempt.
 async function patchLegacyGrallocRc(containerId) {
   const tmpPath = path.join(os.tmpdir(), `venus3d-${containerId.slice(0, 12)}-allocator2.0.rc`);
   await execFileAsync('docker', ['cp', `${containerId}:${LEGACY_GRALLOC_RC_PATH}`, tmpPath]);
