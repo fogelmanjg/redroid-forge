@@ -691,6 +691,23 @@ function buildRestartEditRow(inst) {
   venus3dWrap.appendChild(document.createTextNode(t('new.venus3d')));
   panel.appendChild(venus3dWrap);
 
+  // venus3d auto-check: on an NVIDIA host, plain gpuMode=host never boots at all (the stock
+  // GBM/Mesa gralloc crashes SurfaceFlinger in a loop, see the module's own README) -- leaving
+  // the checkbox unticked there is never a valid choice, not just a default worth nudging.
+  // Seeded once per switch-to-host (not re-forced if the user then unchecks it deliberately,
+  // e.g. to reproduce the broken path for diagnosis), reset so it nudges again each time the
+  // select leaves and comes back to "host". Best-effort only -- assertModulesReady still
+  // enforces the real rule server-side regardless of what this suggests.
+  let venus3dAutoChecked = false;
+  async function maybeAutoCheckVenus3d() {
+    if (gpuSelect.value !== 'host' || venus3dAutoChecked || checks.venus3d.checked) return;
+    venus3dAutoChecked = true;
+    try {
+      const m = await api(`/modules/venus3d?imageId=${encodeURIComponent(inst.imageId)}`);
+      if (gpuSelect.value === 'host' && m.hostCompatible) checks.venus3d.checked = true;
+    } catch { /* best-effort nudge, nothing to fall back to */ }
+  }
+
   // Mirrors the "new instance" form: a module requiring a specific gpuMode must not stay
   // checkable/selectable once the select is switched away from it, instead of only warning
   // and letting the apply fail server-side with a 409 from moduleGate.check.
@@ -700,7 +717,12 @@ function buildRestartEditRow(inst) {
     checks.hwdec.disabled = needsHost;
     if (needsHost) checks.hwdec.checked = false;
     checks.venus3d.disabled = needsHost;
-    if (needsHost) checks.venus3d.checked = false;
+    if (needsHost) {
+      checks.venus3d.checked = false;
+      venus3dAutoChecked = false;
+    } else {
+      maybeAutoCheckVenus3d();
+    }
     updateEncodeSelect({
       select: encodeSelect, optHwenc, optNvenc, status: encodeStatus,
       imageId: inst.imageId, hwEncCapable: inst.hwEncCapable, gpuMode: gpuSelect.value,
@@ -2500,7 +2522,19 @@ const dialog = $('#new-instance-dialog');
 // gpu-mode select lives in the same form, see new.gpuMode) AND this host's GPU vendor supports
 // that specific capability; otherwise the checkbox is disabled and says why, instead of
 // letting the create fail afterwards.
+//
+// venus3d is the one exception to "never a silent default" above, auto-checked (not forced --
+// still togglable) the moment it becomes available: on an NVIDIA host, plain gpuMode=host never
+// boots AT ALL without it (the stock GBM/Mesa gralloc crashes SurfaceFlinger in a loop, see the
+// module's own README) -- unlike hwdec, leaving it unticked there is not an optional path to
+// something working without it, it is a guaranteed broken instance. Found for real 01/11/2026:
+// an instance switched to host without it, hit exactly that crash loop.
 let imagesById = {};
+// Tracks whether venus3d has already been auto-checked for the current "gpuMode=host" stretch
+// in this dialog session -- set once the nudge fires, reset whenever gpuMode leaves host (see
+// refreshHwAccelOption below) or the dialog is reopened, so a manual uncheck afterward sticks
+// instead of being fought on the next unrelated refresh (image change, etc).
+let venus3dNudged = false;
 function hwAccelElements(id) {
   return { chk: $(`#chk-${id}`), status: $(`#${id}-status`) };
 }
@@ -2522,6 +2556,7 @@ async function refreshHwAccelOption(id) {
   const effectiveGpuMode = $('#new-instance-form').gpuMode.value || img.gpuMode;
   if (effectiveGpuMode !== 'host') {
     setHwAccel(id, { enabled: false, text: t(`new.${id}NeedsHost`), tone: 'muted' });
+    if (id === 'venus3d') venus3dNudged = false;
     return;
   }
   setHwAccel(id, { enabled: false, text: t(`new.${id}Checking`), tone: 'muted' });
@@ -2532,6 +2567,13 @@ async function refreshHwAccelOption(id) {
       setHwAccel(id, { enabled: false, text: t(`new.${id}NoHost`, { reason: m.hostIncompatibilityReason }), tone: 'warn-text' });
     } else {
       setHwAccel(id, { enabled: true, text: t(`new.${id}Ok`, { vendor: m.hostGpuVendor || '?' }), tone: 'ok-text' });
+      // See the module-level comment on venus3dNudged: plain host mode never boots on NVIDIA
+      // without this module, so it defaults on (still togglable) instead of defaulting off like
+      // hwdec/hwenc above.
+      if (id === 'venus3d' && !venus3dNudged) {
+        venus3dNudged = true;
+        hwAccelElements(id).chk.checked = true;
+      }
     }
   } catch (e) {
     setHwAccel(id, { enabled: false, text: t('common.error', { msg: e.message }), tone: 'fail-text' });
@@ -2693,6 +2735,7 @@ $('#btn-new-instance').addEventListener('click', async () => {
   $('#select-encode').value = '';
   $('#chk-hwdec').checked = false;
   $('#chk-venus3d').checked = false;
+  venus3dNudged = false;
   $('#chk-wifi-interno').checked = false;
   resetGappsStatus();
   dialog.showModal();
