@@ -1,7 +1,20 @@
+const net = require('net');
 const express = require('express');
 const path = require('path');
 const auth = require('./lib/auth');
 const settings = require('./lib/settings');
+
+// Every host in the fleet has a global-scope IPv6 address from Tailscale (the ULA
+// fd7a:115c:a1e0::/48) -- that makes Node's fetch() race real public IPv6 addresses too (Happy
+// Eyeballs) whenever it looks up a dual-stack external host (e.g. aurora-store's module fetching
+// its pinned APK from f-droid.org), even though that IPv6 cannot actually reach the public
+// internet (Tailscale-only). Node's default per-attempt timeout (250ms) is shorter than the real
+// RTT to many external hosts from here, so the real, working IPv4 address gets abandoned as
+// "timed out" before it has a chance to answer -- confirmed live, 01/11/2026 (intermittent
+// "fetch failed" installing aurora-store on a fresh host, root-caused with `node -e` reproducing
+// AggregateError ETIMEDOUT on every IPv4 candidate within ~830ms while IPv6 failed instantly with
+// ENETUNREACH). Raising the budget fixes it without needing Happy Eyeballs off entirely.
+net.setDefaultAutoSelectFamilyAttemptTimeout(1500);
 
 const app = express();
 app.use(express.json());

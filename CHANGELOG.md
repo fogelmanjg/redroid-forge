@@ -21,6 +21,21 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
 
 ## [Unreleased]
 
+### Fixed
+
+- Intermittent "fetch failed" installing `aurora-store` on a host that had never cached its APK
+  before (`backend/src/server.js`). Root cause: every host in the fleet has a global-scope IPv6
+  address from Tailscale, which makes Node's `fetch()` race real public IPv6 candidates too
+  (Happy Eyeballs) whenever it resolves a dual-stack external host -- even though that IPv6 is
+  Tailscale-only, not internet-routable. Node's default per-attempt timeout (250ms) is shorter
+  than the real RTT to many external hosts from here, so the real, working IPv4 address got
+  abandoned as "timed out" before it could answer. Fixed by raising
+  `net.setDefaultAutoSelectFamilyAttemptTimeout` to 1500ms at startup -- confirmed with a live
+  repro (`node -e` against f-droid.org) failing intermittently at the default and succeeding 5/5
+  at the new one. Not specific to `aurora-store` -- it is the only module today that fetches
+  anything live over the network at module-apply time, but the fix is global (any future outbound
+  fetch benefits).
+
 ### Added
 
 - New module, `nvenc`: hardware H.264 encode on NVIDIA hosts, ported from
