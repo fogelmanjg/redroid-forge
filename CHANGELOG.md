@@ -47,6 +47,29 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
   anything live over the network at module-apply time, but the fix is global (any future outbound
   fetch benefits).
 
+### Changed
+
+- `venus3d`'s checkbox moved from the encode/decode section to right under the `gpuMode` select,
+  in both the new-instance dialog and the Configure panel -- it is the 3D acceleration that
+  `gpuMode=host` means on an NVIDIA host, not an independent capability alongside encode/decode.
+  Still opt-in (never auto-checked, same as `hwdec`): picking `host` without it is not blocked,
+  since deliberately reproducing/diagnosing the known-broken path is a legitimate reason to do it
+  on purpose. Left unticked while `gpuMode=host` on an NVIDIA host, it now shows a loud red "!
+  not recommended" warning instead of staying silent -- plain host mode never boots at all on
+  this GPU without it (stock GBM/Mesa gralloc crash-loops SurfaceFlinger). Found for real,
+  01/11/2026 (jgustavo47): an instance was switched to host without it and hit exactly that
+  crash loop.
+
+- `cifi`'s manifest (`queToca`, both languages) now discloses that its watchdog can't tell a real
+  crash apart from the instance simply running a different app in the foreground -- it only
+  checks `pidof` for CIFI's own process, so on any tick where something else is running instead,
+  it force-relaunches CIFI over it and taps through its own launch screens regardless. Only
+  recommended on an instance dedicated to CIFI alone. Version bumped 1 -> 2 so anyone who already
+  accepted it is re-prompted with the new disclosure before their instance's next
+  start/restart. Prompted by testing another app (Loop Sort) on a `cifi`-enabled instance,
+  01/11/2026 (jgustavo47) -- not confirmed as the actual cause of anything there, the module's own
+  logic alone is enough to document the risk regardless.
+
 ### Added
 
 - New module, `nvenc`: hardware H.264 encode on NVIDIA hosts, ported from
