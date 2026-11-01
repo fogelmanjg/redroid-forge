@@ -154,6 +154,7 @@ gunzip -c image.tar.gz | docker load</pre>
             <option value="guest" data-i18n="new.gpuModeGuest">guest (slow, safe)</option>
           </select>
         </label>
+        <p class="muted" data-i18n="new.gpuModeNote">guest always boots fine -- some apps just need host mode's real GPU to work correctly, though.</p>
         <label class="contract-checkbox"><input type="checkbox" name="venus3d" id="chk-venus3d" />
           <span data-i18n="new.venus3d">Real 3D acceleration (NVIDIA)</span></label>
         <p id="venus3d-status" class="muted" hidden></p>

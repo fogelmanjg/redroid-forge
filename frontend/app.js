@@ -626,6 +626,10 @@ function buildRestartEditRow(inst) {
   gpuWrap.appendChild(gpuSpan);
   gpuWrap.appendChild(gpuSelect);
   panel.appendChild(gpuWrap);
+  const gpuModeNote = document.createElement('p');
+  gpuModeNote.className = 'muted';
+  gpuModeNote.textContent = t('new.gpuModeNote');
+  panel.appendChild(gpuModeNote);
 
   const ids = inst.requiredModuleIds || [];
   const checks = {};
