@@ -242,10 +242,24 @@ instance's own already-created container, with the same contract-based consent `
    completes cleanly, no RenderThread crashes, and a real scrcpy recording of the home screen
    succeeds.
 
+## `nvenc` + `venus3d` together (31/10/2026, closed)
+
+The `vtest_gpu_encode_dmabuf()` branch this section used to call out as pending is done -- see
+`nvenc`'s own README for the full story of the fix (`backend/native/nvenc-daemon/vtest_gpu_encode.c`).
+Short version: `nvenc`'s manifest now accepts `gpuMode: ["guest", "host"]` instead of only
+`["guest"]`. With `venus3d` active, a capture buffer arrives at the daemon as a real dma-buf
+(imported via `VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT` + an explicit DRM format modifier,
+then an image-to-image copy) instead of the memfd this function originally only ever saw; without
+`venus3d` (gpuMode=guest), the original memfd/staging-buffer path is unchanged. The daemon tells
+the two cases apart per-call via `readlink()` on the received fd, not via `gpuMode` directly --
+whichever buffer kind actually shows up is handled correctly either way.
+
+Validation status: see nvenc's own README "Pending" section for the exact, current result of
+testing this combination on real hardware (jgustavo47, GTX 1050 Ti) -- updated there, not
+duplicated here, so the two files cannot drift out of sync about the same test.
+
 ## Pending
 
-- The `nvenc` + `venus3d` simultaneous case above (needs a `vtest_gpu_encode_dmabuf()` dma-buf
-  branch, untested on real hardware yet, and explicitly out of scope for this pass).
 - `REDROID_VENUS3D_ARTIFACTS_DIR` points at a local build folder today, same "download a
   release once one exists" TODO `hwenc`/`nvenc` already carry. It now also needs
   `lib/hw/gralloc.minigbm.so`, `lib64/hw/gralloc.minigbm.so`, `lib/libdmabufheap.so`, and

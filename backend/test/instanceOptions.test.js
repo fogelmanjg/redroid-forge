@@ -57,10 +57,11 @@ test('nvenc cannot be requested on an image that does not support hw accel eithe
 test('venus3d (real 3D) cannot be requested on an image that does not support hw accel either, and is independent of nvenc', () => {
   assert.deepStrictEqual(moduleGate.requiredModuleIds(imgHw, ['venus3d']), ['venus3d']);
   assert.throws(() => moduleGate.requiredModuleIds(imgNoHw, ['venus3d']), (e) => e.httpStatus === 400 && /does not support hardware video acceleration/.test(e.message));
-  // Both can be requested together today (moduleGate itself does not forbid it) even though
-  // their manifests need opposite gpuMode values -- see venus3d's own README for why that
-  // combination is not yet wired to actually work end to end, and manifests.incompatibilityReason
-  // (checked elsewhere, not here) is what would actually reject it for a specific gpuMode.
+  // Both can be requested together -- and, since 31/10/2026, actually work together: nvenc's own
+  // manifest now accepts gpuMode "guest" AND "host" (see its manifest.json), so
+  // manifests.incompatibilityReason (checked elsewhere, not here, via moduleGate.check) no longer
+  // rejects this combination on a gpuMode=host instance either -- see moduleContract.test.js for
+  // that check-level coverage.
   assert.deepStrictEqual(moduleGate.requiredModuleIds(imgHw, ['venus3d', 'nvenc']), ['venus3d', 'nvenc']);
 });
 

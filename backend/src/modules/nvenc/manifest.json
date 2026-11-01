@@ -2,7 +2,7 @@
   "id": "nvenc",
   "nombre": "Hardware video encode (NVENC, NVIDIA)",
   "esTerceroNoLibre": false,
-  "descripcion": "H.264 encode on NVIDIA hosts for screen streaming/capture, via NVENC (a different mechanism from hwenc's VA-API -- NVIDIA never exposes an EncSlice VA-API entrypoint). Ported from redroid-nvidia's Tier 7, confirmed clean on a GTX 1050 Ti -- the one open item in that project (a driver-level artifact) is specific to the RTX 4060. Does NOT need gpuMode=host or redroid-nvidia's own Venus/3D pipeline: the Codec2 component falls back to a plain SCM_RIGHTS dma-buf transport for any real Surface-sourced capture buffer, which is exactly the case this module needs -- gpuMode=guest (the one that actually boots on NVIDIA) is enough.",
+  "descripcion": "H.264 encode on NVIDIA hosts for screen streaming/capture, via NVENC (a different mechanism from hwenc's VA-API -- NVIDIA never exposes an EncSlice VA-API entrypoint). Ported from redroid-nvidia's Tier 7, confirmed clean on a GTX 1050 Ti -- the one open item in that project (a driver-level artifact) is specific to the RTX 4060. Works standalone on gpuMode=guest (no 3D pipeline needed: the Codec2 component falls back to a plain SCM_RIGHTS transport over a memfd for any real Surface-sourced capture buffer) AND, since 31/10/2026, together with the \"venus3d\" module on gpuMode=host (the same SCM_RIGHTS transport, now importing the real dma-buf/GEM buffer venus3d's minigbm backend hands over instead of a memfd) -- see this module's own README for how the two cases are told apart at runtime.",
   "queToca": [
     "copies a service (compiled binary, .rc, seccomp policy, VINTF manifest) into the instance's /vendor -- BEFORE the first start, like hwenc",
     "adds the encoder entry to /vendor/etc/media_codecs.xml (same entry name/type hwenc uses, c2.hardware.encoder.h264 -- the two are mutually exclusive by hostGpuVendor, never installed on the same host)",
@@ -15,7 +15,8 @@
       15
     ],
     "gpuMode": [
-      "guest"
+      "guest",
+      "host"
     ],
     "hostGpuVendor": [
       "nvidia"
@@ -32,7 +33,7 @@
   "i18n": {
     "es": {
       "nombre": "Encode de video por hardware (NVENC, NVIDIA)",
-      "descripcion": "Encode H.264 en hosts NVIDIA para streaming/captura de pantalla, via NVENC (un mecanismo distinto al VA-API de hwenc -- NVIDIA nunca expone un entrypoint EncSlice de VA-API). Portado de redroid-nvidia Tier 7, confirmado limpio en una GTX 1050 Ti -- el unico item abierto de ese proyecto (un artefacto a nivel driver) es especifico de la RTX 4060. NO necesita gpuMode=host ni el pipeline Venus/3D propio de redroid-nvidia: el componente Codec2 cae a un transporte SCM_RIGHTS de dma-buf plano para cualquier buffer de captura real tipo Surface, que es exactamente el caso que este modulo necesita -- gpuMode=guest (el que realmente bootea en NVIDIA) alcanza.",
+      "descripcion": "Encode H.264 en hosts NVIDIA para streaming/captura de pantalla, via NVENC (un mecanismo distinto al VA-API de hwenc -- NVIDIA nunca expone un entrypoint EncSlice de VA-API). Portado de redroid-nvidia Tier 7, confirmado limpio en una GTX 1050 Ti -- el unico item abierto de ese proyecto (un artefacto a nivel driver) es especifico de la RTX 4060. Funciona solo en gpuMode=guest (sin pipeline 3D: el componente Codec2 cae a un transporte SCM_RIGHTS sobre un memfd para cualquier buffer de captura real tipo Surface) Y, desde el 31/10/2026, junto con el modulo \"venus3d\" en gpuMode=host (el mismo transporte SCM_RIGHTS, ahora importando el dma-buf/GEM real que entrega el backend minigbm de venus3d en vez de un memfd) -- ver el README de este modulo para como se distinguen los dos casos en runtime.",
       "queToca": [
         "copia un servicio (binario compilado, .rc, politica de seccomp, manifest VINTF) dentro de /vendor de la instancia -- ANTES del primer arranque, igual que hwenc",
         "agrega la entrada del encoder a /vendor/etc/media_codecs.xml (misma entrada/tipo que usa hwenc, c2.hardware.encoder.h264 -- los dos son mutuamente excluyentes por hostGpuVendor, nunca instalados en el mismo host)",

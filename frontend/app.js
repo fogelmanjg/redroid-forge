@@ -678,6 +678,19 @@ function buildRestartEditRow(inst) {
   hwdecWrap.appendChild(document.createTextNode(t('new.hwdec')));
   panel.appendChild(hwdecWrap);
 
+  // venus3d: same shape as hwdec (plain checkbox, gpuMode=host only, no vendor split needed in
+  // the UI -- the module itself is NVIDIA-only via hostGpuVendor, enforced server-side).
+  const venus3dWrap = document.createElement('label');
+  venus3dWrap.className = 'display-edit-field';
+  venus3dWrap.style.flexDirection = 'row';
+  const venus3dChk = document.createElement('input');
+  venus3dChk.type = 'checkbox';
+  venus3dChk.checked = ids.includes('venus3d');
+  checks.venus3d = venus3dChk;
+  venus3dWrap.appendChild(venus3dChk);
+  venus3dWrap.appendChild(document.createTextNode(t('new.venus3d')));
+  panel.appendChild(venus3dWrap);
+
   // Mirrors the "new instance" form: a module requiring a specific gpuMode must not stay
   // checkable/selectable once the select is switched away from it, instead of only warning
   // and letting the apply fail server-side with a 409 from moduleGate.check.
@@ -686,6 +699,8 @@ function buildRestartEditRow(inst) {
     codecWarn.hidden = !needsHost;
     checks.hwdec.disabled = needsHost;
     if (needsHost) checks.hwdec.checked = false;
+    checks.venus3d.disabled = needsHost;
+    if (needsHost) checks.venus3d.checked = false;
     updateEncodeSelect({
       select: encodeSelect, optHwenc, optNvenc, status: encodeStatus,
       imageId: inst.imageId, hwEncCapable: inst.hwEncCapable, gpuMode: gpuSelect.value,
@@ -885,6 +900,7 @@ function buildRestartEditRow(inst) {
     const modules = ids.filter((id) => id === 'wifi-interno-virtwifi');
     if (encodeSelect.value) modules.push(encodeSelect.value);
     if (checks.hwdec.checked) modules.push('hwdec');
+    if (checks.venus3d.checked) modules.push('venus3d');
     if (wifiChk.checked) modules.push('wifi-interno');
     if (gappsChk.checked) modules.push('gapps');
     if (armChk.checked) modules.push('arm-translation');
@@ -2521,13 +2537,17 @@ async function refreshHwAccelOption(id) {
     setHwAccel(id, { enabled: false, text: t('common.error', { msg: e.message }), tone: 'fail-text' });
   }
 }
-// Encode is a single select (none/hwenc/nvenc), not a checkbox like hwdec: the two mechanisms
-// are mutually exclusive by host GPU vendor (hwenc: AMD/Intel, needs gpuMode=host; nvenc:
-// NVIDIA, needs gpuMode=guest -- NVIDIA's gpuMode=host does not even boot). Whichever vendor
-// this host does NOT have is hidden outright (it will never work on this hardware, not merely
-// "needs a setting changed"); the one that does apply is only disabled, with a hint, when
-// gpuMode does not match yet -- that is a live, user-adjustable choice, in either form that uses
-// this (the new-instance dialog and the per-instance Configure panel, see buildRestartEditRow).
+// Encode is a single select (none/hwenc/nvenc), not a checkbox like hwdec: hwenc and nvenc are
+// still mutually exclusive by host GPU vendor (hwenc: AMD/Intel, needs gpuMode=host; nvenc:
+// NVIDIA). Unlike before 31/10/2026, nvenc no longer needs gpuMode=guest specifically -- its own
+// manifest now accepts both "guest" (standalone, a plain memfd transport) and "host" (together
+// with the venus3d module active, a real dma-buf import instead -- see nvenc's own README), so on
+// an NVIDIA host it is compatible with whichever gpuMode is live either way. Whichever vendor this
+// host does NOT have is hidden outright (it will never work on this hardware, not merely "needs a
+// setting changed"); the one that does apply is only disabled, with a hint, when gpuMode does not
+// match ANY of its compatibleCon.gpuMode values -- that is a live, user-adjustable choice, in
+// either form that uses this (the new-instance dialog and the per-instance Configure panel, see
+// buildRestartEditRow).
 //
 // gpuMode here must already be the EFFECTIVE value ('host'/'guest', never '' / image-default) --
 // callers resolve that themselves, since what "default" means differs between the two forms.
@@ -2603,6 +2623,7 @@ async function refreshEncodeOption() {
 function refreshHwencOption() {
   refreshEncodeOption();
   refreshHwAccelOption('hwdec');
+  refreshHwAccelOption('venus3d');
 }
 $('#image-select').addEventListener('change', refreshHwencOption);
 $('#new-instance-form').gpuMode.addEventListener('change', refreshHwencOption);
@@ -2671,6 +2692,7 @@ $('#btn-new-instance').addEventListener('click', async () => {
   $('#chk-aurora-store').checked = false;
   $('#select-encode').value = '';
   $('#chk-hwdec').checked = false;
+  $('#chk-venus3d').checked = false;
   $('#chk-wifi-interno').checked = false;
   resetGappsStatus();
   dialog.showModal();
@@ -2719,6 +2741,7 @@ $('#new-instance-form').addEventListener('submit', async (e) => {
   const modules = [];
   if (form.encode.value) modules.push(form.encode.value);
   if (form.hwdec.checked) modules.push('hwdec');
+  if (form.venus3d.checked) modules.push('venus3d');
   if (form.gapps.checked) modules.push('gapps');
   if (form.arm.checked) modules.push('arm-translation');
   if (form.auroraStore.checked) modules.push('aurora-store');

@@ -837,78 +837,181 @@ vtest_gpu_encode_dmabuf(int fd, uint32_t width, uint32_t height,
    const uint32_t rowBytes = rowPixels * bpp;
    const size_t bufSize = (size_t)rowBytes * height;
 
-   /* Step 1: this buffer is a plain memfd (confirmed on real hardware,
-    * 31/10/2026, via readlink("/proc/self/fd/N") on the received fd:
-    * "/memfd:gralloc-buffer (deleted)") - redroid's own gralloc
-    * (gralloc.redroid.so, the one gpuMode=guest actually uses - the whole
-    * reason this module targets that mode on NVIDIA) allocates plain CPU
-    * shared memory here, not a real dma-buf/GEM object the way cros_gralloc/
-    * minigbm would on a real GPU (gpuMode=host). There is no GPU-side
-    * object behind a memfd to import via VK_EXTERNAL_MEMORY_HANDLE_TYPE_
-    * DMA_BUF_BIT_EXT (confirmed: that path's AllocateMemory fails outright,
-    * -EIO, every single call). Treated instead as what it actually is -
-    * plain CPU-visible memory - mmap()'d directly and uploaded through an
-    * ordinary host-visible staging buffer. */
-   void *src = mmap(NULL, bufSize, PROT_READ, MAP_SHARED, fd, 0);
-   close(fd); /* mmap() took its own reference; the fd itself is no longer needed */
-   ret = -EIO;
-   if (src == MAP_FAILED) {
-      fprintf(stderr, "encode_dmabuf: mmap(memfd, %zu) failed: %s\n", bufSize, strerror(errno));
-      goto out;
-   }
+   /*
+    * venus3d (31/10/2026): tell a real dma-buf (from minigbm's cros_gralloc/
+    * nvidia_venus.c, with venus3d active) apart from the plain memfd
+    * redroid's own gralloc.redroid.so hands over without it - the same
+    * readlink() signal the comment this replaces already used to diagnose
+    * the split in the first place: a memfd's target always starts with
+    * "/memfd:"; a real dma-buf's does not. NvencEncComponent.cpp's own
+    * `looksLikeCrosGralloc` branch is what produces a real, non-zero
+    * `modifier` and a BYTE (not pixel) `stride` for this second case -
+    * confirmed by reading cros_gralloc_handle.h directly: `strides[]` is
+    * documented there as the per-plane byte pitch, not pixels (unlike the
+    * memfd wrapper's own stride, confirmed PIXELS by the comment below).
+    */
+   char fdlink_path[64];
+   char fdlink_target[256] = { 0 };
+   snprintf(fdlink_path, sizeof(fdlink_path), "/proc/self/fd/%d", fd);
+   const ssize_t fdlink_len = readlink(fdlink_path, fdlink_target, sizeof(fdlink_target) - 1);
+   const bool is_real_dmabuf = !(fdlink_len > 0 && strncmp(fdlink_target, "/memfd:", 7) == 0);
 
-   const VkBufferCreateInfo staging_info = {
-      .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, .size = bufSize,
-      .usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT, .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
-   };
    VkBuffer staging_buf = VK_NULL_HANDLE;
    VkDeviceMemory staging_mem = VK_NULL_HANDLE;
-   VkResult vr = enc.CreateBuffer(enc.dev, &staging_info, NULL, &staging_buf);
-   if (vr != VK_SUCCESS) {
-      munmap(src, bufSize);
-      fprintf(stderr, "encode_dmabuf FAIL: CreateBuffer(staging) failed (vr=%d)\n", vr);
-      goto out;
-   }
+   VkImage import_image = VK_NULL_HANDLE;
+   VkDeviceMemory import_mem = VK_NULL_HANDLE;
 
-   VkMemoryRequirements staging_reqs;
-   enc.GetBufferMemoryRequirements(enc.dev, staging_buf, &staging_reqs);
-   uint32_t staging_mem_type = UINT32_MAX;
-   const VkMemoryPropertyFlags want = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
-   for (uint32_t i = 0; i < enc.mem_props.memoryTypeCount; i++)
-      if ((staging_reqs.memoryTypeBits & (1u << i)) &&
-          (enc.mem_props.memoryTypes[i].propertyFlags & want) == want)
-         { staging_mem_type = i; break; }
-   if (staging_mem_type == UINT32_MAX) {
+   if (is_real_dmabuf) {
+      /* Step 1 (real dma-buf, venus3d active): import the GEM object
+       * directly as a Vulkan image at its own real modifier/byte-stride -
+       * device memory behind a dma-buf is not generally CPU-mappable the
+       * way a memfd is (confirmed below, the whole reason the memfd path
+       * exists). `width`/`height` here are already the buffer's own real
+       * allocation size (cros_gralloc_handle_t::width/height, read by the
+       * caller directly, not a display-cropped value), so no cropping is
+       * needed afterward, unlike the memfd case. The EXPLICIT (not LIST)
+       * modifier variant is required for import: we must describe the
+       * layout this memory ALREADY has, not let the driver pick a fresh
+       * one the way a new allocation would. */
+      const VkExternalMemoryImageCreateInfo import_ext = {
+         .sType = VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMAGE_CREATE_INFO,
+         .handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT,
+      };
+      const VkSubresourceLayout import_plane = {
+         .offset = 0, .size = 0, .rowPitch = stride, .arrayPitch = 0, .depthPitch = 0,
+      };
+      const VkImageDrmFormatModifierExplicitCreateInfoEXT import_explicit_mod = {
+         .sType = VK_STRUCTURE_TYPE_IMAGE_DRM_FORMAT_MODIFIER_EXPLICIT_CREATE_INFO_EXT,
+         .pNext = &import_ext, .drmFormatModifier = modifier,
+         .drmFormatModifierPlaneCount = 1, .pPlaneLayouts = &import_plane,
+      };
+      const VkImageCreateInfo import_info = {
+         .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO, .pNext = &import_explicit_mod,
+         .imageType = VK_IMAGE_TYPE_2D, .format = format, .extent = { width, height, 1 },
+         .mipLevels = 1, .arrayLayers = 1, .samples = VK_SAMPLE_COUNT_1_BIT,
+         .tiling = VK_IMAGE_TILING_DRM_FORMAT_MODIFIER_EXT,
+         .usage = VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
+         .sharingMode = VK_SHARING_MODE_EXCLUSIVE, .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+      };
+      VkResult vr = enc.CreateImage(enc.dev, &import_info, NULL, &import_image);
+      if (vr != VK_SUCCESS) {
+         close(fd);
+         fprintf(stderr, "encode_dmabuf FAIL: CreateImage(import dma-buf, modifier=%llu) failed (vr=%d)\n",
+                 (unsigned long long)modifier, vr);
+         ret = -EINVAL;
+         goto out;
+      }
+
+      VkMemoryRequirements import_reqs;
+      enc.GetImageMemoryRequirements(enc.dev, import_image, &import_reqs);
+      uint32_t import_mem_type = UINT32_MAX;
+      for (uint32_t i = 0; i < enc.mem_props.memoryTypeCount; i++)
+         if ((import_reqs.memoryTypeBits & (1u << i)) &&
+             (enc.mem_props.memoryTypes[i].propertyFlags & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT))
+            { import_mem_type = i; break; }
+      if (import_mem_type == UINT32_MAX)
+         import_mem_type = ffs(import_reqs.memoryTypeBits) - 1;
+
+      const VkImportMemoryFdInfoKHR import_fd_info = {
+         .sType = VK_STRUCTURE_TYPE_IMPORT_MEMORY_FD_INFO_KHR,
+         .handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT, .fd = fd,
+      };
+      const VkMemoryDedicatedAllocateInfo import_ded = {
+         .sType = VK_STRUCTURE_TYPE_MEMORY_DEDICATED_ALLOCATE_INFO,
+         .pNext = &import_fd_info, .image = import_image,
+      };
+      const VkMemoryAllocateInfo import_alloc = {
+         .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO, .pNext = &import_ded,
+         .allocationSize = import_reqs.size, .memoryTypeIndex = import_mem_type,
+      };
+      vr = enc.AllocateMemory(enc.dev, &import_alloc, NULL, &import_mem);
+      if (vr != VK_SUCCESS) {
+         /* Import failed: per the Vulkan spec, the driver only takes fd
+          * ownership on SUCCESS - still ours to close here. */
+         close(fd);
+         fprintf(stderr, "encode_dmabuf FAIL: AllocateMemory(import dma-buf) failed (vr=%d)\n", vr);
+         ret = -EIO;
+         goto out;
+      }
+      /* Successful import: the driver now owns `fd` per spec - must not close it ourselves. */
+      vr = enc.BindImageMemory(enc.dev, import_image, import_mem, 0);
+      if (vr != VK_SUCCESS) {
+         fprintf(stderr, "encode_dmabuf FAIL: BindImageMemory(import dma-buf) failed (vr=%d)\n", vr);
+         ret = -EINVAL;
+         goto out;
+      }
+   } else {
+      /* Step 1 (plain memfd, no venus3d): this buffer is a plain memfd
+       * (confirmed on real hardware, 31/10/2026, via the same readlink()
+       * check above: "/memfd:gralloc-buffer (deleted)") - redroid's own
+       * gralloc (gralloc.redroid.so, the one gpuMode=guest without venus3d
+       * actually uses) allocates plain CPU shared memory here, not a real
+       * dma-buf/GEM object the way cros_gralloc/minigbm would with venus3d
+       * active. There is no GPU-side object behind a memfd to import via
+       * VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT (confirmed: that
+       * path's AllocateMemory fails outright, -EIO, every single call).
+       * Treated instead as what it actually is - plain CPU-visible memory -
+       * mmap()'d directly and uploaded through an ordinary host-visible
+       * staging buffer. */
+      void *src = mmap(NULL, bufSize, PROT_READ, MAP_SHARED, fd, 0);
+      close(fd); /* mmap() took its own reference; the fd itself is no longer needed */
+      ret = -EIO;
+      if (src == MAP_FAILED) {
+         fprintf(stderr, "encode_dmabuf: mmap(memfd, %zu) failed: %s\n", bufSize, strerror(errno));
+         goto out;
+      }
+
+      const VkBufferCreateInfo staging_info = {
+         .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, .size = bufSize,
+         .usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT, .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+      };
+      VkResult vr = enc.CreateBuffer(enc.dev, &staging_info, NULL, &staging_buf);
+      if (vr != VK_SUCCESS) {
+         munmap(src, bufSize);
+         fprintf(stderr, "encode_dmabuf FAIL: CreateBuffer(staging) failed (vr=%d)\n", vr);
+         goto out;
+      }
+
+      VkMemoryRequirements staging_reqs;
+      enc.GetBufferMemoryRequirements(enc.dev, staging_buf, &staging_reqs);
+      uint32_t staging_mem_type = UINT32_MAX;
+      const VkMemoryPropertyFlags want = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+      for (uint32_t i = 0; i < enc.mem_props.memoryTypeCount; i++)
+         if ((staging_reqs.memoryTypeBits & (1u << i)) &&
+             (enc.mem_props.memoryTypes[i].propertyFlags & want) == want)
+            { staging_mem_type = i; break; }
+      if (staging_mem_type == UINT32_MAX) {
+         munmap(src, bufSize);
+         fprintf(stderr, "encode_dmabuf FAIL: no host-visible+coherent memory type for staging buffer\n");
+         goto out;
+      }
+      const VkMemoryAllocateInfo staging_alloc = {
+         .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+         .allocationSize = staging_reqs.size, .memoryTypeIndex = staging_mem_type,
+      };
+      vr = enc.AllocateMemory(enc.dev, &staging_alloc, NULL, &staging_mem);
+      if (vr != VK_SUCCESS) {
+         munmap(src, bufSize);
+         fprintf(stderr, "encode_dmabuf FAIL: AllocateMemory(staging) failed (vr=%d)\n", vr);
+         goto out;
+      }
+      vr = enc.BindBufferMemory(enc.dev, staging_buf, staging_mem, 0);
+      if (vr != VK_SUCCESS) {
+         munmap(src, bufSize);
+         fprintf(stderr, "encode_dmabuf FAIL: BindBufferMemory(staging) failed (vr=%d)\n", vr);
+         goto out;
+      }
+      void *dst = NULL;
+      vr = enc.MapMemory(enc.dev, staging_mem, 0, bufSize, 0, &dst);
+      if (vr != VK_SUCCESS) {
+         munmap(src, bufSize);
+         fprintf(stderr, "encode_dmabuf FAIL: MapMemory(staging) failed (vr=%d)\n", vr);
+         goto out;
+      }
+      memcpy(dst, src, bufSize);
+      enc.UnmapMemory(enc.dev, staging_mem);
       munmap(src, bufSize);
-      fprintf(stderr, "encode_dmabuf FAIL: no host-visible+coherent memory type for staging buffer\n");
-      goto out;
    }
-   const VkMemoryAllocateInfo staging_alloc = {
-      .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
-      .allocationSize = staging_reqs.size, .memoryTypeIndex = staging_mem_type,
-   };
-   vr = enc.AllocateMemory(enc.dev, &staging_alloc, NULL, &staging_mem);
-   if (vr != VK_SUCCESS) {
-      munmap(src, bufSize);
-      fprintf(stderr, "encode_dmabuf FAIL: AllocateMemory(staging) failed (vr=%d)\n", vr);
-      goto out;
-   }
-   vr = enc.BindBufferMemory(enc.dev, staging_buf, staging_mem, 0);
-   if (vr != VK_SUCCESS) {
-      munmap(src, bufSize);
-      fprintf(stderr, "encode_dmabuf FAIL: BindBufferMemory(staging) failed (vr=%d)\n", vr);
-      goto out;
-   }
-   void *dst = NULL;
-   vr = enc.MapMemory(enc.dev, staging_mem, 0, bufSize, 0, &dst);
-   if (vr != VK_SUCCESS) {
-      munmap(src, bufSize);
-      fprintf(stderr, "encode_dmabuf FAIL: MapMemory(staging) failed (vr=%d)\n", vr);
-      goto out;
-   }
-   memcpy(dst, src, bufSize);
-   enc.UnmapMemory(enc.dev, staging_mem);
-   munmap(src, bufSize);
 
    /*
     * Step 2: (re)configure the persistent copy target if the resolution
@@ -950,8 +1053,8 @@ vtest_gpu_encode_dmabuf(int fd, uint32_t width, uint32_t height,
       }
    }
 
-   /* Step 3: upload the staged frame into copy_image (buffer -> tiled image, instead of the
-    * image -> image copy an actual dma-buf import would have allowed - see Step 1's comment). */
+   /* Step 3: upload the staged frame into copy_image - image -> image for a real dma-buf
+    * (venus3d), buffer -> tiled image for a plain memfd (see Step 1's branch). */
    enc.ResetCommandBuffer(enc.cmd, 0);
    const VkCommandBufferBeginInfo begininfo = { .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
    enc.BeginCommandBuffer(enc.cmd, &begininfo);
@@ -968,16 +1071,38 @@ vtest_gpu_encode_dmabuf(int fd, uint32_t width, uint32_t height,
       .srcAccessMask = 0,
       .dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
    };
-   enc.CmdPipelineBarrier(enc.cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
-                          0, 0, NULL, 0, NULL, 1, &copy_to_dst);
 
-   const VkBufferImageCopy region = {
-      .bufferOffset = 0, .bufferRowLength = rowPixels, .bufferImageHeight = height,
-      .imageSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 }, .imageOffset = { 0, 0, 0 },
-      .imageExtent = { width, height, 1 },
-   };
-   enc.CmdCopyBufferToImage(enc.cmd, staging_buf, enc.copy_image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                             1, &region);
+   if (is_real_dmabuf) {
+      const VkImageMemoryBarrier import_to_src = {
+         .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+         .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED, .newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+         .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED, .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+         .image = import_image, .subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 },
+         .srcAccessMask = 0, .dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT,
+      };
+      const VkImageMemoryBarrier pre_copy[2] = { import_to_src, copy_to_dst };
+      enc.CmdPipelineBarrier(enc.cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                             0, 0, NULL, 0, NULL, 2, pre_copy);
+
+      const VkImageCopy region = {
+         .srcSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 }, .srcOffset = { 0, 0, 0 },
+         .dstSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 }, .dstOffset = { 0, 0, 0 },
+         .extent = { width, height, 1 },
+      };
+      enc.CmdCopyImage(enc.cmd, import_image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                       enc.copy_image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
+   } else {
+      enc.CmdPipelineBarrier(enc.cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                             0, 0, NULL, 0, NULL, 1, &copy_to_dst);
+
+      const VkBufferImageCopy region = {
+         .bufferOffset = 0, .bufferRowLength = rowPixels, .bufferImageHeight = height,
+         .imageSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 }, .imageOffset = { 0, 0, 0 },
+         .imageExtent = { width, height, 1 },
+      };
+      enc.CmdCopyBufferToImage(enc.cmd, staging_buf, enc.copy_image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                                1, &region);
+   }
 
    VkImageMemoryBarrier copy_to_general = copy_to_dst;
    copy_to_general.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
@@ -1057,6 +1182,10 @@ out:
       enc.DestroyBuffer(enc.dev, staging_buf, NULL);
    if (staging_mem)
       enc.FreeMemory(enc.dev, staging_mem, NULL);
+   if (import_mem)
+      enc.FreeMemory(enc.dev, import_mem, NULL);
+   if (import_image)
+      enc.DestroyImage(enc.dev, import_image, NULL);
    pthread_mutex_unlock(&enc_mutex);
    return ret;
 }

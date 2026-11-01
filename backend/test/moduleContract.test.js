@@ -208,6 +208,21 @@ test('moduleGate.check: rejects (409) a module with hostGpuVendor if the host do
   assert.match(result.error, /"nvidia" GPU/);
 }));
 
+// Regression of the real fix (31/10/2026): nvenc's own manifest used to declare
+// compatibleCon.gpuMode: ["guest"] only, so this combination was rejected (409) by
+// incompatibilityReason on a gpuMode=host image even though moduleGate.requiredModuleIds itself
+// never forbade requesting both (see instanceOptions.test.js) -- nvenc now also accepts "host"
+// (vtest_gpu_encode_dmabuf() branches on the real dma-buf venus3d leaves behind instead of a
+// memfd, see nvenc's own README), so the two modules are no longer mutually exclusive.
+test('moduleGate.check: nvenc and venus3d both pass together on a gpuMode=host NVIDIA image', (t) => withTempAcceptanceStore(async () => {
+  t.mock.method(hwAccel, 'detectGpuVendor', async () => 'nvidia');
+  acceptance.record({ moduleId: 'nvenc', version: manifests.get('nvenc').version });
+  acceptance.record({ moduleId: 'venus3d', version: manifests.get('venus3d').version });
+
+  const result = await moduleGate.check(imgHwEncCapable, ['nvenc', 'venus3d']);
+  assert.equal(result.ok, true);
+}));
+
 test('moduleGate.check: an image without modules with hostGpuVendor never calls detectGpuVendor', (t) => withTempAcceptanceStore(async () => {
   const spy = t.mock.method(hwAccel, 'detectGpuVendor', async () => 'nvidia');
   await moduleGate.check(imgWithoutModules);
