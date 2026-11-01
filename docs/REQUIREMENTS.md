@@ -280,6 +280,16 @@ control) with no limit on what it is allowed to touch. The exact mechanism (how 
 "dependeDe: [engine-id]" and how the runner/gate resolves and shows it) is still not designed — only the
 policy is decided. Revisit the mechanism when there is a second real case to design against.
 
+**Nuance added 01/11/2026, from a real case (see `moduleScheduler.defaultPauseForNewModules` and
+`CHANGELOG.md`'s entry for it):** "no match found" for an image-matching engine's tick has to be a
+normal, silent outcome ("woke up, did not recognize the screen, did nothing, exits clean") — never an
+exception that `lastError` would report as a fault. `cifi`'s own `exec()`-based module already draws
+this line correctly (a failed tick is recorded but ticking continues regardless, see
+`moduleScheduler.test.js`'s "a failed tick must not cancel future ones"); an engine-based module has to
+keep the same distinction between "legitimately nothing to do this tick" and "something is actually
+broken," or every unrecognized screen would misreport as a module malfunction instead of the expected,
+common case it actually is (a watchdog not yet trained on every screen the app can show).
+
 ## 6. License policy and third-party content
 
 - **No third-party software inside the code or the images**, unless it is 100% free (a real FOSS
