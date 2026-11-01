@@ -690,23 +690,27 @@ function buildRestartEditRow(inst) {
   venus3dWrap.appendChild(venus3dChk);
   venus3dWrap.appendChild(document.createTextNode(t('new.venus3d')));
   panel.appendChild(venus3dWrap);
+  const venus3dWarn = document.createElement('p');
+  venus3dWarn.className = 'resources-warn';
+  venus3dWarn.textContent = t('new.venus3dRecommendedWarn');
+  venus3dWarn.hidden = true;
+  panel.appendChild(venus3dWarn);
 
-  // venus3d auto-check: on an NVIDIA host, plain gpuMode=host never boots at all (the stock
-  // GBM/Mesa gralloc crashes SurfaceFlinger in a loop, see the module's own README) -- leaving
-  // the checkbox unticked there is never a valid choice, not just a default worth nudging.
-  // Seeded once per switch-to-host (not re-forced if the user then unchecks it deliberately,
-  // e.g. to reproduce the broken path for diagnosis), reset so it nudges again each time the
-  // select leaves and comes back to "host". Best-effort only -- assertModulesReady still
-  // enforces the real rule server-side regardless of what this suggests.
-  let venus3dAutoChecked = false;
-  async function maybeAutoCheckVenus3d() {
-    if (gpuSelect.value !== 'host' || venus3dAutoChecked || checks.venus3d.checked) return;
-    venus3dAutoChecked = true;
+  // venus3d stays opt-in (never forced/auto-checked, same as hwdec -- explicit informed choice,
+  // not a silent default). On an NVIDIA host specifically, plain gpuMode=host without it is a
+  // known-broken combination (stock GBM/Mesa gralloc crash-loops SurfaceFlinger, see the
+  // module's own README) -- not blocked, since "community tier" diagnosis/testing of the broken
+  // path itself is a legitimate reason to pick it anyway, just flagged with a warning instead of
+  // letting it fail silently. Checked each time gpuMode or the venus3d checkbox itself changes.
+  async function refreshVenus3dWarn() {
+    if (gpuSelect.value !== 'host') { venus3dWarn.hidden = true; return; }
+    if (checks.venus3d.checked) { venus3dWarn.hidden = true; return; }
     try {
       const m = await api(`/modules/venus3d?imageId=${encodeURIComponent(inst.imageId)}`);
-      if (gpuSelect.value === 'host' && m.hostCompatible) checks.venus3d.checked = true;
-    } catch { /* best-effort nudge, nothing to fall back to */ }
+      venus3dWarn.hidden = !(gpuSelect.value === 'host' && !checks.venus3d.checked && m.hostCompatible);
+    } catch { venus3dWarn.hidden = true; }
   }
+  checks.venus3d.addEventListener('change', refreshVenus3dWarn);
 
   // Mirrors the "new instance" form: a module requiring a specific gpuMode must not stay
   // checkable/selectable once the select is switched away from it, instead of only warning
@@ -717,12 +721,8 @@ function buildRestartEditRow(inst) {
     checks.hwdec.disabled = needsHost;
     if (needsHost) checks.hwdec.checked = false;
     checks.venus3d.disabled = needsHost;
-    if (needsHost) {
-      checks.venus3d.checked = false;
-      venus3dAutoChecked = false;
-    } else {
-      maybeAutoCheckVenus3d();
-    }
+    if (needsHost) checks.venus3d.checked = false;
+    refreshVenus3dWarn();
     updateEncodeSelect({
       select: encodeSelect, optHwenc, optNvenc, status: encodeStatus,
       imageId: inst.imageId, hwEncCapable: inst.hwEncCapable, gpuMode: gpuSelect.value,
@@ -2523,18 +2523,15 @@ const dialog = $('#new-instance-dialog');
 // that specific capability; otherwise the checkbox is disabled and says why, instead of
 // letting the create fail afterwards.
 //
-// venus3d is the one exception to "never a silent default" above, auto-checked (not forced --
-// still togglable) the moment it becomes available: on an NVIDIA host, plain gpuMode=host never
-// boots AT ALL without it (the stock GBM/Mesa gralloc crashes SurfaceFlinger in a loop, see the
-// module's own README) -- unlike hwdec, leaving it unticked there is not an optional path to
-// something working without it, it is a guaranteed broken instance. Found for real 01/11/2026:
-// an instance switched to host without it, hit exactly that crash loop.
+// venus3d stays opt-in like the two above -- never auto-checked, same "explicit informed
+// choice" reasoning. The one difference: on an NVIDIA host, plain gpuMode=host without it is a
+// known-broken combination (stock GBM/Mesa gralloc crash-loops SurfaceFlinger, see the module's
+// own README), not just an optional capability you can skip -- so instead of the normal "Ok"
+// status it shows a "not recommended" warning for as long as the box stays unticked (see the
+// venus3d-specific branch in refreshHwAccelOption below, and the change listener right after
+// this dialog's other new-instance-form listeners). Found for real 01/11/2026: an instance
+// switched to host without it hit exactly that crash loop.
 let imagesById = {};
-// Tracks whether venus3d has already been auto-checked for the current "gpuMode=host" stretch
-// in this dialog session -- set once the nudge fires, reset whenever gpuMode leaves host (see
-// refreshHwAccelOption below) or the dialog is reopened, so a manual uncheck afterward sticks
-// instead of being fought on the next unrelated refresh (image change, etc).
-let venus3dNudged = false;
 function hwAccelElements(id) {
   return { chk: $(`#chk-${id}`), status: $(`#${id}-status`) };
 }
@@ -2556,27 +2553,48 @@ async function refreshHwAccelOption(id) {
   const effectiveGpuMode = $('#new-instance-form').gpuMode.value || img.gpuMode;
   if (effectiveGpuMode !== 'host') {
     setHwAccel(id, { enabled: false, text: t(`new.${id}NeedsHost`), tone: 'muted' });
-    if (id === 'venus3d') venus3dNudged = false;
+    if (id === 'venus3d') venus3dLastCheck = null;
     return;
   }
+  // setHwAccel's "Checking..." step below unconditionally sets checked=false (enabled=false
+  // clears it) -- captured here, before that happens, so venus3d's own warn-vs-ok text can
+  // still tell whether the user had it ticked.
+  const wasChecked = hwAccelElements(id).chk.checked;
   setHwAccel(id, { enabled: false, text: t(`new.${id}Checking`), tone: 'muted' });
   try {
     const m = await api(`/modules/${id}?imageId=${encodeURIComponent(img.id)}`);
     if (imagesById[$('#image-select').value] !== img) return; // another image was chosen meanwhile
     if (m.hostCompatible === false) {
       setHwAccel(id, { enabled: false, text: t(`new.${id}NoHost`, { reason: m.hostIncompatibilityReason }), tone: 'warn-text' });
+      if (id === 'venus3d') venus3dLastCheck = null;
+    } else if (id === 'venus3d') {
+      setHwAccel(id, { enabled: true, text: '', tone: 'muted' });
+      hwAccelElements(id).chk.checked = wasChecked;
+      venus3dLastCheck = m;
+      updateVenus3dStatus();
     } else {
       setHwAccel(id, { enabled: true, text: t(`new.${id}Ok`, { vendor: m.hostGpuVendor || '?' }), tone: 'ok-text' });
-      // See the module-level comment on venus3dNudged: plain host mode never boots on NVIDIA
-      // without this module, so it defaults on (still togglable) instead of defaulting off like
-      // hwdec/hwenc above.
-      if (id === 'venus3d' && !venus3dNudged) {
-        venus3dNudged = true;
-        hwAccelElements(id).chk.checked = true;
-      }
     }
   } catch (e) {
     setHwAccel(id, { enabled: false, text: t('common.error', { msg: e.message }), tone: 'fail-text' });
+  }
+}
+// Cache of the last successful /modules/venus3d check in this dialog session (null once gpuMode
+// leaves host, or the host isn't NVIDIA) -- lets the checkbox's own change listener redraw the
+// warn-vs-ok status text instantly, without a round trip through the function above, which would
+// otherwise fight the very click that triggered it (its "Checking..." step force-unchecks the
+// box, same as hwdec/hwenc; see wasChecked above for why that matters here).
+let venus3dLastCheck = null;
+function updateVenus3dStatus() {
+  if (!venus3dLastCheck) return;
+  const { chk, status } = hwAccelElements('venus3d');
+  status.hidden = false;
+  if (chk.checked) {
+    status.className = 'ok-text';
+    status.textContent = t('new.venus3dOk', { vendor: venus3dLastCheck.hostGpuVendor || '?' });
+  } else {
+    status.className = 'warn-text';
+    status.textContent = t('new.venus3dRecommendedWarn');
   }
 }
 // Encode is a single select (none/hwenc/nvenc), not a checkbox like hwdec: hwenc and nvenc are
@@ -2669,6 +2687,7 @@ function refreshHwencOption() {
 }
 $('#image-select').addEventListener('change', refreshHwencOption);
 $('#new-instance-form').gpuMode.addEventListener('change', refreshHwencOption);
+$('#chk-venus3d').addEventListener('change', updateVenus3dStatus);
 
 // Checked ids survive a re-render of #user-modules-list (see loadUserModules below) -- cleared
 // only when a creation actually succeeds (createInstance's success path), not on every dialog
