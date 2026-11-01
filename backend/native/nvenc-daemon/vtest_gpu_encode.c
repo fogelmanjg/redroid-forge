@@ -855,6 +855,12 @@ vtest_gpu_encode_dmabuf(int fd, uint32_t width, uint32_t height,
    snprintf(fdlink_path, sizeof(fdlink_path), "/proc/self/fd/%d", fd);
    const ssize_t fdlink_len = readlink(fdlink_path, fdlink_target, sizeof(fdlink_target) - 1);
    const bool is_real_dmabuf = !(fdlink_len > 0 && strncmp(fdlink_target, "/memfd:", 7) == 0);
+   /* TEMP diagnostic (01/11/2026): which branch below actually fires for live traffic, and
+    * what width/stride/modifier it sees -- remove once the black-screen-with-venus3d report is
+    * root-caused. */
+   fprintf(stderr, "encode_dmabuf: fd target=%.*s is_real_dmabuf=%d w=%u h=%u stride=%u modifier=%llu\n",
+           (int)(fdlink_len > 0 ? fdlink_len : 0), fdlink_target, is_real_dmabuf, width, height,
+           stride, (unsigned long long)modifier);
 
    VkBuffer staging_buf = VK_NULL_HANDLE;
    VkDeviceMemory staging_mem = VK_NULL_HANDLE;
