@@ -21,6 +21,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-11-01
+
 ### Fixed
 
 - A watchdog module (e.g. `cifi`) now starts PAUSED by default the first time an instance gets
@@ -70,7 +72,44 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
   01/11/2026 (jgustavo47) -- not confirmed as the actual cause of anything there, the module's own
   logic alone is enough to document the risk regardless.
 
+- A light, non-alarming `muted` note added right under the `gpuMode` select, both dialogs: guest
+  always boots fine and is the safe default, but some apps genuinely need host's real GPU to work
+  correctly -- never previously stated as the actual tradeoff in one place, only implied
+  separately by each option's own label.
+
+- ⚠ **`nvenc` + `venus3d` together, on the same instance: documented as NOT YET RELIABLE**, not
+  removed or blocked. Testing Loop Sort against a real instance running both (01/11/2026,
+  jgustavo47) reproduced the Android guest's own `system_server` going unresponsive and
+  restarting under load (`ActivityManager: Low on memory`, `lmkd` re-running its own
+  boot-completed handling, `DeadSystemException` on every input event meanwhile) -- NVIDIA DRM
+  fence-import errors (`nv_drm_prime_fence_context_create_ioctl ... Failed to import fence
+  semaphore surface`) appear in the same window, suspected (not confirmed) to trace back to
+  `nvenc`'s own per-frame Vulkan dma-buf import/export cycle with `venus3d` active. The dma-buf
+  import itself is NOT the problem -- a temporary diagnostic log in
+  `backend/native/nvenc-daemon/vtest_gpu_encode.c` confirms every frame is correctly identified
+  and imported as a real dma-buf, never falling back to the memfd path. Both manifests'
+  `queToca` (EN+ES) now disclose this plainly, and both versions bumped 1 -> 2 so anyone who
+  already accepted either is re-prompted. The frontend also shows a loud red warning (both
+  dialogs) whenever `nvenc` + `venus3d` are selected together. Investigation paused here, not
+  closed -- resume from the diagnostic log and the fence-import correlation before trying
+  anything else.
+
 ### Added
+
+- New module, `venus3d`: real GPU-accelerated 3D rendering on NVIDIA hosts
+  (`gpuMode=host`), ported from
+  [`redroid-nvidia`](https://github.com/fogelmanjg/redroid-nvidia)'s Tier 4/5. Plain
+  `gpuMode=host` never boots at all on NVIDIA (Mesa's GBM has no driver-table entry for NVIDIA's
+  proprietary stack, confirmed via a reproducible `SurfaceFlinger` crash loop) -- this module
+  routes the guest's Vulkan (Mesa Venus) over a unix socket to a host-side
+  `virgl_test_server`/`virglrenderer` process that speaks to the real NVIDIA driver instead of
+  any direct GPU passthrough. Confirmed clean end to end on a GTX 1050 Ti (real, GPU-accelerated
+  `SurfaceFlinger` RenderEngine, `Vulkan device initialized: 1`); the RTX 4060 has a known,
+  currently-open NVIDIA driver bug outside this module's own code (VA-space mapping assertion,
+  NVIDIA's own `open-gpu-kernel-modules` issues #1364/#1165/#1140/#1396), not fixed here. See
+  `backend/src/modules/venus3d/README.md` for the eight real gaps found getting a clean boot
+  (gralloc replacement, EGL/Vulkan `ro.hardware.*` property ordering, a missing
+  `libdmabufheap.so`, and more).
 
 - New module, `nvenc`: hardware H.264 encode on NVIDIA hosts, ported from
   [`redroid-nvidia`](https://github.com/fogelmanjg/redroid-nvidia)'s Tier 7 (confirmed clean on a

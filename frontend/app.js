@@ -705,6 +705,21 @@ function buildRestartEditRow(inst) {
   encodeStatus.hidden = true;
   panel.appendChild(encodeStatus);
 
+  // nvenc + venus3d together is a known-broken combination (01/11/2026 -- crashed the Android
+  // guest's own system_server under load, root cause not yet found) -- see the matching comment
+  // in the new-instance dialog's refreshNvencVenus3dWarn for the full reasoning. Not blocked,
+  // just flagged.
+  const nvencVenus3dWarn = document.createElement('p');
+  nvencVenus3dWarn.className = 'resources-warn resources-warn-error';
+  nvencVenus3dWarn.textContent = t('new.nvencVenus3dWarn');
+  nvencVenus3dWarn.hidden = true;
+  panel.appendChild(nvencVenus3dWarn);
+  function refreshNvencVenus3dWarn() {
+    nvencVenus3dWarn.hidden = !(encodeSelect.value === 'nvenc' && checks.venus3d.checked);
+  }
+  encodeSelect.addEventListener('change', refreshNvencVenus3dWarn);
+  checks.venus3d.addEventListener('change', refreshNvencVenus3dWarn);
+
   // Decode (hwdec): no vendor split -- the same module id works on AMD/Intel (VA-API) and
   // NVIDIA (NVDEC), both only via gpuMode=host.
   const codecWarn = document.createElement('div');
@@ -736,7 +751,7 @@ function buildRestartEditRow(inst) {
     updateEncodeSelect({
       select: encodeSelect, optHwenc, optNvenc, status: encodeStatus,
       imageId: inst.imageId, hwEncCapable: inst.hwEncCapable, gpuMode: gpuSelect.value,
-    });
+    }).then(refreshNvencVenus3dWarn);
   }
   gpuSelect.addEventListener('change', refreshCodecAvailability);
   refreshCodecAvailability();
@@ -2690,14 +2705,22 @@ async function refreshEncodeOption() {
     isStale: () => imagesById[$('#image-select').value] !== img,
   });
 }
-function refreshHwencOption() {
-  refreshEncodeOption();
-  refreshHwAccelOption('hwdec');
-  refreshHwAccelOption('venus3d');
+// nvenc + venus3d together is a known-broken combination (01/11/2026: crashed the Android
+// guest's own system_server under load, root cause not yet found) -- not blocked (an instance
+// dedicated to diagnosing it is a legitimate reason to pick it anyway, same reasoning as the
+// venus3d-without-host warning), just flagged loudly whenever both are selected together.
+function refreshNvencVenus3dWarn() {
+  const warn = $('#nvenc-venus3d-warn');
+  warn.hidden = !($('#select-encode').value === 'nvenc' && $('#chk-venus3d').checked);
+}
+async function refreshHwencOption() {
+  await Promise.all([refreshEncodeOption(), refreshHwAccelOption('hwdec'), refreshHwAccelOption('venus3d')]);
+  refreshNvencVenus3dWarn();
 }
 $('#image-select').addEventListener('change', refreshHwencOption);
 $('#new-instance-form').gpuMode.addEventListener('change', refreshHwencOption);
-$('#chk-venus3d').addEventListener('change', updateVenus3dStatus);
+$('#chk-venus3d').addEventListener('change', () => { updateVenus3dStatus(); refreshNvencVenus3dWarn(); });
+$('#select-encode').addEventListener('change', refreshNvencVenus3dWarn);
 
 // Checked ids survive a re-render of #user-modules-list (see loadUserModules below) -- cleared
 // only when a creation actually succeeds (createInstance's success path), not on every dialog

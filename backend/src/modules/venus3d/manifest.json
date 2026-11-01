@@ -2,14 +2,15 @@
   "id": "venus3d",
   "nombre": "Real 3D acceleration (NVIDIA, Venus-proxy)",
   "esTerceroNoLibre": false,
-  "descripcion": "Real GPU-accelerated 3D rendering on NVIDIA hosts, ported from redroid-nvidia's Tier 4/5. gpuMode=host never boots on NVIDIA natively (Mesa's GBM has no driver-table entry for NVIDIA's proprietary stack) -- this module routes the guest's Vulkan (Mesa Venus) over a unix socket to a host-side virgl_test_server/virglrenderer process that speaks to the real NVIDIA driver, instead of any direct GPU passthrough. Confirmed clean on a GTX 1050 Ti; the RTX 4060 has a known, currently-open NVIDIA driver bug (VA-space mapping assertion, NVIDIA's own open-gpu-kernel-modules issues #1364/#1165/#1140/#1396) outside this module's own code, not fixed here. Since 31/10/2026, works together with the \"nvenc\" module on the same instance (gpuMode=host) -- nvenc's own host daemon imports the real dma-buf this module's minigbm backend hands over for a capture buffer, instead of its original memfd-only path (see nvenc's own README for that half).",
+  "descripcion": "Real GPU-accelerated 3D rendering on NVIDIA hosts, ported from redroid-nvidia's Tier 4/5. gpuMode=host never boots on NVIDIA natively (Mesa's GBM has no driver-table entry for NVIDIA's proprietary stack) -- this module routes the guest's Vulkan (Mesa Venus) over a unix socket to a host-side virgl_test_server/virglrenderer process that speaks to the real NVIDIA driver, instead of any direct GPU passthrough. Confirmed clean on a GTX 1050 Ti; the RTX 4060 has a known, currently-open NVIDIA driver bug (VA-space mapping assertion, NVIDIA's own open-gpu-kernel-modules issues #1364/#1165/#1140/#1396) outside this module's own code, not fixed here. Together with the \"nvenc\" module on the same instance (gpuMode=host): NOT YET RELIABLE (01/11/2026) -- see queToca.",
   "queToca": [
     "copies 8 guest driver files into the instance's /vendor (4 libraries x 2 architectures: the patched Mesa Venus Vulkan ICD, the patched minigbm gralloc backend, and stock ANGLE's EGL/GLESv2) -- BEFORE the first start, like hwenc/hwdec/nvenc",
     "replaces the stock /vendor/lib(64)/hw/gralloc.cros.so with a build of the same minigbm source that statically links the NVIDIA backend behind the legacy HAL_MODULE_INFO_SYM entry point gralloc needs -- keeps the original alongside it (.orig) rather than discarding it",
     "adds the boot flag androidboot.redroid_gpu_node=/dev/dri/renderD128 (carried over from the one image already confirmed booting with real 3D acceleration on this hardware, 2026-09)",
     "requires gpuMode=host -- this is what actually turns on the guest's Venus Vulkan driver instead of redroid's own software gralloc (nvenc, unlike this module, also still works standalone on gpuMode=guest)",
     "requires a process of its own on the HOST, outside any container -- a patched virgl_test_server (same reasoning as nvenc's own daemon: this backend's Alpine/musl image cannot dlopen() the real NVIDIA userspace driver); install it as the systemd unit documented in backend/native/venus3d-daemon/ before enabling this module",
-    "no stage 6 (no mediaserver restart needed -- this is a graphics driver, not a Codec2 service)"
+    "no stage 6 (no mediaserver restart needed -- this is a graphics driver, not a Codec2 service)",
+    "NOT RECOMMENDED together with \"nvenc\" yet: real use (both active on the same instance) has caused the Android guest's own system_server to go unresponsive and restart under load, with NVIDIA DRM fence-import errors in the same window -- not yet root-caused (01/11/2026), suspected on nvenc's side (see that module's own queToca) but not confirmed"
   ],
   "compatibleCon": {
     "androidVersion": [
@@ -28,18 +29,19 @@
     5
   ],
   "entry": "./integrate.js",
-  "version": 1,
+  "version": 2,
   "i18n": {
     "es": {
       "nombre": "Aceleracion 3D real (NVIDIA, Venus-proxy)",
-      "descripcion": "Renderizado 3D real por hardware en hosts NVIDIA, portado de redroid-nvidia Tier 4/5. gpuMode=host nunca bootea nativamente en NVIDIA (el GBM de Mesa no tiene tabla de drivers para el stack propietario de NVIDIA) -- este modulo enruta el Vulkan del guest (Mesa Venus) por un socket unix hacia un proceso virgl_test_server/virglrenderer propio en el host que habla con el driver real de NVIDIA, en vez de passthrough directo de GPU. Confirmado limpio en una GTX 1050 Ti; la RTX 4060 tiene un bug real y actualmente abierto del driver de NVIDIA (falla de mapeo de VA-space, issues #1364/#1165/#1140/#1396 del propio open-gpu-kernel-modules de NVIDIA) ajeno al codigo de este modulo, no resuelto aqui. Desde el 31/10/2026, funciona junto con el modulo \"nvenc\" en la misma instancia (gpuMode=host) -- el daemon de nvenc importa el dma-buf real que entrega el backend minigbm de este modulo para un buffer de captura, en vez de su camino original solo-memfd (ver el README de nvenc para esa mitad).",
+      "descripcion": "Renderizado 3D real por hardware en hosts NVIDIA, portado de redroid-nvidia Tier 4/5. gpuMode=host nunca bootea nativamente en NVIDIA (el GBM de Mesa no tiene tabla de drivers para el stack propietario de NVIDIA) -- este modulo enruta el Vulkan del guest (Mesa Venus) por un socket unix hacia un proceso virgl_test_server/virglrenderer propio en el host que habla con el driver real de NVIDIA, en vez de passthrough directo de GPU. Confirmado limpio en una GTX 1050 Ti; la RTX 4060 tiene un bug real y actualmente abierto del driver de NVIDIA (falla de mapeo de VA-space, issues #1364/#1165/#1140/#1396 del propio open-gpu-kernel-modules de NVIDIA) ajeno al codigo de este modulo, no resuelto aqui. Junto con el modulo \"nvenc\" en la misma instancia (gpuMode=host): TODAVIA NO ES CONFIABLE (01/11/2026) -- ver queToca.",
       "queToca": [
         "copia 8 archivos de drivers del guest dentro del /vendor de la instancia (4 librerias x 2 arquitecturas: el Vulkan ICD Venus de Mesa parcheado, el backend de gralloc de minigbm parcheado, y el EGL/GLESv2 de ANGLE sin modificar) -- ANTES del primer arranque, igual que hwenc/hwdec/nvenc",
         "reemplaza el /vendor/lib(64)/hw/gralloc.cros.so original por un build del mismo minigbm que linkea estatico el backend NVIDIA detras del punto de entrada legacy HAL_MODULE_INFO_SYM que gralloc necesita -- guarda el original al lado (.orig) en vez de descartarlo",
         "agrega el boot flag androidboot.redroid_gpu_node=/dev/dri/renderD128 (heredado de la imagen que ya se confirmo booteando con aceleracion 3D real en este hardware, 2026-09)",
         "requiere gpuMode=host -- esto es lo que activa el driver Vulkan Venus del guest en vez del gralloc por software de redroid (nvenc, a diferencia de este modulo, tambien sigue funcionando solo en gpuMode=guest)",
         "requiere un proceso propio en el HOST, fuera de cualquier contenedor -- un virgl_test_server parcheado (misma razon que el daemon de nvenc: la imagen Alpine/musl de este backend no puede dlopen() el driver real de NVIDIA); instalarlo como el servicio systemd documentado en backend/native/venus3d-daemon/ antes de activar este modulo",
-        "sin etapa 6 (no hace falta reiniciar mediaserver -- esto es un driver grafico, no un servicio Codec2)"
+        "sin etapa 6 (no hace falta reiniciar mediaserver -- esto es un driver grafico, no un servicio Codec2)",
+        "NO RECOMENDADO todavia junto con \"nvenc\": en uso real (los dos activos en la misma instancia) el propio system_server del guest Android dejo de responder y se reinicio bajo carga, con errores de fence de NVIDIA DRM en la misma ventana -- todavia no identificado (01/11/2026), se sospecha del lado de nvenc (ver el queToca de ese modulo) pero no esta confirmado"
       ]
     }
   }

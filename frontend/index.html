@@ -167,6 +167,7 @@ gunzip -c image.tar.gz | docker load</pre>
         </select>
       </label>
       <p id="encode-status" class="muted" hidden></p>
+      <p id="nvenc-venus3d-warn" class="resources-warn resources-warn-error" hidden data-i18n="new.nvencVenus3dWarn">! nvenc + venus3d together is not reliable yet: known to crash the Android guest under load.</p>
       <label class="contract-checkbox"><input type="checkbox" name="hwdec" id="chk-hwdec" />
         <span data-i18n="new.hwdec">Hardware decode (VA-API / NVDEC)</span></label>
       <p id="hwdec-status" class="muted" hidden></p>
