@@ -50,6 +50,15 @@ const FILES = [
   // service links against).
   ['lib64/libdrm.so', 'lib64/libdrm.so'],
   ['lib/libdrm.so', 'lib/libdrm.so'],
+  // Sixth real gap, found replacing gralloc.cros.so itself (see installGrallocCros() below):
+  // the new gralloc.minigbm.so build links libdmabufheap.so (minigbm_cros_gralloc_defaults'
+  // own shared_libs, not something the stock monolithic gralloc.cros.so ever needed) -- and
+  // even though a /vendor/lib64/libdmabufheap.so exists in the stock image at the pre-boot
+  // container filesystem level, the booted guest's own adb-visible /vendor cannot stat() it at
+  // all (confirmed: ENOENT after boot, despite docker cp seeing it fine before boot) -- same
+  // "ship our own copy" fix already proven for libdrm.so above, not re-diagnosed further here.
+  ['lib64/libdmabufheap.so', 'lib64/libdmabufheap.so'],
+  ['lib/libdmabufheap.so', 'lib/libdmabufheap.so'],
 ];
 
 function log(msg) { console.log(`[venus3dService] ${msg}`); }
@@ -80,10 +89,53 @@ async function installFiles(containerId) {
   for (const [srcRel, destRel] of FILES) {
     await copyIntoContainer(containerId, path.join(ARTIFACTS_DIR, srcRel), destRel);
   }
+  await installGrallocCros(containerId);
   await patchGpuConfigSh(containerId);
   await patchSurfaceflingerRc(containerId);
   await patchLegacyGrallocRc(containerId);
   await installVtestSocketProp(containerId);
+}
+
+// Real gap found after the first four (same pass, later): installFiles() above drops
+// libminigbm_gralloc.so (the one that DOES contain backend_nvidia_venus, confirmed via
+// `strings`) at /vendor/lib64/libminigbm_gralloc.so, but nothing in the stock image ever
+// dlopen()s a file by that name -- the image's actual /vendor/lib*/hw/gralloc.cros.so is a
+// monolithic, statically-linked minigbm build (no NEEDED entry for libminigbm_gralloc.so,
+// confirmed via `readelf -d`) whose own backend list has no nvidia entry at all. There is no
+// code path in the stock image that can ever reach nvidia_venus.c through gralloc -- the HAL
+// shim itself has to BE the one that links against libminigbm_gralloc.so.
+//
+// The fix does not need a new Soong module: `external/minigbm/Android.bp` already builds
+// exactly this shim -- `gralloc.minigbm` (`cc_library_shared`, `minigbm_cros_gralloc0_defaults`,
+// i.e. `cros_gralloc/gralloc0/gralloc0.cc`, the real HAL_MODULE_INFO_SYM entry point) with
+// `shared_libs: ["libminigbm_gralloc"]` -- the same artifact already deployed above. Built via
+// `m gralloc.minigbm` in the same AOSP tree (confirmed: `readelf --dyn-syms` shows the `HMI`
+// symbol, `readelf -d` shows `NEEDED libminigbm_gralloc.so`, resolved at runtime from the exact
+// path installFiles() already ships it at). So this module REPLACES the stock
+// /vendor/lib(64)/hw/gralloc.cros.so with that build -- not adds a new file.
+//
+// Keeps a copy of the original first (`gralloc.cros.so.orig`, alongside it in the same `hw/`
+// dir) rather than discarding it -- not for an automatic restore-on-disable (no module in this
+// project reverts its own /vendor changes today, moduleRunner.js has no such hook; adding one
+// here alone would be inconsistent with hwenc/hwdec/nvenc's own behavior) but so a host can
+// manually recover the stock file if this module ever needs to be backed out of an existing
+// instance by hand. Only replaces at stage 4 (container created, not started) -- `/vendor`
+// is already read-only by the time anything could `docker exec` into it.
+const GRALLOC_CROS_PATHS = [
+  ['lib64/hw/gralloc.cros.so', 'lib64/hw/gralloc.minigbm.so'],
+  ['lib/hw/gralloc.cros.so', 'lib/hw/gralloc.minigbm.so'],
+];
+
+async function installGrallocCros(containerId) {
+  for (const [crosRel] of GRALLOC_CROS_PATHS) {
+    const backupTmp = path.join(os.tmpdir(), `venus3d-${containerId.slice(0, 12)}-${path.basename(crosRel)}.orig`);
+    await execFileAsync('docker', ['cp', `${containerId}:/vendor/${crosRel}`, backupTmp]);
+    await execFileAsync('docker', ['cp', backupTmp, `${containerId}:/vendor/${crosRel}.orig`]);
+    fs.unlinkSync(backupTmp);
+  }
+  for (const [crosRel, patchedRel] of GRALLOC_CROS_PATHS) {
+    await copyIntoContainer(containerId, path.join(ARTIFACTS_DIR, patchedRel), crosRel);
+  }
 }
 
 const VTEST_PROP_RC_SOURCE = path.join(__dirname, '..', 'modules', 'venus3d', 'venus3d-vtest-prop.rc');
@@ -119,6 +171,10 @@ const VTEST_PROP_RC_SOURCE = path.join(__dirname, '..', 'modules', 'venus3d', 'v
 // inherited environment: `installVtestSocketProp()` below adds a standalone trigger `.rc`
 // (`on early-init`, same convention as `redroid-gralloc-fix`'s own `redroid-no-rgb10.rc`) that
 // sets `mesa.vtest.socket.name` to the module's real socket path before anything can race it.
+// It also sets `mesa.vn.debug` to `vtest` for the exact same reason -- see the .rc file's own
+// comment (the EIGHTH real gap): zygote-forked app processes (SystemUI, launcher3, any app
+// drawing through HWUI/ANGLE) never see `patchSurfaceflingerRc()`'s `setenv`, since that only
+// reaches the one service it is scoped to, but they all read this same property fallback.
 async function installVtestSocketProp(containerId) {
   await copyIntoContainer(containerId, VTEST_PROP_RC_SOURCE, 'etc/init/venus3d-vtest-prop.rc');
 }
@@ -187,11 +243,22 @@ async function patchGpuConfigSh(containerId) {
   // final piece that makes the guest's Vulkan path the one actually exercised at all.
   let patched = original.replace(
     /(\n\s*panfrost\)\n\s*setprop ro\.hardware\.vulkan panfrost\n\s*;;\n)/,
-    '$1        nvidia-drm)\n            setprop ro.hardware.vulkan virtio\n            setprop ro.hardware.gralloc cros\n            setprop debug.renderengine.backend skiavkthreaded\n            ;;\n',
+    '$1        nvidia-drm)\n            setprop ro.hardware.vulkan virtio\n            setprop ro.hardware.gralloc cros\n            setprop ro.hardware.egl angle\n            setprop debug.renderengine.backend skiavkthreaded\n            ;;\n',
   );
+  // A SEVENTH real gap, found after booting all the way through with scrcpy: gpu_setup_host()
+  // unconditionally overwrites ro.hardware.egl back to "mesa" right after the nvidia-drm case
+  // above already set it to "angle" (setup_vulkan/setup_render_node runs first, same ordering
+  // the gralloc line below was already made conditional for -- the egl line sat right next to
+  // it, untouched, and nothing exercised it until an app (SystemUI, scrcpy's own virtual
+  // display) actually tried to draw through HWUI's EGL path rather than SurfaceFlinger's own
+  // direct Vulkan RenderEngine: `EglManager::initialize()` aborts with `EGL_NOT_INITIALIZED`
+  // because Android's EGL loader was still looking for libEGL_mesa.so, which fails against
+  // NVIDIA the same way gralloc.gbm.so already did, not the libEGL_angle.so this module
+  // actually ships at /vendor/lib64/egl/). Made conditional the same way.
   patched = patched.replace(
-    /(gpu_setup_host\(\) \{\n\s*echo "use GPU host mode"\n\n\s*setprop ro\.hardware\.egl mesa\n)\s*setprop ro\.hardware\.gralloc gbm\n/,
-    '$1    [ "$(getprop ro.hardware.gralloc)" = "cros" ] || setprop ro.hardware.gralloc gbm\n',
+    /(gpu_setup_host\(\) \{\n\s*echo "use GPU host mode"\n\n)\s*setprop ro\.hardware\.egl mesa\n\s*setprop ro\.hardware\.gralloc gbm\n/,
+    '$1    [ "$(getprop ro.hardware.egl)" = "angle" ] || setprop ro.hardware.egl mesa\n'
+      + '    [ "$(getprop ro.hardware.gralloc)" = "cros" ] || setprop ro.hardware.gralloc gbm\n',
   );
   if (patched === original) {
     throw new Error(`${tmpPath} (copied from ${GPU_CONFIG_SH_PATH}) did not match the expected shape -- was the image's own script changed?`);

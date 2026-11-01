@@ -86,9 +86,12 @@ whichever one does not match the instance's actual `gpuMode`, same mechanism tha
 
 ## Validation (jgustavo47, GTX 1050 Ti, 31/10/2026)
 
-**The core goal is confirmed working; full boot is not, yet.** Five real, load-bearing
-integration gaps were found and fixed against the live stock image, each one a genuine blocker
-(not a config nicety) — in the order hit:
+**Confirmed fully working, end to end, not just the Vulkan/RenderEngine piece: real
+`sys.boot_completed=1`, no crash loops, and a genuine scrcpy recording of the home screen (22
+decodable H.264 frames at 720×1280, visually confirmed — status bar, Google search widget, dock
+icons, nav bar all correctly rendered).** Eight real, load-bearing integration gaps were found
+and fixed against the live stock image, each one a genuine blocker (not a config nicety) — in the
+order hit:
 
 1. `/vendor/bin/gpu_config.sh` has no `nvidia-drm` case in `setup_vulkan()` and unconditionally
    forces `ro.hardware.gralloc=gbm` (Mesa's native GBM, which fails outright against NVIDIA) —
@@ -170,25 +173,86 @@ whole point, and it is real, not simulated or assumed.
      window) and `system_server` itself keeps restarting too — a cascading symptom of the same
      root cause, not a new, separate bug.
 
+**Point 5 above is now resolved (same day, later pass).** The two options it proposed turned out
+to collapse into one: option (a) ("a new Soong module that statically links the patched minigbm
+sources behind a legacy HAL_MODULE_INFO_SYM shim") did not need to be written at all — it already
+existed. `external/minigbm/Android.bp`'s own `gralloc.minigbm` module (`cc_library_shared`,
+`minigbm_cros_gralloc0_defaults`, compiling `cros_gralloc/gralloc0/gralloc0.cc`) exports the
+`HMI`/`HAL_MODULE_INFO_SYM` symbol directly and already depends on `libminigbm_gralloc` (via
+`shared_libs`), the same library that statically includes `nvidia_venus.c` — confirmed via
+`readelf --dyn-syms` (has `HMI`) and `strings` (`backend_nvidia_venus`/`nvidia-drm` present).
+Building it (`m gralloc.minigbm`, an incremental build inside the already-configured AOSP tree —
+one pre-existing leftover had to be cleared first: a stray, untracked meson-subproject checkout
+at `external/mesa3d/subprojects/libdrm-2.4.134/`, left over from the standalone `vulkan.virtio.so`
+build above, whose duplicate `Android.bp` module names broke Soong bootstrap with "module X
+already defined" until moved entirely out of the AOSP tree) produces the exact legacy-ABI,
+NVIDIA-backend-containing drop-in replacement this gap needed — no new module, no shim.
+
+`installGrallocCros()` (`venus3dService.js`) now overwrites the instance's real
+`/vendor/lib(64)/hw/gralloc.cros.so` with this build's output, at the same pre-first-boot stage
+`installFiles()` already uses for every other file. The original is backed up first, to
+`gralloc.cros.so.orig` next to it, for manual recovery — not auto-restored on module disable,
+since (confirmed by reading `moduleRunner.js`) no module, `hwenc`/`nvenc` included, has any
+disable/revert mechanism today; this follows that existing norm rather than inventing a new one.
+Consistent with the project's standing rule: the base Docker image is never touched, only each
+instance's own already-created container, with the same contract-based consent `hwenc`/`hwdec`/
+`nvenc` already rely on.
+
+6. **Replacing `gralloc.cros.so` alone regressed further**, surfacing a sixth real gap:
+   `minigbm_cros_gralloc_defaults`'s own `shared_libs` links `libdmabufheap.so`, which the
+   original monolithic `gralloc.cros.so` never needed. `vndksupport` failed to `dlopen` the new
+   file from the `sphal` linker namespace with `library "libdmabufheap.so" not found`, and
+   SurfaceFlinger itself SIGABRTed outright (`Could not initialize Vulkan RenderEngine!`). The
+   file is visible via `docker cp` against the container's pre-boot filesystem but genuinely
+   unreachable from inside the booted guest's own `/vendor` view (`adb shell stat`/`ls` both
+   report it missing; root cause not further chased). **Fixed** the same way this module's
+   `libdrm.so` entries already were: ship the module's own copy via the existing `FILES`/
+   `installFiles()` injection mechanism rather than relying on whatever the stock image nominally
+   has.
+7. **With gap 6 fixed, `sys.boot_completed=1` was reached for the first time ever for this
+   module** — confirmed via `dumpsys SurfaceFlinger` (`"------------RE Vulkan (Ganesh)----------"`,
+   `"Vulkan device initialized: 1"`) and the venus3d daemon's own log showing
+   `vtest_gpu_alloc: allocating on "NVIDIA GeForce GTX 1050 Ti"` — but `scrcpy` recordings still
+   came back 0 bytes. Logcat showed `com.android.systemui`'s `RenderThread` crash-looping every
+   ~1.2s with `Abort message: 'Failed to create context, error = EGL_NOT_INITIALIZED'`, through
+   `libhwui.so`'s `EglManager::initialize()`. Root cause: `getprop ro.hardware.egl` read back
+   `mesa` instead of the `angle` the new `nvidia-drm` case in `setup_vulkan()` (gap 1) already
+   sets — `gpu_setup_host()` runs after `setup_vulkan()`/`setup_render_node()` in this script's
+   own `gpu_setup()` and unconditionally resets `ro.hardware.egl` back to `mesa`, a line that sat
+   right next to the `ro.hardware.gralloc` line a prior pass had already made conditional for the
+   exact same ordering bug, but was itself missed. **Fixed** by making the `egl` line conditional
+   too (`patchGpuConfigSh()`), matching the existing `gralloc` pattern exactly.
+8. **Still not enough**: with `ro.hardware.egl=angle` correctly surviving boot, ANGLE itself now
+   loaded, but its own Vulkan backend failed with a generic `Internal Vulkan error (-3)`
+   (`vk_renderer.cpp:initialize:2228`), still crash-looping every app's `RenderThread`
+   (SystemUI, launcher3) and still producing 0-byte scrcpy recordings. Root cause, found by
+   reading Mesa's own `os_get_option()` (`src/util/os_misc.c`): on Android it falls back from
+   `getenv()` to a system property for every env var it reads, via a fixed name-mangling rule
+   (`VTEST_SOCKET_NAME` maps to `mesa.vtest.socket.name`, already set by gap 5's fix; `VN_DEBUG`
+   maps to `mesa.vn.debug`, never set). `vn_renderer_create()` only even attempts the vtest
+   transport if `VN_DEBUG(VTEST)` is set — without it, it falls through to
+   `vn_renderer_create_virtgpu()`, which tries a real virtio-gpu kernel device that does not exist
+   here, producing exactly the generic init failure seen. `patchSurfaceflingerRc()`'s own
+   `setenv VN_DEBUG vtest` only ever reached SurfaceFlinger's own forked process — every
+   zygote-forked app process (SystemUI, launcher3, any scrcpy-driven virtual display) never saw
+   it, since zygote does not inherit init's environment the way a directly-forked service does.
+   **Fixed** by adding `setprop mesa.vn.debug vtest` to the same `venus3d-vtest-prop.rc`
+   `on early-init` trigger gap 5 already uses — a property is readable by every process regardless
+   of how it was forked, with no per-service wiring needed. This was the last blocker: boot
+   completes cleanly, no RenderThread crashes, and a real scrcpy recording of the home screen
+   succeeds.
+
 ## Pending
 
-- **The real next step, now properly scoped (was previously "strace it", now actually traced
-  all the way through): either (a) extend `external/minigbm`'s own `Android.bp` with a *new*
-  Soong module that statically links this project's patched minigbm sources (including
-  `nvidia_venus.c`) behind a legacy `HAL_MODULE_INFO_SYM`-exporting shim — mirroring the stock
-  `gralloc.cros.so`'s own monolithic design closely enough to be a real drop-in replacement for
-  it — or (b) build and ship the modern AIDL allocator *service* binary this image never had in
-  the first place (its own `.rc` + VINTF manifest entry), linking the already-correctly-built
-  `libminigbm_gralloc.so` through its real C++ API, and let it replace
-  `android.hardware.graphics.allocator@2.0-service` outright instead of patching it. Either one
-  is a real AOSP build/porting task, not a config change — out of scope for a config-only pass.**
-- The `mesa.vtest.socket.name` property fix (`installVtestSocketProp()`) is real, tested, and
-  necessary regardless of which of the two options above gets picked — keep it; it just is not
-  sufficient on its own, since `nvidia_venus_connect()` is never reached today.
 - The `nvenc` + `venus3d` simultaneous case above (needs a `vtest_gpu_encode_dmabuf()` dma-buf
-  branch, untested on real hardware yet).
+  branch, untested on real hardware yet, and explicitly out of scope for this pass).
 - `REDROID_VENUS3D_ARTIFACTS_DIR` points at a local build folder today, same "download a
-  release once one exists" TODO `hwenc`/`nvenc` already carry.
+  release once one exists" TODO `hwenc`/`nvenc` already carry. It now also needs
+  `lib/hw/gralloc.minigbm.so`, `lib64/hw/gralloc.minigbm.so`, `lib/libdmabufheap.so`, and
+  `lib64/libdmabufheap.so` alongside the original 8 files.
+- The root cause of `libdmabufheap.so` (gap 6) being unreachable from the booted guest's own
+  `/vendor` view, despite being present pre-boot, was not chased further — shipping the module's
+  own copy sidesteps it but does not explain it.
 - The host daemon binaries (`backend/native/venus3d-daemon/`) are reused, unmodified, from
   `redroid-nvidia`'s own 2026-09 validation session rather than rebuilt in this pass — rebuilding
   them from the patch sources in that project's own `patches/virglrenderer/` is documented there

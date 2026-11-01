@@ -7,5 +7,23 @@
 # any gralloc.cros.so consumer -- most importantly the legacy HIDL 2.0 Allocator service
 # SurfaceFlinger's own GraphicBufferAllocator depends on for real display buffers -- fails with
 # ENODEV ("no vtest connection") and crash-loops.
+#
+# An EIGHTH real gap, found after SurfaceFlinger's own RenderEngine booted correctly but every
+# app's EGL path (HWUI/ANGLE, used by SystemUI, launcher3, and any scrcpy-driven virtual
+# display) still crash-looped with "ANGLE Display::initialize error 0: Internal Vulkan error
+# (-3)": zygote-forked app processes never see the `setenv VTEST_SOCKET_NAME/VN_DEBUG` pair
+# patchSurfaceflingerRc()/patchLegacyGrallocRc() set -- those are scoped to one service's own
+# forked process, and zygote does not inherit init's environment the way a directly-forked
+# service does. But Mesa's os_get_option() (src/util/os_misc.c, os_get_android_option()) already
+# falls back from getenv() to a system property for every env var it reads on Android, readable
+# by any process regardless of how it was forked: VTEST_SOCKET_NAME -> mesa.vtest.socket.name
+# (already set below), VN_DEBUG -> mesa.vn.debug. And VN_DEBUG=vtest is not cosmetic --
+# vn_renderer_create() (src/virtio/vulkan/vn_renderer.h) only attempts the vtest transport at all
+# when VN_DEBUG(VTEST) is set; without it, it falls through to vn_renderer_create_vtgpu(), which
+# tries a real virtio-gpu kernel device that does not exist here, producing the exact generic
+# VK_ERROR_INITIALIZATION_FAILED (err=-3) ANGLE was logging. Setting mesa.vn.debug here makes
+# every process -- zygote-forked apps included -- resolve the same vtest path SurfaceFlinger's
+# own setenv already gave it, with no per-service wiring needed.
 on early-init
     setprop mesa.vtest.socket.name /vendor/venus.sock
+    setprop mesa.vn.debug vtest
