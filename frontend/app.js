@@ -627,13 +627,54 @@ function buildRestartEditRow(inst) {
   gpuWrap.appendChild(gpuSelect);
   panel.appendChild(gpuWrap);
 
+  const ids = inst.requiredModuleIds || [];
+  const checks = {};
+
+  // venus3d: real 3D acceleration, part of what gpuMode=host means on this GPU rather than a
+  // separate capability -- placed right under the gpuMode select for that reason, above encode.
+  // Stays opt-in (never forced/auto-checked, same "explicit informed choice" reasoning as
+  // hwdec/hwenc below) -- NOT blocked when unticked on host either, since deliberately
+  // reproducing/diagnosing the broken path is a legitimate reason to pick that combination on
+  // purpose. On an NVIDIA host specifically, plain gpuMode=host without it is a known-broken
+  // combination (stock GBM/Mesa gralloc crash-loops SurfaceFlinger, see the module's own
+  // README), so it gets a loud red warning instead of silence. Disabled-but-visible in guest
+  // mode (not hidden) -- same convention as every other gpuMode-gated option here, so its own
+  // state doesn't silently vanish out of the panel.
+  const venus3dWrap = document.createElement('label');
+  venus3dWrap.className = 'display-edit-field';
+  venus3dWrap.style.flexDirection = 'row';
+  const venus3dChk = document.createElement('input');
+  venus3dChk.type = 'checkbox';
+  venus3dChk.checked = ids.includes('venus3d');
+  checks.venus3d = venus3dChk;
+  venus3dWrap.appendChild(venus3dChk);
+  venus3dWrap.appendChild(document.createTextNode(t('new.venus3d')));
+  panel.appendChild(venus3dWrap);
+  const venus3dStatus = document.createElement('p');
+  venus3dStatus.hidden = true;
+  panel.appendChild(venus3dStatus);
+
+  function refreshVenus3dStatus() {
+    if (gpuSelect.value !== 'host') {
+      venus3dStatus.hidden = false;
+      venus3dStatus.className = 'resources-warn';
+      venus3dStatus.textContent = t('new.venus3dNeedsHost');
+      return;
+    }
+    if (checks.venus3d.checked) { venus3dStatus.hidden = true; return; }
+    api(`/modules/venus3d?imageId=${encodeURIComponent(inst.imageId)}`).then((m) => {
+      venus3dStatus.hidden = !(gpuSelect.value === 'host' && !checks.venus3d.checked && m.hostCompatible);
+      venus3dStatus.className = 'resources-warn resources-warn-error';
+      venus3dStatus.textContent = t('new.venus3dRecommendedWarn');
+    }).catch(() => { venus3dStatus.hidden = true; });
+  }
+  checks.venus3d.addEventListener('change', refreshVenus3dStatus);
+
   // --- Hardware encode/decode ---
   const codecHeader = document.createElement('div');
   codecHeader.className = 'resources-edit-header';
   codecHeader.textContent = t('instances.configure.codecHeader');
   panel.appendChild(codecHeader);
-
-  const ids = inst.requiredModuleIds || [];
 
   // Encode: same mutually-exclusive-by-vendor select as the new-instance dialog (see
   // updateEncodeSelect) -- this instance's own imageId/hwEncCapable are already on `inst`
@@ -666,7 +707,6 @@ function buildRestartEditRow(inst) {
   codecWarn.className = 'resources-warn';
   codecWarn.textContent = t('instances.codec.needsHost');
   panel.appendChild(codecWarn);
-  const checks = {};
   const hwdecWrap = document.createElement('label');
   hwdecWrap.className = 'display-edit-field';
   hwdecWrap.style.flexDirection = 'row';
@@ -678,40 +718,6 @@ function buildRestartEditRow(inst) {
   hwdecWrap.appendChild(document.createTextNode(t('new.hwdec')));
   panel.appendChild(hwdecWrap);
 
-  // venus3d: same shape as hwdec (plain checkbox, gpuMode=host only, no vendor split needed in
-  // the UI -- the module itself is NVIDIA-only via hostGpuVendor, enforced server-side).
-  const venus3dWrap = document.createElement('label');
-  venus3dWrap.className = 'display-edit-field';
-  venus3dWrap.style.flexDirection = 'row';
-  const venus3dChk = document.createElement('input');
-  venus3dChk.type = 'checkbox';
-  venus3dChk.checked = ids.includes('venus3d');
-  checks.venus3d = venus3dChk;
-  venus3dWrap.appendChild(venus3dChk);
-  venus3dWrap.appendChild(document.createTextNode(t('new.venus3d')));
-  panel.appendChild(venus3dWrap);
-  const venus3dWarn = document.createElement('p');
-  venus3dWarn.className = 'resources-warn';
-  venus3dWarn.textContent = t('new.venus3dRecommendedWarn');
-  venus3dWarn.hidden = true;
-  panel.appendChild(venus3dWarn);
-
-  // venus3d stays opt-in (never forced/auto-checked, same as hwdec -- explicit informed choice,
-  // not a silent default). On an NVIDIA host specifically, plain gpuMode=host without it is a
-  // known-broken combination (stock GBM/Mesa gralloc crash-loops SurfaceFlinger, see the
-  // module's own README) -- not blocked, since "community tier" diagnosis/testing of the broken
-  // path itself is a legitimate reason to pick it anyway, just flagged with a warning instead of
-  // letting it fail silently. Checked each time gpuMode or the venus3d checkbox itself changes.
-  async function refreshVenus3dWarn() {
-    if (gpuSelect.value !== 'host') { venus3dWarn.hidden = true; return; }
-    if (checks.venus3d.checked) { venus3dWarn.hidden = true; return; }
-    try {
-      const m = await api(`/modules/venus3d?imageId=${encodeURIComponent(inst.imageId)}`);
-      venus3dWarn.hidden = !(gpuSelect.value === 'host' && !checks.venus3d.checked && m.hostCompatible);
-    } catch { venus3dWarn.hidden = true; }
-  }
-  checks.venus3d.addEventListener('change', refreshVenus3dWarn);
-
   // Mirrors the "new instance" form: a module requiring a specific gpuMode must not stay
   // checkable/selectable once the select is switched away from it, instead of only warning
   // and letting the apply fail server-side with a 409 from moduleGate.check.
@@ -722,7 +728,7 @@ function buildRestartEditRow(inst) {
     if (needsHost) checks.hwdec.checked = false;
     checks.venus3d.disabled = needsHost;
     if (needsHost) checks.venus3d.checked = false;
-    refreshVenus3dWarn();
+    refreshVenus3dStatus();
     updateEncodeSelect({
       select: encodeSelect, optHwenc, optNvenc, status: encodeStatus,
       imageId: inst.imageId, hwEncCapable: inst.hwEncCapable, gpuMode: gpuSelect.value,
@@ -2593,7 +2599,7 @@ function updateVenus3dStatus() {
     status.className = 'ok-text';
     status.textContent = t('new.venus3dOk', { vendor: venus3dLastCheck.hostGpuVendor || '?' });
   } else {
-    status.className = 'warn-text';
+    status.className = 'fail-text';
     status.textContent = t('new.venus3dRecommendedWarn');
   }
 }

@@ -154,6 +154,9 @@ gunzip -c image.tar.gz | docker load</pre>
             <option value="guest" data-i18n="new.gpuModeGuest">guest (slow, safe)</option>
           </select>
         </label>
+        <label class="contract-checkbox"><input type="checkbox" name="venus3d" id="chk-venus3d" />
+          <span data-i18n="new.venus3d">Real 3D acceleration (NVIDIA)</span></label>
+        <p id="venus3d-status" class="muted" hidden></p>
       </fieldset>
       <label><span data-i18n="new.encodeLabel">Hardware encode</span>
         <select name="encode" id="select-encode">
@@ -166,9 +169,6 @@ gunzip -c image.tar.gz | docker load</pre>
       <label class="contract-checkbox"><input type="checkbox" name="hwdec" id="chk-hwdec" />
         <span data-i18n="new.hwdec">Hardware decode (VA-API / NVDEC)</span></label>
       <p id="hwdec-status" class="muted" hidden></p>
-      <label class="contract-checkbox"><input type="checkbox" name="venus3d" id="chk-venus3d" />
-        <span data-i18n="new.venus3d">Real 3D acceleration (NVIDIA)</span></label>
-      <p id="venus3d-status" class="muted" hidden></p>
       <label class="contract-checkbox"><input type="checkbox" name="gapps" id="chk-gapps" />
         <span data-i18n="new.gapps">Google Apps (Play Store)</span></label>
       <p id="gapps-status" class="muted" hidden></p>
