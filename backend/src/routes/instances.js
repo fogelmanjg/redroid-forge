@@ -381,6 +381,9 @@ router.post('/', async (req, res) => {
       androidId: null,
       androidIdRegisteredAt: null,
       createdAt: new Date().toISOString(),
+      // Any watchdog module this instance has (e.g. cifi) starts paused -- see
+      // moduleScheduler.defaultPauseForNewModules for why.
+      watchdogPaused: moduleScheduler.defaultPauseForNewModules(null, requiredModuleIds),
     };
     store.upsert(instance);
 
@@ -809,6 +812,10 @@ router.post('/:id/display', async (req, res) => {
       // which read instance.hasGapps rather than re-deriving it from requiredModuleIds).
       hasGapps: !!img.hasGapps || requiredModuleIds.includes('gapps'),
       deviceProfileApplied: null,
+      // Same default-paused seeding as creation -- only applies to a watchdog module this
+      // instance never had before (e.g. cifi added just now through `modules`); one it already
+      // had keeps whatever pause state it already had.
+      watchdogPaused: moduleScheduler.defaultPauseForNewModules(instance.watchdogPaused, requiredModuleIds),
     });
 
     if (wasRunning) {

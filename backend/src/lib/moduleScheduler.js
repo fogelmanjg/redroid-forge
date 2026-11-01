@@ -103,7 +103,33 @@ function status(instanceId, requiredModuleIds) {
 function pause(instanceId, moduleId) { return setPaused(instanceId, moduleId, true); }
 function resume(instanceId, moduleId) { return setPaused(instanceId, moduleId, false); }
 
+// A watchdog's own tap sequence (e.g. cifi's startGame/automation/continueBtn) assumes a
+// KNOWN state after reopening the app -- it has no way to recognize a screen it has never seen
+// before. A brand new install can hit a one-time first-run gate (e.g. a ToS/Privacy Policy
+// screen) that the watchdog was never taught -- if that instance's process happens to die and
+// restart during that window, the watchdog would reopen it and tap blindly into a screen it does
+// not understand, which can do more harm than leaving it alone. Found for real, 01/11/2026,
+// jgustavo47: a fresh `cifi` install got stuck on exactly this kind of screen (not a crash --
+// `isRunning()` never triggered here -- but the same blind-tap risk applies once the module
+// starts ticking against it).
+//
+// Default fix: any watchdog module a requiredModuleIds change is adding for the FIRST time
+// (creation, or added later through /display's `modules` param) starts PAUSED -- the human has
+// to get the app through its own first run once, then explicitly resume the watchdog (the
+// pause/resume API already existed for this). A module the instance already had keeps whatever
+// pause state it already had (its own key already exists in `existingPaused`) -- this only seeds
+// a default for one it never had before, it never re-pauses one already running.
+function defaultPauseForNewModules(existingPaused, requiredModuleIds) {
+  const watchdogPaused = { ...(existingPaused || {}) };
+  for (const manifest of moduleRunner.watchdogModules(requiredModuleIds)) {
+    if (!(manifest.id in watchdogPaused)) watchdogPaused[manifest.id] = true;
+  }
+  return watchdogPaused;
+}
+
 // Only for tests.
 function _resetForTests() { for (const id of Array.from(scheduled.keys())) stop(id); }
 
-module.exports = { start, stop, status, pause, resume, isPaused, _resetForTests };
+module.exports = {
+  start, stop, status, pause, resume, isPaused, defaultPauseForNewModules, _resetForTests,
+};

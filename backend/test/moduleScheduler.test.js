@@ -193,3 +193,30 @@ test('moduleScheduler.status: a module that throws is reported with lastOk=false
   s = scheduler.status('inst-1', [id])[0];
   assert.equal(s.lastOk, false); // still failing, but it DID run again
 }));
+
+test('defaultPauseForNewModules: a watchdog module the instance never had before starts paused', (t) => withWatchdogFixture({
+  entryBody: 'module.exports.runTick = async () => {};',
+}, ({ id }) => {
+  assert.deepEqual(scheduler.defaultPauseForNewModules(null, [id]), { [id]: true });
+  assert.deepEqual(scheduler.defaultPauseForNewModules({}, [id]), { [id]: true });
+}));
+
+test('defaultPauseForNewModules: a module already in existingPaused keeps its own state, paused or not', (t) => withWatchdogFixture({
+  entryBody: 'module.exports.runTick = async () => {};',
+}, ({ id }) => {
+  assert.deepEqual(scheduler.defaultPauseForNewModules({ [id]: false }, [id]), { [id]: false });
+  assert.deepEqual(scheduler.defaultPauseForNewModules({ [id]: true }, [id]), { [id]: true });
+}));
+
+test('defaultPauseForNewModules: merges with unrelated existing keys instead of replacing them', (t) => withWatchdogFixture({
+  entryBody: 'module.exports.runTick = async () => {};',
+}, ({ id }) => {
+  assert.deepEqual(
+    scheduler.defaultPauseForNewModules({ 'some-other-module': true }, [id]),
+    { 'some-other-module': true, [id]: true },
+  );
+}));
+
+test('defaultPauseForNewModules: a non-watchdog module id is simply ignored, nothing is seeded for it', () => {
+  assert.deepEqual(scheduler.defaultPauseForNewModules(null, ['not-a-watchdog-module']), {});
+});

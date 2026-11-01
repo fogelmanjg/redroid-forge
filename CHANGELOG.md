@@ -23,6 +23,17 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
 
 ### Fixed
 
+- A watchdog module (e.g. `cifi`) now starts PAUSED by default the first time an instance gets
+  it -- at creation, or whenever it's added later through `/display`'s `modules` param
+  (`moduleScheduler.defaultPauseForNewModules`). A module an instance already had keeps whatever
+  pause state it already had; this only seeds the default for one it never had before. Found for
+  real, 01/11/2026 (jgustavo47): a fresh `cifi` install hit a one-time first-run "Privacy Policy"
+  gate the watchdog's tap sequence (calibrated for "reopen after crash", not "never seen this
+  screen") has no way to recognize -- had the process also died and restarted during that window,
+  the watchdog would have reopened it and tapped blindly into a screen it does not understand. The
+  human now has to get a freshly-added watchdog module's app through its own first run once, then
+  explicitly resume it (`POST /api/instances/:id/watchdogs/:moduleId/resume`, already existed).
+
 - Intermittent "fetch failed" installing `aurora-store` on a host that had never cached its APK
   before (`backend/src/server.js`). Root cause: every host in the fleet has a global-scope IPv6
   address from Tailscale, which makes Node's `fetch()` race real public IPv6 candidates too
