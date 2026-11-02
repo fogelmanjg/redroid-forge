@@ -38,6 +38,7 @@ app.use('/api/settings', require('./routes/settings'));
 app.use('/api/quotas', require('./routes/quotas'));
 app.use('/api/backups', require('./routes/backups'));
 app.use('/api/network', require('./routes/network'));
+app.use('/api/version', require('./routes/version'));
 
 if (auth.LOCAL_ENABLED) require('./lib/userStore').ensureBootstrapAdmin();
 

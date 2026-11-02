@@ -6,6 +6,9 @@ const I18n = (() => {
   const strings = {
     en: {
       'nav.instances': 'Instances', 'nav.modules': 'Modules', 'nav.userModules': 'User modules', 'nav.doctor': 'Doctor', 'nav.help': 'Help', 'nav.identities': 'Identities',
+      'version.check': 'Check for updates', 'version.checking': 'Checking…',
+      'version.upToDate': 'Up to date ({version})', 'version.newer': '{latest} available (installed: {installed})',
+      'version.error': 'Could not check: {error}',
       'auth.logout': 'Log out', 'auth.loginTitle': 'Log in', 'auth.username': 'Username', 'auth.password': 'Password',
       'auth.loginSubmit': 'Log in', 'auth.loginWithProvider': 'Log in with {provider}',
       'identities.intro': 'Everyone who can log in to this instance of redroid-forge, whether a local account (REDROID_FORGE_AUTH=local/both) or an identity that logged in via SSO (REDROID_FORGE_AUTH=oidc/both). An SSO provider only proves who someone is -- assigning a role here is what actually grants access. A new SSO identity starts "Pending" (no access) until an admin picks a role.',
@@ -206,6 +209,9 @@ const I18n = (() => {
     },
     es: {
       'nav.instances': 'Instancias', 'nav.modules': 'Módulos', 'nav.userModules': 'Módulos de usuario', 'nav.doctor': 'Doctor', 'nav.help': 'Ayuda', 'nav.identities': 'Identidades',
+      'version.check': 'Chequear actualizaciones', 'version.checking': 'Chequeando…',
+      'version.upToDate': 'Actualizado ({version})', 'version.newer': 'Hay {latest} disponible (instalado: {installed})',
+      'version.error': 'No se pudo chequear: {error}',
       'auth.logout': 'Cerrar sesión', 'auth.loginTitle': 'Iniciar sesión', 'auth.username': 'Usuario', 'auth.password': 'Contraseña',
       'auth.loginSubmit': 'Iniciar sesión', 'auth.loginWithProvider': 'Iniciar sesión con {provider}',
       'identities.intro': 'Todos los que pueden entrar a esta instancia de redroid-forge, ya sea una cuenta local (REDROID_FORGE_AUTH=local/both) o una identidad logueada por SSO (REDROID_FORGE_AUTH=oidc/both). Un proveedor SSO solo prueba quién es alguien -- asignarle un rol acá es lo que realmente da acceso. Una identidad SSO nueva arranca "Pendiente" (sin acceso) hasta que un admin le elige un rol.',

@@ -135,6 +135,39 @@ async function loadHostCoreCount() {
   } catch { hostCoreCount = null; }
 }
 
+// Installed version: free (no network call -- see versionCheck.js) and shown on every load.
+// Whether a newer one exists on GitHub is NEVER checked on its own, only by this button, right
+// now, on demand -- see backend/src/routes/version.js's own comment for why.
+let installedVersion = null;
+async function loadInstalledVersion() {
+  try {
+    const { installed } = await api('/version');
+    installedVersion = installed;
+    $('#app-version').textContent = `v${installed}`;
+  } catch { $('#app-version').textContent = ''; }
+}
+
+async function checkForNewerVersion() {
+  const btn = $('#btn-version-check');
+  const label = $('#app-version');
+  btn.disabled = true;
+  const prevLabel = label.textContent;
+  label.textContent = t('version.checking');
+  try {
+    const r = await api('/version/check', { method: 'POST' });
+    label.textContent = r.newer
+      ? t('version.newer', { latest: r.latest, installed: r.installed })
+      : t('version.upToDate', { version: r.installed });
+    if (r.newer && r.url) label.title = r.url;
+  } catch (e) {
+    label.textContent = t('version.error', { error: e.message });
+    setTimeout(() => { if (label.textContent === t('version.error', { error: e.message })) label.textContent = prevLabel; }, 5000);
+  } finally {
+    btn.disabled = false;
+  }
+}
+$('#btn-version-check').addEventListener('click', checkForNewerVersion);
+
 // Instances redesign (24/10/2026): every per-instance editable thing used to be its own
 // chip-click-to-toggle panel (openResourcesId/openDisplayId/openCodecId/openWifiInternoId).
 // Now there are only two edit panels, opened by two dedicated buttons in the secondary line --
@@ -2922,6 +2955,7 @@ AuthUi.ready.then(() => {
   $('.tab-btn[data-tab="settings"]').hidden = !AuthUi.canManageSettings();
 
   loadHostCoreCount();
+  loadInstalledVersion();
   loadInstances();
 
   // The state of an instance changes by itself (it boots, it crashes, someone uses adb/docker): refresh
