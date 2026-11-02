@@ -45,7 +45,7 @@ function reservedSlots(env = process.env) {
 // the case of a host with the module's default `devices=binder,hwbinder,
 // vndbinder` (confirmed on n02).
 function nextFreeSlot({
-  legacy = useLegacyBinder(), exists = fs.existsSync, reserved = reservedSlots(), accessible = worldAccessible, inUse = [],
+  legacy = useLegacyBinder(), exists = hostExistsSync, reserved = reservedSlots(), accessible = hostWorldAccessible, inUse = [],
 } = {}) {
   const used = new Set(store.readAll().map((i) => i.binderSlot).filter((s) => s != null));
   for (const r of reserved) used.add(r);
@@ -107,7 +107,28 @@ function worldAccessible(p) {
   try { return (fs.statSync(p).mode & 0o006) === 0o006; } catch { return true; }
 }
 
-function restrictedNodes(slot, accessible = worldAccessible, exists = fs.existsSync) {
+// The legacy /dev/binder* nodes are NOT bind-mounted into this container (unlike /dev/binderfs,
+// see docker-compose.yml) -- this privileged container's own devtmpfs auto-populates its OWN
+// independent copies of them (same major:minor as the host's, but a different inode, created
+// 0600 by default regardless of what the host's copy is chmod'd to). Confirmed live (n02,
+// 02/11/2026): `chmod 0666` on the HOST's nodes had zero effect on what this container itself
+// saw at the same bare path -- a Doctor check (and nextFreeSlot/binderBinds below) reading the
+// bare path here was reporting a healthy host as broken, and could have refused to create an
+// instance that the host was actually ready for.
+//
+// `pid: host` (docker-compose.yml) means /proc/1 is genuinely the host's init: reading through
+// /proc/1/root gives this container the HOST's real filesystem view, with no extra bind needed
+// (and no risk of it ever drifting from whatever slot count the host is actually configured
+// with, unlike a static per-slot bind list would). Only for THESE checks -- the actual Docker
+// bind strings binderBinds() returns must stay bare host paths (`/dev/binderN:/dev/binder`):
+// those are resolved by the Docker daemon itself, which already runs directly on the host.
+const HOST_ROOT = '/proc/1/root';
+function hostExistsSync(p) { return fs.existsSync(`${HOST_ROOT}${p}`); }
+function hostWorldAccessible(p) {
+  try { return (fs.statSync(`${HOST_ROOT}${p}`).mode & 0o006) === 0o006; } catch { return true; }
+}
+
+function restrictedNodes(slot, accessible = hostWorldAccessible, exists = hostExistsSync) {
   return legacyNodeNames(slot).map((n) => `/dev/${n}`).filter((p) => exists(p) && !accessible(p));
 }
 
@@ -143,7 +164,7 @@ function useLegacyBinder(exists = fs.existsSync) {
 // Returns the Docker binds "/dev/binderfs/binderN:/dev/binder" (and hwbinder/vndbinder)
 // for a given slot, creating the devices if needed. In legacy mode the source is
 // "/dev/binderN" and it must already exist.
-function binderBinds(slot, { legacy = useLegacyBinder(), exists = fs.existsSync, accessible = worldAccessible } = {}) {
+function binderBinds(slot, { legacy = useLegacyBinder(), exists = hostExistsSync, accessible = hostWorldAccessible } = {}) {
   const targets = ['/dev/binder', '/dev/hwbinder', '/dev/vndbinder'];
   if (legacy) {
     const names = legacyNodeNames(slot);
@@ -169,5 +190,5 @@ function binderBinds(slot, { legacy = useLegacyBinder(), exists = fs.existsSync,
 }
 
 module.exports = {
-  nextFreeSlot, slotsFromBinds, slotsInUseOnHost, binderBinds, useLegacyBinder, reservedSlots, legacyDevicesParam, legacyNodeNames, restrictedNodes, worldAccessible, BINDERFS_ROOT,
+  nextFreeSlot, slotsFromBinds, slotsInUseOnHost, binderBinds, useLegacyBinder, reservedSlots, legacyDevicesParam, legacyNodeNames, restrictedNodes, worldAccessible, hostExistsSync, hostWorldAccessible, BINDERFS_ROOT,
 };

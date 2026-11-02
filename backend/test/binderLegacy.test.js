@@ -148,6 +148,35 @@ test('worldAccessible: only a node that every user can open for read and write c
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
+// This container's own /dev/binder* is NOT the host's -- it is not bind-mounted (unlike
+// /dev/binderfs), so this privileged container's devtmpfs auto-creates its own independent
+// copy of each node, same major:minor, always 0600 regardless of what the host's real node is
+// chmod'd to (confirmed live, n02, 02/11/2026). nextFreeSlot/binderBinds's real defaults read
+// through /proc/1/root (pid: host) instead, to see what the HOST actually has.
+test('hostExistsSync / hostWorldAccessible: read through /proc/1/root, never the bare path', () => {
+  const fs = require('fs');
+  const { hostExistsSync, hostWorldAccessible } = require('../src/lib/binder');
+  const realExists = fs.existsSync;
+  const realStat = fs.statSync;
+  const seen = [];
+  fs.existsSync = (p) => { seen.push(p); return p === '/proc/1/root/dev/binder3'; };
+  fs.statSync = (p) => {
+    seen.push(p);
+    if (p !== '/proc/1/root/dev/binder3') throw new Error('ENOENT');
+    return { mode: 0o20666 };
+  };
+  try {
+    assert.strictEqual(hostExistsSync('/dev/binder3'), true);
+    assert.strictEqual(hostExistsSync('/dev/binder4'), false);
+    assert.strictEqual(hostWorldAccessible('/dev/binder3'), true);
+    assert.strictEqual(hostWorldAccessible('/dev/binder4'), true, 'a missing node is reported on its own');
+    assert.ok(seen.length > 0 && seen.every((p) => p.startsWith('/proc/1/root/dev/binder')), `saw: ${seen.join(', ')}`);
+  } finally {
+    fs.existsSync = realExists;
+    fs.statSync = realStat;
+  }
+});
+
 test('nextFreeSlot skips a slot whose nodes are root-only and takes the next usable one', () => {
   const { nextFreeSlot, legacyDevicesParam } = require('../src/lib/binder');
   const present = new Set(legacyDevicesParam(4).split(',').map((n) => `/dev/${n}`));
