@@ -132,6 +132,16 @@ function checkExt4Module() {
   }
 }
 
+// /dev/loop-control existing is NOT enough: a char device node for it can exist (udev's static
+// rules, or a leftover from a previous boot) while the loop driver itself is not loaded -- in
+// that state opening it fails with ENODEV and apexd-bootstrap dies within seconds with
+// "reboot,bootloader,bootstrap-apexd-failed" (confirmed live, n02, 02/11/2026: /dev/loop-control
+// was present, 0 loop devices existed, and a plain `docker run` of the official redroid image
+// crashed every time until `modprobe loop`). /sys/module/loop is genuinely host-wide, global
+// kernel state -- unlike /dev's char/block device nodes, it is not re-populated independently
+// per container's own devtmpfs, so this is reliable from inside any container without needing
+// the /proc/1/root trick binder.js uses for /dev itself. A kernel with loop built in (not a
+// module) may have no /sys/module/loop entry either, so a real loop0 device also counts.
 function checkLoopDevices() {
   const ctrlPath = '/dev/loop-control';
   if (!fs.existsSync(ctrlPath)) {
@@ -141,7 +151,19 @@ function checkLoopDevices() {
       fix: 'Run on the HOST: sudo modprobe loop',
     };
   }
-  return { status: 'ok', detail: `${ctrlPath} present.` };
+  const moduleLoaded = fs.existsSync('/sys/module/loop') || fs.existsSync('/dev/loop0');
+  if (!moduleLoaded) {
+    return {
+      status: 'fail',
+      detail: `${ctrlPath} exists but the loop driver is not loaded (no /dev/loop0, no /sys/module/loop) -- `
+        + 'opening it fails with ENODEV. Typical symptom: an instance boots and dies within seconds, '
+        + 'reboot reason "bootstrap-apexd-failed" (apexd-bootstrap could not create loop devices for the APEXes).',
+      fix: 'Run on the HOST: sudo modprobe loop\n'
+        + 'To survive a reboot, add to /etc/modules-load.d/loop-redroid.conf (create it, this is its entire content):\n'
+        + '  loop',
+    };
+  }
+  return { status: 'ok', detail: `${ctrlPath} present, loop driver loaded.` };
 }
 
 // The ./data bind mount inherits the host's real filesystem — it can be read from
