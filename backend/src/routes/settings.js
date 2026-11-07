@@ -1,6 +1,7 @@
 const express = require('express');
 const settings = require('../lib/settings');
 const permissions = require('../lib/permissions');
+const hwAccel = require('../lib/hwAccel');
 const { IP_SHAPE_RE } = require('../lib/instanceParams');
 
 const router = express.Router();
@@ -12,9 +13,11 @@ router.get('/', (req, res) => {
 // Admin only (docs/ROADMAP.md Phase 7) -- this changes where every instance's backups land,
 // which interfaces are offered at all, and (appBindHosts) this app's OWN listen addresses -- none
 // of it scoped to any one instance's ownership.
-router.put('/', (req, res) => {
+router.put('/', async (req, res) => {
   if (!permissions.canManageSettings(req.user)) return res.status(403).json({ error: 'Admin only' });
-  const { backupDir, networkInterfaceOverrides, appBindHosts, operatorPoolMaxVcpus, operatorPoolMaxMemoryMb } = req.body || {};
+  const {
+    backupDir, networkInterfaceOverrides, appBindHosts, operatorPoolMaxVcpus, operatorPoolMaxMemoryMb, encodeBackend,
+  } = req.body || {};
   if (backupDir !== undefined && (typeof backupDir !== 'string' || backupDir.trim() === '')) {
     return res.status(400).json({ error: 'backupDir must be a non-empty string' });
   }
@@ -46,6 +49,9 @@ router.put('/', (req, res) => {
       return res.status(400).json({ error: `${key} must be a positive integer, or null/empty to leave it unlimited` });
     }
   }
+  if (encodeBackend !== undefined && encodeBackend !== null && encodeBackend !== 'legacy' && encodeBackend !== 'ffmpeg') {
+    return res.status(400).json({ error: 'encodeBackend must be "legacy", "ffmpeg", or null (automatic)' });
+  }
   const patch = {};
   if (backupDir !== undefined) patch.backupDir = backupDir.trim();
   if (networkInterfaceOverrides !== undefined) patch.networkInterfaceOverrides = networkInterfaceOverrides;
@@ -55,7 +61,25 @@ router.put('/', (req, res) => {
   }
   if (operatorPoolMaxVcpus !== undefined) patch.operatorPoolMaxVcpus = operatorPoolMaxVcpus || null;
   if (operatorPoolMaxMemoryMb !== undefined) patch.operatorPoolMaxMemoryMb = operatorPoolMaxMemoryMb || null;
-  res.json(settings.update(patch));
+  const before = settings.get().encodeBackend;
+  if (encodeBackend !== undefined) patch.encodeBackend = encodeBackend || null;
+  const updated = settings.update(patch);
+  // Unlike authMode (needs a full app restart, never automated -- see auth.js's own comment),
+  // this one can be hot-applied: hwAccel.restartDaemonWithCurrentSettings() waits for the old
+  // native daemon to actually exit before relaunching it with the new backend (see its own
+  // comment on why that matters). It briefly cuts hw-accel for EVERY instance on this host (the
+  // daemon is shared, not per-instance -- see settings.js's comment on encodeBackend), the same
+  // kind of blip the daemon's own crash-restart supervisor already causes on its own. Never
+  // fails the request: the setting is saved either way, and a manual restart still applies it if
+  // this hot-restart itself has trouble.
+  if (encodeBackend !== undefined && patch.encodeBackend !== before) {
+    try {
+      await hwAccel.restartDaemonWithCurrentSettings();
+    } catch (e) {
+      console.warn(`[settings] could not relaunch the VA-API daemon with the new encode backend: ${e.message}`);
+    }
+  }
+  res.json(updated);
 });
 
 module.exports = router;

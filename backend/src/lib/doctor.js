@@ -248,15 +248,26 @@ async function checkHwAccel() {
     // daemon.c disables it on Intel's iHD driver unless forced) -- not suggested for other
     // vendors until that is tried too.
     const idrPeriod = Number(process.env.REDROID_FORGE_ENCODE_IDR_PERIOD || '1');
-    if (vendor === 'amd' && anyNeedsHwEnc && !(idrPeriod > 1)) {
-      return {
-        status: 'warn',
-        detail: `${vendor} GPU detected, VA-API daemon (hwenc) running at ${hwAccel.SOCKET_PATH}, but encoding all-intra (every frame a full IDR) -- fine at a high bitrate, visibly worse at a low one. Set REDROID_FORGE_ENCODE_IDR_PERIOD=120 in .env and restart to enable P-frames (validated on AMD; see docs/ROADMAP.md Phase 2).`,
-      };
-    }
+    const idrWarning = vendor === 'amd' && anyNeedsHwEnc && !(idrPeriod > 1)
+      ? ' Encoding all-intra (every frame a full IDR) -- fine at a high bitrate, visibly worse at a low one. '
+        + 'Set REDROID_FORGE_ENCODE_IDR_PERIOD=120 in .env and restart to enable P-frames (validated on AMD; see docs/ROADMAP.md Phase 2).'
+      : null;
+    // settings.json's encodeBackend wins once set through the UI, same precedence as
+    // effectiveEncodeBackend() uses to actually spawn the daemon (hwAccel.js) -- this reflects
+    // what was ASKED for, not necessarily what ended up running: the daemon silently falls back
+    // to legacy if ffmpeg_encode_open() fails at startup (see its own stderr log for that case).
+    const backendValue = hwAccel.effectiveEncodeBackend();
+    const backend = backendValue === 'ffmpeg' ? 'ffmpeg (h264_vaapi, experimental)' : 'legacy';
+    const risk = await hwAccel.encodeBackendRisk(vendor, backendValue);
+    // Both warnings are independent (one about missing P-frames, the other about the backend
+    // choice itself) and can both be true at once -- e.g. AMD Polaris on ffmpeg with no IDR
+    // period set. Neither may silently hide the other (an earlier version of this check returned
+    // on the IDR warning before ever looking at encodeBackendRisk, dropping the GPU-hang warning
+    // exactly on that combination).
     return {
-      status: 'ok',
-      detail: `${vendor} GPU detected, VA-API daemon (hwenc) running at ${hwAccel.SOCKET_PATH}.`,
+      status: (idrWarning || risk) ? 'warn' : 'ok',
+      detail: `${vendor} GPU detected, VA-API daemon (hwenc) running at ${hwAccel.SOCKET_PATH}, encoder backend: ${backend}.`
+        + (idrWarning || '') + (risk ? ` ${risk.reason}` : ''),
     };
   } catch (e) {
     return {

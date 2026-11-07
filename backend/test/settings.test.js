@@ -88,6 +88,16 @@ test('oidcProviders: can be set to an explicit empty array -- distinct from null
   assert.deepStrictEqual(settings.get(file).oidcProviders, []);
 });
 
+test('encodeBackend: null by default (never touched through the UI), persists once set, back to null clears it', () => {
+  const file = tmpFile();
+  assert.strictEqual(settings.get(file).encodeBackend, null);
+  const after = settings.update({ encodeBackend: 'ffmpeg' }, file);
+  assert.strictEqual(after.encodeBackend, 'ffmpeg');
+  assert.strictEqual(settings.get(file).encodeBackend, 'ffmpeg');
+  const cleared = settings.update({ encodeBackend: null }, file);
+  assert.strictEqual(cleared.encodeBackend, null);
+});
+
 test('settingsFile(): REDROID_FORGE_SETTINGS_FILE overrides the default path when no explicit file arg is given', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'settings-env-'));
   const file = path.join(dir, 'settings.json');

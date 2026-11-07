@@ -1,17 +1,21 @@
-# Our own minimal, LGPL-only FFmpeg build for hwdec.c (libavcodec + VA-API decode) --
-# see docs/ROADMAP.md Phase 2 step 5. Alpine's own ffmpeg-libavcodec package is built
-# with --enable-gpl (for ITS other users, e.g. libx264 support), and FFmpeg's own
-# license terms make the WHOLE library GPL once that flag is on, regardless of which
-# decoders a given program actually calls -- linking it would make this image a GPLv3
-# work, incompatible with Apache-2.0. hwdec.c only ever calls plain decode (avcodec_open2/
-# send_packet/receive_frame) on 7 codecs via VAAPI hwaccel -- all of that is genuinely
-# LGPL-only code in FFmpeg's own tree, no GPL-licensed component involved at all. Proven
-# by configuring with none of avformat/avfilter/avdevice/swscale/swresample/programs and
-# only those 7 decoders + their _vaapi hwaccels: FFmpeg's own build system prints "License:
-# LGPL version 2.1 or later" for this exact configuration (confirmed 23/10/2026, same
-# FFmpeg release Alpine ships, 8.0.1) -- no API difference from Alpine's package, only the
-# license-affecting configure flags differ. This is what finally makes HWDEC a safe
-# default (see below) instead of a "development only" opt-in.
+# Our own minimal, LGPL-only FFmpeg build for hwdec.c (libavcodec + VA-API decode) and,
+# since 07/11/2026, ffmpeg_encode.c (libavcodec + VA-API encode, h264_vaapi -- see
+# docs/ROADMAP.md Phase 2 step 5 and the REDROID_FORGE_ENCODE_BACKEND=ffmpeg path in
+# daemon.c). Alpine's own ffmpeg-libavcodec package is built with --enable-gpl (for ITS
+# other users, e.g. libx264 support), and FFmpeg's own license terms make the WHOLE library
+# GPL once that flag is on, regardless of which decoders/encoders a given program actually
+# calls -- linking it would make this image a GPLv3 work, incompatible with Apache-2.0.
+# hwdec.c only ever calls plain decode (avcodec_open2/send_packet/receive_frame) on 7 codecs
+# via VAAPI hwaccel, and ffmpeg_encode.c only ever calls plain encode (avcodec_send_frame/
+# receive_packet) on h264_vaapi -- all of that is genuinely LGPL-only code in FFmpeg's own
+# tree, no GPL-licensed component involved at all. Proven by configuring with none of
+# avformat/avfilter/avdevice/swscale/swresample/programs and only those 7 decoders + their
+# _vaapi hwaccels + the one encoder: FFmpeg's own build system prints "License: LGPL version
+# 2.1 or later" for this exact configuration (confirmed 23/10/2026 for decode-only, and again
+# 07/11/2026 after adding --enable-encoder=h264_vaapi, same FFmpeg release Alpine ships,
+# 8.0.1) -- no API difference from Alpine's package, only the license-affecting configure
+# flags differ. This is what finally makes HWDEC a safe default (see below) instead of a
+# "development only" opt-in.
 FROM node:22-alpine AS ffmpeg-lgpl
 RUN apk add --no-cache build-base pkgconf libva-dev nasm curl tar xz
 ARG FFMPEG_VERSION=8.0.1
@@ -24,6 +28,7 @@ RUN curl -sL https://ffmpeg.org/releases/ffmpeg-${FFMPEG_VERSION}.tar.xz | tar x
       --disable-avfilter --disable-swscale --disable-swresample \
       --enable-avcodec --enable-avutil \
       --enable-decoder=h264,hevc,vp8,vp9,mpeg2video,vc1,av1 \
+      --enable-encoder=h264_vaapi \
       --enable-hwaccel=h264_vaapi,hevc_vaapi,vp8_vaapi,vp9_vaapi,mpeg2_vaapi,vc1_vaapi,av1_vaapi \
       --enable-vaapi --enable-shared --disable-static && \
     make -j$(nproc) && make install

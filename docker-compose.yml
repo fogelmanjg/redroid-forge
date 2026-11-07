@@ -42,6 +42,11 @@ services:
       # to an integer > 1 (frames per IDR). Off by default in the repo's own compose
       # (nobody turned it on here yet); set in .env for this lab host, not committed.
       - REDROID_FORGE_ENCODE_IDR_PERIOD=${REDROID_FORGE_ENCODE_IDR_PERIOD:-1}
+      # EXPERIMENTAL (07/11/2026): "ffmpeg" switches the encoder to libavcodec's h264_vaapi
+      # (see backend/native/vaapi-daemon/ffmpeg_encode.c) instead of the daemon's own
+      # hand-rolled bitstream writer. Pre-release until validated on both AMD and Intel --
+      # "legacy" (the default) stays untouched either way.
+      - REDROID_FORGE_ENCODE_BACKEND=${REDROID_FORGE_ENCODE_BACKEND:-legacy}
       # EXPERIMENTAL wifi-interno-virtwifi module (see backend/src/lib/virtWifi.js) --
       # empty by default, same reasoning as REDROID_HWENC_ARTIFACTS_DIR: the .ko is built
       # against this exact host's running kernel, never shipped in the repo.

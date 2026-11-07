@@ -10,7 +10,7 @@ const router = express.Router();
 // frontend to render the generic contract modal (section 5) -- here the
 // acceptance state is added and, if asked for a specific image (?imageId=),
 // whether it is compatible with it (compatibleCon).
-function withStatus(manifest, imageId, hostGpuVendor) {
+async function withStatus(manifest, imageId, hostGpuVendor) {
   const latest = acceptance.latestFor(manifest.id);
   const out = {
     ...manifest,
@@ -41,6 +41,20 @@ function withStatus(manifest, imageId, hostGpuVendor) {
       : `this host has a "${hostGpuVendor || 'undetected'}" GPU (compatible with: ${vendors.join(', ')})`;
   }
 
+  // hwenc-specific: which encode backend is actually active on the shared VA-API daemon, and
+  // whether it is a combination this project found risky on this host's own GPU (see
+  // hwAccel.encodeBackendRisk's own comment -- symmetric: ffmpeg on Polaris, legacy on Intel).
+  // Shown here rather than only in Settings because the create-instance dialog already fetches
+  // this exact endpoint for the hwenc option (frontend/app.js's updateEncodeSelect), and that is
+  // the moment someone is actually deciding whether to turn hwenc on, not just reading a status
+  // page. Only computed when the host is otherwise compatible -- no point warning about a
+  // backend choice on a GPU that cannot do hwenc at all.
+  if (manifest.id === 'hwenc' && out.hostCompatible) {
+    out.encodeBackend = hwAccel.effectiveEncodeBackend();
+    const risk = await hwAccel.encodeBackendRisk(hostGpuVendor, out.encodeBackend);
+    out.encodeBackendWarning = risk ? risk.reason : null;
+  }
+
   return out;
 }
 
@@ -53,7 +67,7 @@ async function detectHostVendorIfNeeded(list) {
 router.get('/', async (req, res) => {
   const list = manifests.list();
   const vendor = await detectHostVendorIfNeeded(list);
-  res.json(list.map((m) => withStatus(m, req.query.imageId, vendor)));
+  res.json(await Promise.all(list.map((m) => withStatus(m, req.query.imageId, vendor))));
 });
 
 // GApps does not download anything: the user provides the files (see the module's manifest).
@@ -88,7 +102,7 @@ router.get('/arm-translation/status', async (req, res) => {
 router.get('/:id', async (req, res) => {
   const manifest = manifests.get(req.params.id);
   if (!manifest) return res.status(404).json({ error: `Unknown module: ${req.params.id}` });
-  res.json(withStatus(manifest, req.query.imageId, await detectHostVendorIfNeeded([manifest])));
+  res.json(await withStatus(manifest, req.query.imageId, await detectHostVendorIfNeeded([manifest])));
 });
 
 router.post('/:id/accept', (req, res) => {

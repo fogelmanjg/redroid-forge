@@ -51,6 +51,16 @@ const DEFAULTS = {
   // itself is never automated from inside this app).
   authMode: null,
   oidcProviders: null,
+  // Encode backend for the shared VA-API daemon (hwAccel.js's REDROID_FORGE_ENCODE_BACKEND,
+  // daemon.c's hand-rolled bitstream vs libavcodec's h264_vaapi) -- same null-means-"never
+  // touched through the UI" precedence as authMode/appBindHosts above: null falls back to
+  // REDROID_FORGE_ENCODE_BACKEND / 'legacy', and once set through the UI (even to 'legacy'
+  // explicitly) that wins. Unlike authMode, this one does NOT need a full app restart to apply --
+  // hwAccel.js already supervises the native daemon as a child process it can stop/relaunch, so
+  // routes/settings.js does that itself right after persisting the change. It is a HOST-wide
+  // setting: one VA-API daemon serves every instance on this host, there is no per-instance
+  // backend (see docs comment in the plan this shipped from, 07/11/2026).
+  encodeBackend: null,
 };
 
 function get(file = settingsFile()) {

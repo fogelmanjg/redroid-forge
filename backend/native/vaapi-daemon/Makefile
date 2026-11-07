@@ -21,20 +21,23 @@ LDLIBS := -lva -lva-drm -lgbm -lEGL -ldl -lm
 # exists with a timestamp newer than the .c/.h files -- confirmed live on 30/09, it
 # cost quite some debugging time to find out that "make" said "'daemon' is up to
 # date" and silently ignored the fix.
-# HWDEC=1 adds the vendor-agnostic hardware decode (hwdec.c, libavcodec + VA-API).
-# It is NOT the default: the current production build does not need FFmpeg until the
-# image's own LGPL libavcodec exists (see docs/ROADMAP.md, Phase 2, step 5).
+# HWDEC=1 adds the vendor-agnostic hardware decode (hwdec.c, libavcodec + VA-API) and, since
+# REDROID_FORGE_ENCODE_BACKEND=ffmpeg (ffmpeg_encode.c), the libavcodec h264_vaapi encode
+# alternative to the hand-rolled one in daemon.c -- both share the same libavcodec/libavutil
+# build (the ffmpeg-lgpl Dockerfile stage), so one flag covers both. NOT the default here: the
+# current production build does not need FFmpeg until the image's own LGPL libavcodec exists
+# (see docs/ROADMAP.md, Phase 2, step 5) -- the Dockerfile itself passes HWDEC=1.
 HWDEC ?= 0
 ifeq ($(HWDEC),1)
 HWDEC_CFLAGS := -DHAVE_HWDEC $(shell pkg-config --cflags libavcodec libavutil)
-HWDEC_SRCS := hwdec.c
+HWDEC_SRCS := hwdec.c ffmpeg_encode.c
 HWDEC_LIBS := $(shell pkg-config --libs libavcodec libavutil) -lpthread
 endif
 
 # libdrm's -I (pkg-config): see the comment of the drm_fourcc.h include in daemon.c.
 LIBDRM_CFLAGS := $(shell pkg-config --cflags libdrm 2>/dev/null)
 
-daemon: daemon.c decode_h264.c decode_h264.h protocol.h ratectl.h hwdec.c hwdec.h Makefile
+daemon: daemon.c decode_h264.c decode_h264.h protocol.h ratectl.h hwdec.c hwdec.h ffmpeg_encode.c ffmpeg_encode.h Makefile
 	$(CC) $(CFLAGS) $(LIBDRM_CFLAGS) $(HWDEC_CFLAGS) -o daemon daemon.c decode_h264.c $(HWDEC_SRCS) $(LDLIBS) $(HWDEC_LIBS)
 
 # Step 1 of hwdecode (docs/ROADMAP.md, Phase 2, step 5): a hardware decode session

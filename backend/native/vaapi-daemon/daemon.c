@@ -58,6 +58,7 @@
 #include <sys/mman.h>
 #include <sys/syscall.h>
 #include "hwdec.h"
+#include "ffmpeg_encode.h"
 #endif
 
 #define DRM_RENDER_DEVICE "/dev/dri/renderD128"
@@ -612,6 +613,16 @@ static int64_t now_ns(void) {
     return (int64_t)ts.tv_sec * 1000000000LL + ts.tv_nsec;
 }
 
+/* REDROID_FORGE_ENCODE_BACKEND=ffmpeg (default: legacy, the hand-rolled bitstream writer below) --
+ * read once at startup in main(), before the first request. See ffmpeg_encode.h/.c: a libavcodec
+ * h264_vaapi encoder sharing the same RGBA->NV12 VPP step but replacing SPS/PPS/slice-header
+ * construction and the vaRenderPicture sequence entirely, to get past the Intel P-frame corruption
+ * below without having to keep bisecting the hand-rolled bitstream writer itself. */
+#ifdef HAVE_HWDEC
+static FFmpegEncState *g_ffmpeg_enc;
+#endif
+static int g_backend_is_ffmpeg;
+
 /* P frames (gop.h): off unless REDROID_FORGE_ENCODE_IDR_PERIOD > 1 (frames per IDR; 120 is about 2 s at 60 fps). Until it has been
  * validated on every GPU the default stays the old all-intra encoder. REDROID_FORGE_ENCODE_INTRA_ONLY=1 forces it either way. */
 static unsigned int g_gop_period = 1;
@@ -627,9 +638,11 @@ static void gop_config_init(const vaapi_state_t *st) {
     g_rate_ctl.gop = !g_gop_intra_only;
     /* The Intel driver (iHD) produces P frames that do not decode with the hand-written slice header (measured on an Iris Xe,
      * entrypoint EncSlice: most P frames fail with "top block unavailable for requested intra mode"). Stay all-intra there
-     * unless REDROID_FORGE_ENCODE_P_ON_INTEL=1, to experiment. */
+     * unless REDROID_FORGE_ENCODE_P_ON_INTEL=1, to experiment -- this restriction is specific to the legacy backend's own
+     * bitstream writer, not to Intel/VA-API in general, so it does not apply when REDROID_FORGE_ENCODE_BACKEND=ffmpeg (the
+     * whole point of that backend is a mature encoder that gets P frames right on every vendor). */
     const char *vendor = vaQueryVendorString(st->dpy);
-    if (!g_gop_intra_only && vendor && strstr(vendor, "Intel")) {
+    if (!g_gop_intra_only && vendor && strstr(vendor, "Intel") && !g_backend_is_ffmpeg) {
         const char *force = getenv("REDROID_FORGE_ENCODE_P_ON_INTEL");
         if (!(force && atoi(force) != 0)) {
             fprintf(stderr, "encoder: P frames are not supported on the Intel driver (%s): staying all-intra\n", vendor);
@@ -640,66 +653,59 @@ static void gop_config_init(const vaapi_state_t *st) {
     if (!g_gop_intra_only) fprintf(stderr, "encoder: P frames, an IDR every %u frames\n", g_gop_period);
 }
 
-static long encode_one_frame(vaapi_state_t *st, int dmabuf_fd, const EncodeRequest *req, pid_t peer_pid,
-                              unsigned char **out_buf) {
-    if (vaapi_state_ensure_resolution(st, req->width, req->height) != 0) return -1;
-    gop_config_init(st);
-    const int64_t gop_now = now_ns();
-    const GopDecision gd = gop_next(&st->gop, peer_pid, req->width, req->height, gop_now, g_gop_period, g_gop_intra_only);
-    const int qp = rc_next_qp_t(&g_rate_ctl, now_ns(), req->bitrate, req->width, req->height, gd.is_idr);
-
-    uint32_t import_stride = req->stride_y;
-    uint32_t import_size = req->dmabuf_size;
-    uint64_t import_modifier = st->rgba_modifier;
-
-    /* Tier 5.12: GPUs where no DRM modifier exists for this buffer class at
-     * all (e.g. Polaris/GFX8's opaque TILE_TYPE_DRI, see rgba_modifier_init())
-     * use the OLD, pre-modifier VA-API import (VASurfaceAttribExternalBuffers
-     * / VA_SURFACE_ATTRIB_MEM_TYPE_DRM_PRIME) directly on the real fd instead
-     * of DRM_PRIME_2 -- confirmed working, including cross-process, unlike
-     * the Tier 5.10 GL-bridge attempt this replaced (EGL's plain dma-buf
-     * import only resolves opaque tiling within the same process that
-     * allocated the buffer; VA-API's own import machinery doesn't share that
-     * limitation, likely because libva is built around cross-process IPC as
-     * the normal case to begin with, unlike EGL/GL). */
-    int use_legacy_prime_import = st->use_legacy_prime;
-
-    /* Tier 5.7 finding: VA_SURFACE_ATTRIB_MEM_TYPE_DRM_PRIME (the old path
-     * used up through Tier 5.6) has no way to describe a DRM format
-     * modifier -- it always assumes the buffer is a plain linear raster.
-     * That held for every earlier tier's synthetic/dumb buffers (which
-     * genuinely were linear) but not for a real gralloc-allocated Surface
-     * buffer, which can be GPU-tiled even with DCC compression disabled
-     * (AMD_DEBUG=nodcc only affects compression, not tiling) -- importing a
-     * tiled buffer this way produced a garbled, striped decode. DRM_PRIME_2
-     * (VADRMPRIMESurfaceDescriptor) carries the modifier the component read
-     * out of cros_gralloc's native handle, so the driver interprets the
-     * memory layout correctly regardless of tiling.
-     *
-     * Tier 5.8 finding: the buffer itself is RGBA, not NV12 (Tier 5.7's
-     * closing discovery -- GraphicBufferSource hands the encoder
-     * SurfaceFlinger's raw GL-composited output, and this Mesa/minigbm
-     * stack cannot allocate a buffer that's both GPU-renderable and real
-     * YUV, see DEVLOG). VA_FOURCC_RGBA's byte order matches Android's
-     * RGBA_8888 directly (confirmed back in tier3-dmabuf-import); the DRM
-     * equivalent is DRM_FORMAT_ABGR8888, not DRM_FORMAT_RGBA8888 -- DRM
-     * format names describe *bit* packing in a little-endian 32-bit word,
-     * which inverts to the opposite letter order when read as bytes.
-     *
-     * Tier 5.9: the modifier comes from st->rgba_modifier (this host's own
-     * GPU, determined once at daemon startup), not from the client's
-     * request -- the Android-side component has no reliable way to read
-     * its real value at all (see DEVLOG), and the value is GPU-generation-
-     * specific besides, so asking this host's own driver directly is both
-     * the only correct source and the one that needs no Android rebuild to
-     * change machines. req->drm_format_modifier is intentionally ignored. */
+/* Imports the client's dma-buf as st->surfaces[0] (RGBA) -- shared between the legacy and ffmpeg
+ * encode backends (see ffmpeg_encode.h), since this step and the RGBA->NV12 VPP conversion that
+ * follows (convert_rgba_to_nv12) are identical either way; only what happens AFTER st->surfaces[2]
+ * (NV12) is ready differs by backend.
+ *
+ * Tier 5.12: GPUs where no DRM modifier exists for this buffer class at
+ * all (e.g. Polaris/GFX8's opaque TILE_TYPE_DRI, see rgba_modifier_init())
+ * use the OLD, pre-modifier VA-API import (VASurfaceAttribExternalBuffers
+ * / VA_SURFACE_ATTRIB_MEM_TYPE_DRM_PRIME) directly on the real fd instead
+ * of DRM_PRIME_2 -- confirmed working, including cross-process, unlike
+ * the Tier 5.10 GL-bridge attempt this replaced (EGL's plain dma-buf
+ * import only resolves opaque tiling within the same process that
+ * allocated the buffer; VA-API's own import machinery doesn't share that
+ * limitation, likely because libva is built around cross-process IPC as
+ * the normal case to begin with, unlike EGL/GL).
+ *
+ * Tier 5.7 finding: VA_SURFACE_ATTRIB_MEM_TYPE_DRM_PRIME (the old path
+ * used up through Tier 5.6) has no way to describe a DRM format
+ * modifier -- it always assumes the buffer is a plain linear raster.
+ * That held for every earlier tier's synthetic/dumb buffers (which
+ * genuinely were linear) but not for a real gralloc-allocated Surface
+ * buffer, which can be GPU-tiled even with DCC compression disabled
+ * (AMD_DEBUG=nodcc only affects compression, not tiling) -- importing a
+ * tiled buffer this way produced a garbled, striped decode. DRM_PRIME_2
+ * (VADRMPRIMESurfaceDescriptor) carries the modifier the component read
+ * out of cros_gralloc's native handle, so the driver interprets the
+ * memory layout correctly regardless of tiling.
+ *
+ * Tier 5.8 finding: the buffer itself is RGBA, not NV12 (Tier 5.7's
+ * closing discovery -- GraphicBufferSource hands the encoder
+ * SurfaceFlinger's raw GL-composited output, and this Mesa/minigbm
+ * stack cannot allocate a buffer that's both GPU-renderable and real
+ * YUV, see DEVLOG). VA_FOURCC_RGBA's byte order matches Android's
+ * RGBA_8888 directly (confirmed back in tier3-dmabuf-import); the DRM
+ * equivalent is DRM_FORMAT_ABGR8888, not DRM_FORMAT_RGBA8888 -- DRM
+ * format names describe *bit* packing in a little-endian 32-bit word,
+ * which inverts to the opposite letter order when read as bytes.
+ *
+ * Tier 5.9: the modifier comes from st->rgba_modifier (this host's own
+ * GPU, determined once at daemon startup), not from the client's
+ * request -- the Android-side component has no reliable way to read
+ * its real value at all (see DEVLOG), and the value is GPU-generation-
+ * specific besides, so asking this host's own driver directly is both
+ * the only correct source and the one that needs no Android rebuild to
+ * change machines. req->drm_format_modifier is intentionally ignored. */
+static int import_dmabuf_as_surface0(vaapi_state_t *st, int dmabuf_fd, const EncodeRequest *req) {
     VADRMPRIMESurfaceDescriptor prime_desc = {0};
     VASurfaceAttribExternalBuffers legacy_ext_buf = {0};
     uintptr_t legacy_buffer_handles[1];
     VASurfaceAttrib import_attribs[2];
     VAStatus st_import;
 
-    if (use_legacy_prime_import) {
+    if (st->use_legacy_prime) {
         legacy_buffer_handles[0] = (uintptr_t)dmabuf_fd;
         legacy_ext_buf.pixel_format = VA_FOURCC_RGBA;
         legacy_ext_buf.width = req->width;
@@ -728,14 +734,14 @@ static long encode_one_frame(vaapi_state_t *st, int dmabuf_fd, const EncodeReque
         prime_desc.height = req->height;
         prime_desc.num_objects = 1;
         prime_desc.objects[0].fd = dmabuf_fd;
-        prime_desc.objects[0].size = import_size;
-        prime_desc.objects[0].drm_format_modifier = import_modifier;
+        prime_desc.objects[0].size = req->dmabuf_size;
+        prime_desc.objects[0].drm_format_modifier = st->rgba_modifier;
         prime_desc.num_layers = 1;
         prime_desc.layers[0].drm_format = DRM_FORMAT_ABGR8888;
         prime_desc.layers[0].num_planes = 1;
         prime_desc.layers[0].object_index[0] = 0;
         prime_desc.layers[0].offset[0] = 0;
-        prime_desc.layers[0].pitch[0] = import_stride;
+        prime_desc.layers[0].pitch[0] = req->stride_y;
 
         import_attribs[0].type = VASurfaceAttribMemoryType;
         import_attribs[0].flags = VA_SURFACE_ATTRIB_SETTABLE;
@@ -753,6 +759,18 @@ static long encode_one_frame(vaapi_state_t *st, int dmabuf_fd, const EncodeReque
         fprintf(stderr, "dma-buf import failed: %s\n", vaErrorStr(st_import));
         return -1;
     }
+    return 0;
+}
+
+static long encode_one_frame(vaapi_state_t *st, int dmabuf_fd, const EncodeRequest *req, pid_t peer_pid,
+                              unsigned char **out_buf) {
+    if (vaapi_state_ensure_resolution(st, req->width, req->height) != 0) return -1;
+    gop_config_init(st);
+    const int64_t gop_now = now_ns();
+    const GopDecision gd = gop_next(&st->gop, peer_pid, req->width, req->height, gop_now, g_gop_period, g_gop_intra_only);
+    const int qp = rc_next_qp_t(&g_rate_ctl, now_ns(), req->bitrate, req->width, req->height, gd.is_idr);
+
+    if (import_dmabuf_as_surface0(st, dmabuf_fd, req) != 0) return -1;
 
     if (convert_rgba_to_nv12(st, st->surfaces[0], req->width, req->height) != 0) {
         vaDestroySurfaces(st->dpy, &st->surfaces[0], 1);
@@ -921,6 +939,45 @@ static long encode_one_frame(vaapi_state_t *st, int dmabuf_fd, const EncodeReque
     return (long)total;
 }
 
+#ifdef HAVE_HWDEC
+/* REDROID_FORGE_ENCODE_BACKEND=ffmpeg: same dma-buf import + RGBA->NV12 VPP step as
+ * encode_one_frame() above (import_dmabuf_as_surface0/convert_rgba_to_nv12, untouched), same
+ * gop_next()/gop_commit() IDR policy (gop.h has no VA-API dependency) -- only the actual encode
+ * is different: ffmpeg_encode_frame() hands st->surfaces[2] to libavcodec's h264_vaapi encoder
+ * instead of the hand-rolled SPS/PPS/slice-header + vaRenderPicture sequence. No per-frame qp /
+ * rc_next_qp_t / req->bitrate here -- ffmpeg_encode.c forces a fixed CQP (see its own comment on
+ * why: this is what every VA-API driver tested so far actually supports for this entrypoint, same
+ * reasoning ratectl.h already gives for the legacy backend). REDROID_FORGE_ENCODE_STATS
+ * is not mirrored for this backend yet either (both are known, deliberate gaps for this first cut,
+ * not oversights -- see the plan this was built from). */
+static long encode_one_frame_ffmpeg(vaapi_state_t *st, int dmabuf_fd, const EncodeRequest *req, pid_t peer_pid,
+                                     unsigned char **out_buf) {
+    if (vaapi_state_ensure_resolution(st, req->width, req->height) != 0) return -1;
+    gop_config_init(st);
+    const int64_t gop_now = now_ns();
+    const GopDecision gd = gop_next(&st->gop, peer_pid, req->width, req->height, gop_now, g_gop_period, g_gop_intra_only);
+
+    if (import_dmabuf_as_surface0(st, dmabuf_fd, req) != 0) return -1;
+
+    if (convert_rgba_to_nv12(st, st->surfaces[0], req->width, req->height) != 0) {
+        vaDestroySurfaces(st->dpy, &st->surfaces[0], 1);
+        return -1;
+    }
+
+    unsigned char *out = NULL;
+    long n = ffmpeg_encode_frame(g_ffmpeg_enc, st->dpy, st->surfaces[2], req->width, req->height,
+                                  gd.is_idr, &out);
+    vaDestroySurfaces(st->dpy, &st->surfaces[0], 1);
+    if (n < 0) return -1;
+
+    size_t total = (size_t)n;
+    out = normalize_start_codes(out, total, &total);
+    gop_commit(&st->gop, &gd, peer_pid, req->width, req->height, gop_now);
+    *out_buf = out;
+    return (long)total;
+}
+#endif
+
 /* ------------------------------------------------------------------ *
  * Socket server: one connection = one request/response, per protocol.h.
  * Tier 7 added a second command (decode) dispatched by a 4-byte tag read
@@ -986,7 +1043,12 @@ static void handle_encode(vaapi_state_t *st, int have_encode, int conn_fd) {
     if (getsockopt(conn_fd, SOL_SOCKET, SO_PEERCRED, &cred, &cred_len) != 0) cred.pid = 0;
 
     unsigned char *out_buf = NULL;
-    long n = encode_one_frame(st, dmabuf_fd, &req, cred.pid, &out_buf);
+    long n;
+#ifdef HAVE_HWDEC
+    if (g_backend_is_ffmpeg) n = encode_one_frame_ffmpeg(st, dmabuf_fd, &req, cred.pid, &out_buf);
+    else
+#endif
+        n = encode_one_frame(st, dmabuf_fd, &req, cred.pid, &out_buf);
     close(dmabuf_fd);
 
     if (n < 0) {
@@ -1482,6 +1544,22 @@ int main(void) {
     int have_encode = (vaapi_state_init(&st) == 0);
     if (!have_encode) {
         fprintf(stderr, "No AMD/Intel VA-API encode on this host - encode requests will be rejected\n");
+    }
+    if (have_encode) {
+        const char *backend = getenv("REDROID_FORGE_ENCODE_BACKEND");
+        int ffmpeg_requested = backend && strcmp(backend, "ffmpeg") == 0;
+#ifdef HAVE_HWDEC
+        if (ffmpeg_requested) {
+            g_ffmpeg_enc = ffmpeg_encode_open(DRM_RENDER_DEVICE);
+            g_backend_is_ffmpeg = (g_ffmpeg_enc != NULL);
+            if (!g_backend_is_ffmpeg)
+                fprintf(stderr, "encoder backend: ffmpeg requested but failed to open -- falling back to legacy\n");
+        }
+#else
+        if (ffmpeg_requested)
+            fprintf(stderr, "encoder backend: ffmpeg requested, but this daemon was compiled without HAVE_HWDEC -- using legacy\n");
+#endif
+        fprintf(stderr, "encoder backend: %s\n", g_backend_is_ffmpeg ? "ffmpeg (h264_vaapi)" : "legacy (hand-rolled bitstream)");
     }
     int have_decode = (decode_h264_init() == 0);
     if (!have_decode) {

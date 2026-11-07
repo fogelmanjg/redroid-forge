@@ -1901,6 +1901,7 @@ async function loadSettings() {
     poolFieldset.hidden = AuthUi.authMode() === 'none';
     $('#settings-pool-max-vcpus').value = settings.operatorPoolMaxVcpus || '';
     $('#settings-pool-max-memory-mb').value = settings.operatorPoolMaxMemoryMb || '';
+    $('#settings-encode-backend').value = settings.encodeBackend || '';
   } catch (e) {
     alert(e.message);
   }
@@ -1934,9 +1935,11 @@ $('#settings-form').addEventListener('submit', async (ev) => {
         backupDir, networkInterfaceOverrides, appBindHosts,
         operatorPoolMaxVcpus: vcpusVal ? Number(vcpusVal) : null,
         operatorPoolMaxMemoryMb: memVal ? Number(memVal) : null,
+        encodeBackend: $('#settings-encode-backend').value || null,
       }),
     });
     $('#settings-backup-dir').value = settings.backupDir;
+    $('#settings-encode-backend').value = settings.encodeBackend || '';
     networkInterfacesCache = null; // the new filter (if changed above) applies to this list too, and to the per-instance Configure panel next time it opens
     renderAppBindHostsList(settings.appBindHosts || [], await loadNetworkInterfacesCache());
     saved.hidden = false;
@@ -2718,6 +2721,11 @@ async function updateEncodeSelect({ select, optHwenc, optNvenc, status, imageId,
     setStatus(t('new.hwencNeedsHost'), 'warn-text');
   } else if (!optNvenc.hidden && optNvenc.disabled) {
     setStatus(t('new.nvencNeedsGuest'), 'warn-text');
+  } else if (!optHwenc.hidden && !optHwenc.disabled && hwenc.encodeBackendWarning) {
+    // Known risky backend/GPU combination (hwAccel.encodeBackendRisk, symmetric: ffmpeg on
+    // Polaris, legacy on Intel) -- shown, never blocked (same "warns, does not gate" philosophy
+    // as docs/KNOWN-COMBINATIONS.md). The option stays enabled and selectable.
+    setStatus(hwenc.encodeBackendWarning, 'warn-text');
   } else {
     setStatus(t('new.hwencOk', { vendor: hwenc.hostGpuVendor || nvenc.hostGpuVendor || '?' }), 'ok-text');
   }

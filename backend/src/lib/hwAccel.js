@@ -3,6 +3,7 @@ const path = require('path');
 const { spawn, execFile } = require('child_process');
 const { promisify } = require('util');
 const net = require('net');
+const settings = require('./settings');
 
 const execFileAsync = promisify(execFile);
 
@@ -65,6 +66,31 @@ function stopDaemon() {
   if (daemonProcess) daemonProcess.kill();
 }
 
+// Used by routes/settings.js when encodeBackend changes through the UI (effectiveEncodeBackend()
+// below is read again inside ensureDaemonRunning() once this relaunches it). Deliberately waits
+// for the OLD process to actually exit before starting the new one, rather than firing
+// stopDaemon()+ensureDaemonRunning() back to back: on at least one GPU generation tested this
+// project (Polaris/VCE, 07/11/2026) two VA-API encode sessions open on the same device at once is
+// a known, real way to hang the GPU -- the exact window this would otherwise create if the old
+// process's VA-API context were still open while the new one opens its own. A timeout fallback
+// (it still tries to start the new daemon even if the old one does not exit in time) matches this
+// function's own "never throws, a manual restart still applies it" contract.
+async function restartDaemonWithCurrentSettings() {
+  const old = daemonProcess;
+  daemonWanted = false;
+  if (restartTimer) { clearTimeout(restartTimer); restartTimer = null; }
+  if (old) {
+    await new Promise((resolve) => {
+      let done = false;
+      const finish = () => { if (!done) { done = true; resolve(); } };
+      old.once('exit', finish);
+      old.kill();
+      setTimeout(finish, 3000);
+    });
+  }
+  await ensureDaemonRunning();
+}
+
 // AMD/Intel expose real VA-API encode (radeonsi/iHD). NVIDIA only exposes
 // decode via nvidia-vaapi-driver (VAEntrypointVLD, not EncSlice) -- encode on
 // NVIDIA hosts is a separate component (redroid-nvidia, Venus-proxy
@@ -86,6 +112,54 @@ async function detectGpuVendor() {
 
 function encodeSupported(vendor) {
   return vendor === 'amd' || vendor === 'intel';
+}
+
+// Polaris specifically (GCN4, VCE), not "AMD" in general: real GPU hangs seen under the ffmpeg
+// encode backend on this exact generation (RX 470/480/570/580/590, 07/11/2026 -- ring timeouts,
+// a full BACO reset with a VM protection fault, and one that left visible corruption needing a
+// host reboot), on a host where the legacy backend ran 60 real frames clean right before it.
+// Deliberately NOT extended to older VCE-era chips (Hawaii/Fiji/Tonga etc.) -- no evidence either
+// way there, only Polaris was actually tested. A second, independent lspci call (not sharing
+// detectGpuVendor's) because this is called rarely (Doctor/module checks), not a hot path.
+async function isAmdPolarisFamily() {
+  try {
+    const { stdout } = await execFileAsync('lspci', ['-nnk']);
+    const blocks = stdout.split(/\n(?=\S)/).filter((b) => /VGA compatible controller|3D controller|Display controller/.test(b));
+    return blocks.some((b) => /Ellesmere|Baffin|Lexa|Polaris/i.test(b));
+  } catch (e) {
+    warn(`lspci failed, Polaris could not be detected: ${e.message}`);
+    return false;
+  }
+}
+
+// Symmetric, on purpose: a known-bad combination on either side of this migration, not just the
+// new backend. `legacy` on Intel is the ORIGINAL bug that started this migration (corrupted
+// P-frames in decode, silent image corruption -- not a crash); `ffmpeg` on Polaris is a newly
+// found, real GPU stability bug (see isAmdPolarisFamily's comment). Two cases, not a general risk
+// matrix -- only add a third once there is actual evidence for it, same reasoning as above.
+async function encodeBackendRisk(vendor, backend) {
+  if (backend === 'ffmpeg' && vendor === 'amd' && await isAmdPolarisFamily()) {
+    return {
+      reason: 'ffmpeg (h264_vaapi) ha causado cuelgues reales de GPU en GPUs Polaris (RX 400/500) '
+        + 'durante esta validación (timeouts, reset completo, corrupción visual que exigió reiniciar '
+        + 'el host) -- legacy es la opción probada en este hardware.',
+    };
+  }
+  if (backend === 'legacy' && vendor === 'intel') {
+    return {
+      reason: 'legacy (el bitstream H.264 escrito a mano) tiene un bug conocido en Intel/iHD: '
+        + 'P-frames corruptos en el decode (corrupción silenciosa de imagen, no un cuelgue) -- '
+        + 'ffmpeg es la opción probada en este hardware.',
+    };
+  }
+  return null;
+}
+
+// settings.json's encodeBackend wins once set through the UI, same null-means-"never touched"
+// precedence as authMode/appBindHosts (settings.js's own comment) over
+// REDROID_FORGE_ENCODE_BACKEND, which stays the bootstrap/pre-UI default ('legacy').
+function effectiveEncodeBackend() {
+  return settings.get().encodeBackend || process.env.REDROID_FORGE_ENCODE_BACKEND || 'legacy';
 }
 
 function isDaemonAlive() {
@@ -124,7 +198,10 @@ async function ensureDaemonRunning() {
   // An old socket from a previous daemon that died without cleaning up blocks bind().
   fs.rmSync(SOCKET_PATH, { force: true });
 
-  daemonProcess = spawn(DAEMON_BIN, [], { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, REDROID_FORGE_VAAPI_SOCKET: SOCKET_PATH } });
+  daemonProcess = spawn(DAEMON_BIN, [], {
+    stdio: ['ignore', 'pipe', 'pipe'],
+    env: { ...process.env, REDROID_FORGE_VAAPI_SOCKET: SOCKET_PATH, REDROID_FORGE_ENCODE_BACKEND: effectiveEncodeBackend() },
+  });
   daemonStartedAt = Date.now();
   daemonProcess.stdout.on('data', (d) => log(d.toString().trim()));
   daemonProcess.stderr.on('data', (d) => warn(d.toString().trim()));
@@ -213,6 +290,8 @@ function queryHwdecCaps({ socketPath = SOCKET_PATH, timeoutMs = 3000 } = {}) {
 }
 
 module.exports = {
-  detectGpuVendor, encodeSupported, ensureDaemonRunning, stopDaemon, nextRestartDelay, daemonBind, queryHwdecCaps, parseHwdecCaps,
+  detectGpuVendor, encodeSupported, ensureDaemonRunning, stopDaemon, restartDaemonWithCurrentSettings,
+  nextRestartDelay, daemonBind, queryHwdecCaps, parseHwdecCaps,
   HWDEC_COMPONENTS, VAAPI_ROOT, SOCKET_PATH, INSTANCE_VAAPI_DIR, socketAnswers,
+  isAmdPolarisFamily, encodeBackendRisk, effectiveEncodeBackend,
 };
