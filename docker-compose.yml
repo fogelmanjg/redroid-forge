@@ -7,7 +7,7 @@ services:
         # by default since 23/10/2026; set HWDEC=0 only to skip building it (e.g. a smaller image
         # on a host that will never use it).
         HWDEC: ${HWDEC:-1}
-    container_name: redroid-forge
+    container_name: ${CONTAINER_NAME:-redroid-forge}
     privileged: true
     pid: host
     network_mode: host

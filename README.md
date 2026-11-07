@@ -163,7 +163,9 @@ Running a second instance on a host that already has one (e.g. a disposable/dev 
 alongside a stable one)? Clone into a differently-named directory instead of the default
 `redroid-forge` (`git clone https://github.com/fogelmanjg/redroid-forge.git my-second-forge`) —
 plain `git clone` syntax, nothing specific to this project. Each checkout is fully independent
-(its own `docker-compose.yml`, `.env`, `backend/data/`).
+(its own `docker-compose.yml`, `.env`, `backend/data/`) — just also set `CONTAINER_NAME` in the
+second one's `.env` (e.g. `CONTAINER_NAME=redroid-forge-prod`), since the container name defaults
+to the same `redroid-forge` for every checkout and two containers can't share one name.
 
 ## Viewing the screen from another PC (scrcpy) — e.g. a TV with an old laptop
 

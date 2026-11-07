@@ -165,7 +165,10 @@ host y el comando para resolverlo antes de crear la primera instancia.
 descartable/de prueba al lado de uno estable)? Cloná en un directorio con otro nombre en vez del
 `redroid-forge` por defecto (`git clone https://github.com/fogelmanjg/redroid-forge.git
 mi-segundo-forge`) — sintaxis común de `git clone`, nada específico de este proyecto. Cada
-checkout es totalmente independiente (su propio `docker-compose.yml`, `.env`, `backend/data/`).
+checkout es totalmente independiente (su propio `docker-compose.yml`, `.env`, `backend/data/`) —
+solo falta setear `CONTAINER_NAME` en el `.env` del segundo (por ejemplo
+`CONTAINER_NAME=redroid-forge-prod`), ya que el nombre del contenedor por defecto es el mismo
+`redroid-forge` en cualquier checkout y dos contenedores no pueden compartir un nombre.
 
 ## Ver la pantalla desde otra PC (scrcpy) — ej. una TV con una notebook vieja
 
