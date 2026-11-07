@@ -154,6 +154,7 @@ agregar ahí cualquier imagen nueva (id, tag Docker, label, `gpuMode`, `needsHws
 ```bash
 git clone https://github.com/fogelmanjg/redroid-forge.git
 cd redroid-forge
+cp .env.example .env   # revisá que PORT esté libre en este host, ver los comentarios del archivo
 docker compose up -d --build
 ```
 

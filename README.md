@@ -152,6 +152,7 @@ image there (id, Docker tag, label, `gpuMode`, `needsHwsimWifi`).
 ```bash
 git clone https://github.com/fogelmanjg/redroid-forge.git
 cd redroid-forge
+cp .env.example .env   # check PORT is free on this host, see the file's own comments
 docker compose up -d --build
 ```
 

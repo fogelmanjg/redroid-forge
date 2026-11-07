@@ -74,7 +74,17 @@ const extraHosts = configuredHosts.length ? configuredHosts : (
 // confirmed live, the second bind fails outright with EADDRINUSE.
 const BIND_HOSTS = extraHosts.includes('0.0.0.0') ? ['0.0.0.0'] : [...new Set(['127.0.0.1', ...extraHosts])];
 for (const host of BIND_HOSTS) {
-  app.listen(PORT, host, () => console.log(`redroid-forge listening on ${host}:${PORT}`));
+  // A failed bind (e.g. EADDRINUSE) must be fatal, not swallowed by the generic
+  // uncaughtException handler below -- without a real listener the whole app is
+  // unreachable anyway, and that handler is only meant to protect against a bug in a
+  // single REQUEST, not a startup failure. `restart: unless-stopped` (docker-compose.yml)
+  // then shows this clearly as a crash-looping container instead of a deceptive "Up".
+  app.listen(PORT, host, () => console.log(`redroid-forge listening on ${host}:${PORT}`))
+    .on('error', (err) => {
+      console.error(`Failed to listen on ${host}:${PORT}: ${err.message}`);
+      console.error('Is another process already using this port? Set PORT in .env to a free one.');
+      process.exit(1);
+    });
 }
 // Checks (never applies) whether a newer combinations database exists: on
 // open and once a day. Can be turned off with REDROID_FORGE_DB_CHECK=0.
