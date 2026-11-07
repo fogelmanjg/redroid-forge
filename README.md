@@ -159,6 +159,12 @@ The UI is available at `http://<this-pc-ip>:8080` (or the port you set in `PORT`
 `network_mode: host`). Go to the **Doctor** tab first: it tells you exactly what is missing on this
 host and the command to fix it before creating the first instance.
 
+Running a second instance on a host that already has one (e.g. a disposable/dev deployment
+alongside a stable one)? Clone into a differently-named directory instead of the default
+`redroid-forge` (`git clone https://github.com/fogelmanjg/redroid-forge.git my-second-forge`) —
+plain `git clone` syntax, nothing specific to this project. Each checkout is fully independent
+(its own `docker-compose.yml`, `.env`, `backend/data/`).
+
 ## Viewing the screen from another PC (scrcpy) — e.g. a TV with an old laptop
 
 scrcpy repository: https://github.com/Genymobile/scrcpy

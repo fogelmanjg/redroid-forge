@@ -161,6 +161,12 @@ La UI queda en `http://<ip-de-esta-pc>:8080` (o el puerto que pongas en `PORT`, 
 `network_mode: host`). Entrar a la tab **Doctor** primero: te dice exactamente qué falta en este
 host y el comando para resolverlo antes de crear la primera instancia.
 
+¿Vas a correr una segunda instancia en un host que ya tiene una (por ejemplo un despliegue
+descartable/de prueba al lado de uno estable)? Cloná en un directorio con otro nombre en vez del
+`redroid-forge` por defecto (`git clone https://github.com/fogelmanjg/redroid-forge.git
+mi-segundo-forge`) — sintaxis común de `git clone`, nada específico de este proyecto. Cada
+checkout es totalmente independiente (su propio `docker-compose.yml`, `.env`, `backend/data/`).
+
 ## Ver la pantalla desde otra PC (scrcpy) — ej. una TV con una notebook vieja
 
 Repo de scrcpy: https://github.com/Genymobile/scrcpy
