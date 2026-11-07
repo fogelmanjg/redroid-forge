@@ -146,11 +146,21 @@ fits in the budget at the best quality). A 18 s capture of scrcpy: 525 P frames 
 On Iris Xe the P frames do not decode (the cause is not known yet: the hand-written slice header or how iHD uses it), so the daemon
 refuses P frames on the Intel driver (`REDROID_FORGE_ENCODE_P_ON_INTEL=1` forces them, for whoever wants to find out why).
 
+**This whole section is about the legacy (hand-rolled bitstream) encoder specifically.** Since 0.6.2 there is a second,
+independent encode backend (`REDROID_FORGE_ENCODE_BACKEND=ffmpeg`, or the app's own Settings panel) built on FFmpeg's
+`h264_vaapi` (libavcodec) instead of writing the slice header by hand -- it encodes P frames correctly on Iris Xe, fixing the
+problem above, and is also validated on AMD Cezanne-family APUs (e.g. Ryzen 5700G). It is not yet safe on AMD Polaris (RX
+400/500): real GPU hangs during this project's own validation (timeouts, a full reset, one that needed a host reboot) -- see
+`CHANGELOG.md` 0.6.2. Polaris keeps using the legacy path above, which stays solid there. The choice is per host (one daemon
+process serves every instance), selectable without a full app restart; `hwAccel.js`'s `encodeBackendRisk()` is what drives the
+warning the app shows in Settings/instance creation/Doctor for a risky backend+GPU combination.
+
 ### Runtime options (environment variables)
 
 | Variable | Effect |
 |---|---|
 | `REDROID_FORGE_DRM_NODE` | DRM render node to use (default `/dev/dri/renderD128`). |
+| `REDROID_FORGE_ENCODE_BACKEND` | `legacy` (default, hand-rolled bitstream) or `ffmpeg` (libavcodec `h264_vaapi` -- see "P frames" above for which GPUs it is actually safe/validated on). The app's own Settings panel overrides this once set through the UI. |
 | `REDROID_FORGE_HWDEC_DOWNLOAD` | How a decoded frame is brought from the GPU to RAM: `derive-sse` (default: `vaDeriveImage` + SSE4.1 non-temporal loads), `derive`, `getimage` (`vaGetImage`) or `ffmpeg` (`av_hwframe_transfer_data`). The first frame of every session is also downloaded through ffmpeg and compared byte by byte; if the direct download fails or differs, that session goes back to the ffmpeg path and says so on stderr. |
 | `REDROID_FORGE_HWDEC_STATS` | If set, every session prints its average time per stage (send, GPU wait, download, copy) when it closes, and the daemon prints the wait/queue/socket averages. |
 | `REDROID_FORGE_ENCODE_STATS` | If set, the daemon prints the real encoded bitrate (against the target) every 5 s, and how many IDR and P frames it made (`gop-stats`). |
