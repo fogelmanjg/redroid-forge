@@ -21,6 +21,27 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
 
 ## [Unreleased]
 
+## [0.6.2] - 2026-11-07
+
+### Added
+
+- A new H.264 encode path for `hwenc` (hardware video encode), built on FFmpeg's `h264_vaapi`
+  encoder instead of this project's own hand-rolled bitstream writer. The original path could not
+  do P-frames on Intel (iHD) GPUs without corrupting the image, so every frame had to be a full
+  keyframe there -- fine at a high bitrate, visibly worse at the low bitrates this project's
+  typical use (scrcpy over a slow link) needs. The new path encodes P-frames correctly on Intel,
+  and is also validated on AMD Cezanne-family APUs (e.g. Ryzen 5700G). Not yet enabled on AMD
+  Polaris (RX 400/500): it causes real GPU hangs there, still under investigation -- Polaris keeps
+  using the original path, which is solid on that hardware. NVIDIA is unaffected (it uses the
+  separate `nvenc` module).
+- A **Settings** control to choose the `hwenc` encode backend (`legacy`/`ffmpeg`) for the whole
+  host, plus a matching warning -- shown in Settings, the instance creation dialog, and the
+  Doctor tab -- whenever the active backend is a known-risky choice for the host's own GPU (today:
+  `ffmpeg` on Polaris, `legacy` on Intel). Never blocks the choice, same "warn, don't gate"
+  approach as `docs/KNOWN-COMBINATIONS.md`. Changing it relaunches the shared VA-API daemon with
+  the new backend -- hardware encode/decode is briefly unavailable for every instance on that host
+  while it restarts.
+
 ## [0.6.1] - 2026-11-07
 
 ### Fixed
