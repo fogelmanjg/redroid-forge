@@ -21,6 +21,61 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-11-07
+
+### Fixed
+
+- Running a second checkout of this app on a host that already has one (e.g. a disposable/dev
+  deployment alongside a stable one) hit three separate walls, found by deliberately installing
+  this project from scratch, README-only, as if it were a brand new user:
+  - `git clone ... && cd redroid-forge` collided if a checkout already existed at that default
+    path -- README now shows cloning into a differently-named directory instead.
+  - `container_name` was hardcoded to `redroid-forge` with no override, so even a second checkout
+    in its own directory still collided on the container name. Now reads `${CONTAINER_NAME:-redroid-forge}`
+    -- same default as before, so a single-instance host sees no change.
+  - A failed `app.listen()` (e.g. the default `PORT=8080` already taken by something else on the
+    host) was silently swallowed by the generic `uncaughtException` handler meant to survive a bug
+    in a single request, not a startup failure -- the container stayed "Up" (`fwknopd` alive) with
+    the Express server never actually listening, no real signal anything was wrong. A failed bind
+    is now fatal (`process.exit(1)`), so `restart: unless-stopped` shows it honestly as a
+    crash-looping container instead.
+
+### Added
+
+- `.env.example` -- no such file existed; every env var was only discoverable by reading
+  `docker-compose.yml`'s own comments. Documents `PORT`/`CONTAINER_NAME` up front (the two that
+  matter on a host already running another instance) plus the rest.
+
+## [0.6.0] - 2026-11-07
+
+### Fixed
+
+- Doctor's loop-device check reported "ok" from a stale/static `/dev/loop-control` node alone,
+  without the `loop` kernel module actually loaded behind it -- found live on n02, 02/11/2026: an
+  instance (and even a plain `docker run` of the official redroid image, redroid-forge not
+  involved) booted and died within seconds every time, apexd-bootstrap unable to create loop
+  devices. Now also requires `/sys/module/loop` or a real `/dev/loop0` before reporting ok. Fixed
+  on n02 with `modprobe loop`.
+
+- `binder.js`'s legacy (non-binderfs) checks read this container's OWN auto-populated
+  `/dev/binder*` copy (always `0600`, independent of the host's real node) instead of the host's
+  -- found live on a fresh n02 install (Debian trixie, legacy `binder_linux` mode): `chmod 0666` on
+  the host's node had zero visible effect, and a correctly-configured host could have been
+  refused an instance as "broken". Now reads these specific checks through `/proc/1/root` (this
+  container runs `pid: host`) instead of the bare path.
+
+- Doctor's binderfs fix text led with the mount command (guaranteed to fail on a kernel without
+  `CONFIG_ANDROID_BINDERFS`, e.g. Debian trixie) before ever explaining why, and the legacy
+  fallback's two files were only distinguished by an easily-misread bare comment. Reordered to
+  explain first, and both files are now labeled explicitly.
+
+### Added
+
+- The header now shows the installed version (`GET /api/version`, no network call, safe on every
+  page load) plus a manual "Check for updates" button (`GET /api/version/check`) -- the only thing
+  that ever calls GitHub, only on that exact press, never on a timer or on startup. Added because
+  the fleet had drifted to different versions across hosts with no way to tell from the UI.
+
 ## [0.5.0] - 2026-11-01
 
 ### Fixed
