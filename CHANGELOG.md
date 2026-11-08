@@ -21,6 +21,25 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
 
 ## [Unreleased]
 
+## [0.6.3] - 2026-11-08
+
+### Fixed
+
+- `appBindHosts` (Settings' "App network" addresses) used to require a full container restart to
+  take effect -- it was only ever read once, at process start. Saving a change now closes and
+  reopens this app's own HTTP listeners in place, in process, within a few seconds -- no manual
+  restart needed any more.
+- The ADB "open access" (port-knock) panel's source-IP field used to silently pre-fill from the
+  backend's own view of the connecting address (`req.ip`) -- behind this app's own Caddy route,
+  that is always the proxy's own address, not the browsing device's, so the suggestion was
+  actively wrong there. Dropped that pre-fill; the row now labels the server's own fixed listening
+  address and the editable source-IP field separately and explicitly, and offers a collapsed,
+  per-OS terminal command (with a copy button) to find the browsing device's own address instead,
+  hinted to the right address family (Tailscale vs. private LAN) for that particular server
+  address. (A WebRTC-based in-page detection was tried first; confirmed live that no major browser
+  -- Firefox, Chrome, Edge, Brave, Safari -- exposes this to a page any more, so there was nothing
+  reliable left to read in-page.)
+
 ## [0.6.2] - 2026-11-07
 
 ### Added
