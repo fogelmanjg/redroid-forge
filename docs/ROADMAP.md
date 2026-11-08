@@ -930,17 +930,20 @@ it is just never the end user's own job to knock.
   by the app** (explicit user decision -- "a riesgo del administrador") -- requesting more than the
   default shows a warning message (never a block) that a longer window leaves the port answering for
   longer before anything connects, independent of how long a session that does connect then lasts.
-- Target IP: pre-filled from the HTTP request's own source IP (the browser session asking to open
-  access), always editable by hand. This works well specifically for the case this phase is actually for
-  (gating the internet-facing interface): the device browsing the UI and the device that will run
-  scrcpy are very often behind the *same* home NAT/public IP even when they are not the same device,
-  so the common case needs no typing at all. Known future gap, not a blocker now: if `redroid-forge`
-  itself ever sits behind a reverse proxy (e.g. Plenum's Caddy, already used this session for the OIDC
-  work), the detected IP would need to come from a trusted `X-Forwarded-For` instead of the raw socket
-  address.
+- Target IP: originally pre-filled from the HTTP request's own source IP (`req.ip`), always editable by
+  hand. **Changed 08/11/2026** (v0.6.3): that pre-fill was actively wrong whenever this app sits behind
+  a reverse proxy pointed at loopback (Plenum's Caddy, exactly the gap flagged below at the time) --
+  every visitor saw the proxy's own address, not theirs, no matter who they were. Tried replacing it
+  with the browsing device's own address detected in-page via WebRTC's old ICE-candidate leak; confirmed
+  live that no major browser (Firefox, Chrome/Edge/Brave -- mDNS-obfuscated, Safari) exposes this to a
+  page any more, so there was nothing reliable left to read client-side either. Landed on: no pre-fill
+  at all, a clearly separate read-only line showing the server's own fixed address, and a collapsed
+  per-OS terminal command (with a copy button) to find the browsing device's own address from the OS
+  itself, hinted to the right address family (Tailscale CGNAT vs. private LAN) for that server address.
 - UI: a toggle per bound interface in the instance's existing "Network" panel ("requires a knock", off by
-  default); when on, a small control to request access (IP pre-filled/editable, minutes pre-filled at 1)
-  and the current state (closed / open until HH:MM).
+  default); when on, a small control to request access (server address shown read-only, source IP
+  field editable with the help described above, minutes pre-filled at 1) and the current state (closed
+  / open until HH:MM).
 
 **Steps, all done:**
 1. `fwknopd` as a supervised process inside the existing container (`lib/fwknop.js`), spawned by
