@@ -2,6 +2,7 @@ const express = require('express');
 const settings = require('../lib/settings');
 const permissions = require('../lib/permissions');
 const hwAccel = require('../lib/hwAccel');
+const httpListeners = require('../lib/httpListeners');
 const { IP_SHAPE_RE } = require('../lib/instanceParams');
 
 const router = express.Router();
@@ -55,13 +56,14 @@ router.put('/', async (req, res) => {
   const patch = {};
   if (backupDir !== undefined) patch.backupDir = backupDir.trim();
   if (networkInterfaceOverrides !== undefined) patch.networkInterfaceOverrides = networkInterfaceOverrides;
+  const beforeAppBindHosts = settings.get().appBindHosts;
   if (appBindHosts !== undefined) {
     const deduped = [...new Set(appBindHosts)].filter((h) => h !== '127.0.0.1');
     patch.appBindHosts = deduped.includes('0.0.0.0') ? ['0.0.0.0'] : deduped;
   }
   if (operatorPoolMaxVcpus !== undefined) patch.operatorPoolMaxVcpus = operatorPoolMaxVcpus || null;
   if (operatorPoolMaxMemoryMb !== undefined) patch.operatorPoolMaxMemoryMb = operatorPoolMaxMemoryMb || null;
-  const before = settings.get().encodeBackend;
+  const beforeEncodeBackend = settings.get().encodeBackend;
   if (encodeBackend !== undefined) patch.encodeBackend = encodeBackend || null;
   const updated = settings.update(patch);
   // Unlike authMode (needs a full app restart, never automated -- see auth.js's own comment),
@@ -72,14 +74,34 @@ router.put('/', async (req, res) => {
   // kind of blip the daemon's own crash-restart supervisor already causes on its own. Never
   // fails the request: the setting is saved either way, and a manual restart still applies it if
   // this hot-restart itself has trouble.
-  if (encodeBackend !== undefined && patch.encodeBackend !== before) {
+  if (encodeBackend !== undefined && patch.encodeBackend !== beforeEncodeBackend) {
     try {
       await hwAccel.restartDaemonWithCurrentSettings();
     } catch (e) {
       console.warn(`[settings] could not relaunch the VA-API daemon with the new encode backend: ${e.message}`);
     }
   }
+  // Same "hot-apply, never fail the request over it" reasoning as encodeBackend above, but for
+  // this app's OWN listeners (lib/httpListeners.js) instead of the native daemon -- a changed
+  // appBindHosts used to need a manual `docker compose restart` (real gotcha, 28/10/2026: "up -d"
+  // alone does nothing, since this setting lives in data, not .env/the image); now the close+
+  // relisten happens here instead. Compared by value, not reference: patch.appBindHosts is a new
+  // deduped array every time, so `!==` would "change" on every save even with the same hosts.
+  const appBindHostsChanged = appBindHosts !== undefined && JSON.stringify([...patch.appBindHosts].sort())
+    !== JSON.stringify([...beforeAppBindHosts].sort());
+  // Responds BEFORE restarting, unlike encodeBackend above: the admin's own request may itself be
+  // arriving on the very address about to be closed, and httpListeners.closeAll() waits (with a
+  // timeout) for that connection to end -- awaiting it before res.json() would deadlock the
+  // request against its own response. The setting is already saved either way (settings.update()
+  // ran above), so there's nothing wrong with the client getting its answer first.
   res.json(updated);
+  if (appBindHostsChanged) {
+    try {
+      await httpListeners.restart();
+    } catch (e) {
+      console.warn(`[settings] could not rebind this app's own listeners with the new network settings: ${e.message}`);
+    }
+  }
 });
 
 module.exports = router;

@@ -2,7 +2,6 @@ const net = require('net');
 const express = require('express');
 const path = require('path');
 const auth = require('./lib/auth');
-const settings = require('./lib/settings');
 
 // Every host in the fleet has a global-scope IPv6 address from Tailscale (the ULA
 // fd7a:115c:a1e0::/48) -- that makes Node's fetch() race real public IPv6 addresses too (Happy
@@ -43,49 +42,15 @@ app.use('/api/version', require('./routes/version'));
 if (auth.LOCAL_ENABLED) require('./lib/userStore').ensureBootstrapAdmin();
 
 const PORT = process.env.PORT || 8080;
-// 127.0.0.1 is ALWAYS listened on, with no way to opt out (see routes/settings.js) -- nothing on
-// this very host (e.g. scrcpy-redroid.sh, which SSHes in and reaches for localhost) could reach
-// this app at all otherwise. Real incident, 28/10/2026: appBindHost used to be a SINGLE address,
-// and once an admin pointed it at the Tailscale interface to reach the UI remotely, loopback
-// access broke -- an http.Server only ever binds the one address it is given, so "pick one"
-// quietly meant "give up the other one too", which nobody actually wants. Beyond that, this app's
-// own API/UI can create/delete/operate every instance (and, once Phase 7's `local`/`oidc` auth is
-// on, manage every account), so whoever can reach it is able to do all of that -- the same
-// reasoning as each instance's own ADB port (dockerRuntime.create's `bindHosts`), just for a much
-// bigger surface. `network_mode: host` in docker-compose.yml means these bind addresses are the
-// real host's, not a container-internal one.
-//
-// Settings' `appBindHosts` (set from the Settings tab's "App network" section, same
-// already-filtered interfaces list as the per-instance picker -- docs/ROADMAP.md Phase 6) is
-// ADDED to localhost once an admin has actually chosen at least one through the UI;
-// REDROID_FORGE_BIND_HOST stays as the env-var escape hatch for before that UI has ever been
-// touched (first boot, headless setups), ignored once appBindHosts is non-empty. Either way this
-// is read once, at process start -- an http.Server cannot be rebound to a different address
-// without restarting the listener, so a changed value only takes effect after the container is
-// restarted; the Settings UI says so rather than pretending it is live (same honesty as the OIDC
-// "secure cookie" gap noted in auth.js).
-const configuredHosts = settings.get().appBindHosts;
-const extraHosts = configuredHosts.length ? configuredHosts : (
-  process.env.REDROID_FORGE_BIND_HOST && process.env.REDROID_FORGE_BIND_HOST !== '127.0.0.1'
-    ? [process.env.REDROID_FORGE_BIND_HOST] : []
-);
-// 0.0.0.0 already covers 127.0.0.1 too -- binding both separately is the same port claimed
-// twice, which a real listen() (unlike this app's own address picker) does not tolerate at all:
-// confirmed live, the second bind fails outright with EADDRINUSE.
-const BIND_HOSTS = extraHosts.includes('0.0.0.0') ? ['0.0.0.0'] : [...new Set(['127.0.0.1', ...extraHosts])];
-for (const host of BIND_HOSTS) {
-  // A failed bind (e.g. EADDRINUSE) must be fatal, not swallowed by the generic
-  // uncaughtException handler below -- without a real listener the whole app is
-  // unreachable anyway, and that handler is only meant to protect against a bug in a
-  // single REQUEST, not a startup failure. `restart: unless-stopped` (docker-compose.yml)
-  // then shows this clearly as a crash-looping container instead of a deceptive "Up".
-  app.listen(PORT, host, () => console.log(`redroid-forge listening on ${host}:${PORT}`))
-    .on('error', (err) => {
-      console.error(`Failed to listen on ${host}:${PORT}: ${err.message}`);
-      console.error('Is another process already using this port? Set PORT in .env to a free one.');
-      process.exit(1);
-    });
-}
+// This app's own API/UI can create/delete/operate every instance (and, once Phase 7's
+// `local`/`oidc` auth is on, manage every account), so whoever can reach it is able to do all of
+// that -- the same reasoning as each instance's own ADB port (dockerRuntime.create's
+// `bindHosts`), just for a much bigger surface. `network_mode: host` in docker-compose.yml means
+// the bind addresses below are the real host's, not a container-internal one. Which addresses to
+// listen on, and how a later change to that setting is applied without a manual restart, now
+// lives in lib/httpListeners.js (routes/settings.js calls its restart() once appBindHosts
+// actually changes).
+require('./lib/httpListeners').listen(app, PORT);
 // Checks (never applies) whether a newer combinations database exists: on
 // open and once a day. Can be turned off with REDROID_FORGE_DB_CHECK=0.
 require('./lib/knownDbUpdate').startScheduler();
