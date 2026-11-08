@@ -1289,6 +1289,74 @@ function buildStorageEditRow(inst) {
   return tr;
 }
 
+// Which "reachability family" an IPv4 address falls into -- used only to pick which flavor of
+// hint buildLocalIpHelp() below shows (Tailscale's own CGNAT range vs. a private LAN), not to
+// filter or verify anything. Tried first actually filtering real candidates gathered in-page via
+// WebRTC's old ICE-candidate leak -- confirmed live (08/11/2026) across Firefox ESR (does not
+// leak at all for this user's profile) and documented separately for Chrome/Edge/Brave (mDNS-
+// obfuscate it) and Safari (never exposed it): no major browser still gives a page this
+// information, so there is nothing left in-page to filter. See buildLocalIpHelp for what this
+// feeds into instead.
+function ipFamily(ip) {
+  const octets = String(ip).split('.').map(Number);
+  if (octets.length !== 4 || octets.some((o) => Number.isNaN(o) || o < 0 || o > 255)) return null;
+  const [a, b] = octets;
+  if (a === 100 && b >= 64 && b <= 127) return 'tailscale';
+  if (a === 10) return 'private';
+  if (a === 172 && b >= 16 && b <= 31) return 'private';
+  if (a === 192 && b === 168) return 'private';
+  return null;
+}
+
+// Hands the user a command to run in THEIR OWN terminal instead of trying (and failing, see
+// ipFamily's comment above) to read their local IP from inside the page -- the OS itself is the
+// only thing left that still knows this answer. A collapsed <details> rather than always-visible
+// text: this is a fallback for the uncommon case of not already knowing your own device's address,
+// not something every admin needs to see on every single row.
+function buildLocalIpHelp(host) {
+  const details = document.createElement('details');
+  details.className = 'muted';
+  const summary = document.createElement('summary');
+  summary.textContent = t('instances.knock.ipHelpSummary');
+  details.appendChild(summary);
+
+  const family = ipFamily(host);
+  const note = document.createElement('div');
+  note.textContent = family === 'tailscale' ? t('instances.knock.ipHelpTailscale')
+    : family === 'private' ? t('instances.knock.ipHelpPrivate')
+      : t('instances.knock.ipHelpGeneric');
+  details.appendChild(note);
+
+  // One command per OS, each already filtered to "an actual interface address", not every line
+  // ipconfig/ifconfig would otherwise print -- the user still has to pick the right one out of
+  // however many it shows (the `note` above says which prefix to look for), this just saves them
+  // from a wall of unrelated adapter/DNS/subnet-mask output first.
+  for (const { label, cmd } of [
+    { label: 'Linux', cmd: "hostname -I | tr ' ' '\\n'" },
+    { label: 'macOS', cmd: 'ifconfig | grep "inet " | grep -v 127.0.0.1' },
+    { label: 'Windows', cmd: 'ipconfig | findstr IPv4' },
+  ]) {
+    const row = document.createElement('div');
+    row.appendChild(document.createTextNode(`${label}: `));
+    const code = document.createElement('code');
+    code.textContent = cmd;
+    row.appendChild(code);
+    const copyBtn = document.createElement('button');
+    copyBtn.type = 'button';
+    copyBtn.className = 'secondary';
+    copyBtn.textContent = t('instances.knock.ipHelpCopy');
+    copyBtn.addEventListener('click', () => {
+      navigator.clipboard?.writeText(cmd).then(() => {
+        copyBtn.textContent = t('instances.knock.ipHelpCopied');
+        setTimeout(() => { copyBtn.textContent = t('instances.knock.ipHelpCopy'); }, 1500);
+      }).catch(() => {});
+    });
+    row.appendChild(copyBtn);
+    details.appendChild(row);
+  }
+  return details;
+}
+
 // The actual "open access" controls (docs/ROADMAP.md Phase 9) -- which interfaces are gated at
 // all is decided in the Configure panel (rare, admin-y); this row is the frequent action of
 // actually opening one, one per `knockRequiredHosts` entry, same toggle pattern as
@@ -1310,22 +1378,27 @@ function buildAdbAccessEditRow(inst) {
     const row = document.createElement('div');
     row.className = 'display-edit-field';
 
-    const label = document.createElement('div');
-    label.textContent = t('instances.knock.openLabel', { address: host });
-    row.appendChild(label);
+    // Read-only -- this is the instance's own fixed listening address (docker-published, set in
+    // the Configure panel), never something to type here. Said explicitly (08/11/2026): the
+    // field below it looked editable enough that it was not obvious this one line above it is a
+    // completely different, fixed thing.
+    const serverLabel = document.createElement('div');
+    serverLabel.textContent = t('instances.knock.serverListensOn', { address: host });
+    row.appendChild(serverLabel);
+
+    const ipFieldLabel = document.createElement('div');
+    ipFieldLabel.textContent = t('instances.knock.connectFromLabel');
+    row.appendChild(ipFieldLabel);
 
     const ipInput = document.createElement('input');
     ipInput.type = 'text';
     ipInput.placeholder = t('instances.knock.ipPlaceholder');
+    // Wider than .display-edit-field's shared 6em default (style.css) -- 6em is not enough room
+    // to comfortably read/type a full IPv4 address in this one.
+    ipInput.style.width = '10em';
     row.appendChild(ipInput);
+    row.appendChild(buildLocalIpHelp(host));
 
-    // Pre-filled from the request's own source IP (routes/instances.js's GET /adb-access) --
-    // right by default only when the device browsing this panel is also the one that will
-    // connect, over the SAME network path. Confirmed live 29/10/2026: opening access from a
-    // Tailscale-reached panel for a LAN connection attempt (or vice versa, or from a different
-    // device entirely) needs this edited to the real connecting address, since the temporary
-    // ACCEPT rule matches the packet's actual source IP, not which interface the panel itself
-    // was reached through.
     const ipHint = document.createElement('div');
     ipHint.className = 'muted';
     ipHint.textContent = t('instances.knock.ipHint');
@@ -1361,10 +1434,7 @@ function buildAdbAccessEditRow(inst) {
     };
 
     api(`/instances/${inst.id}/adb-access?hostIp=${encodeURIComponent(host)}`)
-      .then((state) => {
-        if (!ipInput.value && state.detectedSourceIp) ipInput.value = state.detectedSourceIp;
-        renderState(state);
-      })
+      .then((state) => renderState(state))
       .catch(() => {});
 
     openBtn.addEventListener('click', async () => {
