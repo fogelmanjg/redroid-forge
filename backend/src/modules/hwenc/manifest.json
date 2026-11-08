@@ -2,18 +2,20 @@
   "id": "hwenc",
   "nombre": "Hardware video encode (VA-API)",
   "esTerceroNoLibre": false,
-  "descripcion": "H.264 encode (AMD/Intel via VA-API) for screen streaming/capture. The Codec2 component lives in the instance and talks to a daemon of our own running on the host -- from redroid-hwenc. Hardware DECODE is the separate \"hwdec\" module -- split off on 22/10/2026: a real, reproducible hang has been seen when encode and decode are both active on the same instance on at least one AMD GPU (Polaris), cause not yet identified. If you hit it, turn one of the two off.",
+  "descripcion": "H.264 encode (AMD/Intel via VA-API) for screen streaming/capture. The Codec2 component lives in the instance and talks to a daemon of our own running on the host -- from redroid-hwenc. On Android 15 it registers through the AIDL Codec2 HAL; on Android 11 (added 08/11/2026) through our own HIDL port of the same component code, since AIDL does not exist before Android 14 (confirmed against AOSP source) -- end-to-end validated on Android 11 through the real instance API (create with modules=[hwenc], not a hand-patched container), but ONLY on AMD (Ryzen 5700G/Renoir): real VA-API hardware encode through scrcpy, confirmed via logcat (VaapiEncComponent). Never tested on Intel for this HIDL path -- expect it to fail or corrupt the picture rather than just being unverified: the HIDL Codec2 component is a hand-written VA-API consumer, the same kind of code that had a real, never-fully-fixed-by-hand P-frame corruption bug on Intel/iHD elsewhere in this project (daemon.c's own bitstream writer). Warned, not blocked, in the create-instance dialog when the host is Intel. Hardware DECODE is the separate \"hwdec\" module -- split off on 22/10/2026: a real, reproducible hang has been seen when encode and decode are both active on the same instance on at least one AMD GPU (Polaris), cause not yet identified. If you hit it, turn one of the two off.",
   "queToca": [
     "copies a service (compiled binary, .rc, seccomp policy, VINTF manifest) into the instance's /vendor -- it has to be done BEFORE the first start, /vendor becomes read-only as soon as it boots",
     "adds the encoder entry to /vendor/etc/media_codecs.xml so that the framework lists it",
-    "adds the boot flag androidboot.use_redroid_c2=1 to the container's startup (stage 3, previously hardcoded by hand in instances.js)",
+    "adds the boot flag androidboot.use_redroid_c2=1 to the container's startup (stage 3, previously hardcoded by hand in instances.js) -- only has an effect on Android 15 (triggers the official image's own redroid.c2.sh); harmless no-op on Android 11",
     "requires a process of its own running on the host (the VA-API daemon), outside any container, listening on /dev/vaapi-helper/socket -- the backend starts it by itself if it is not running",
-    "does a setprop + mediaserver restart after every fresh boot (stage 6) -- automated since Phase 5, before it was run by hand",
-    "shares the same host daemon and container-side service as the \"hwdec\" module -- enabling either one for the first time on an instance installs the same files",
+    "does a setprop + mediaserver restart after every fresh boot (stage 6) -- automated since Phase 5, before it was run by hand. On Android 15 this is media.c2.hal.selection=aidl; on Android 11 it is debug.stagefright.ccodec=4, plus a dma_heap fix for libion.so (legacy /dev/ion does not exist on any modern host kernel, and this AOSP version's own libion.so has no fallback) applied to /system and the swcodec apex right before the restart -- see codec2Service.js's installIonDmaHeapFix",
+    "on Android 11, stage 6 waits for sys.boot_completed=1 before touching anything -- found for real (08/11/2026, first run through the actual instance API): a readiness proxy that is not the real boot-completed signal (checking for /data/local/tmp instead) let the setprop run too early, and a later boot step silently reset it back to the image's default",
+    "shares the same host daemon and container-side service as the \"hwdec\" module -- enabling either one for the first time on an instance installs the same files (per androidVersion: hwdec is Android-15-only today, so there is no scenario where the two pull different variants onto the same instance)",
     "a real, reproducible hang has been seen when this is combined with \"hwdec\" (decode) on the same instance (at least on Polaris), cause not yet identified"
   ],
   "compatibleCon": {
     "androidVersion": [
+      11,
       15
     ],
     "gpuMode": [
@@ -31,18 +33,19 @@
     6
   ],
   "entry": "./integrate.js",
-  "version": 5,
+  "version": 8,
   "i18n": {
     "es": {
       "nombre": "Encode de video por hardware (VA-API)",
-      "descripcion": "Encode H.264 (AMD/Intel via VA-API) para streaming/captura de pantalla. El componente Codec2 vive en la instancia y habla con un daemon propio corriendo en el host -- de redroid-hwenc. El DECODE por hardware es el modulo separado \"hwdec\" -- separado el 22/10/2026: se vio un cuelgue real y reproducible al tener encode y decode activos juntos en la misma instancia en al menos una GPU AMD (Polaris), causa todavia no identificada. Si te pasa, apaga uno de los dos.",
+      "descripcion": "Encode H.264 (AMD/Intel via VA-API) para streaming/captura de pantalla. El componente Codec2 vive en la instancia y habla con un daemon propio corriendo en el host -- de redroid-hwenc. En Android 15 se registra por el HAL Codec2 AIDL; en Android 11 (agregado 08/11/2026) por nuestro propio port HIDL del mismo codigo del componente, ya que AIDL no existe antes de Android 14 (confirmado contra el codigo fuente de AOSP) -- validado de punta a punta en Android 11 a traves de la API real de instancias (creada con modules=[hwenc], no un contenedor parcheado a mano), pero SOLO en AMD (Ryzen 5700G/Renoir): encode VA-API real via scrcpy, confirmado por logcat (VaapiEncComponent). Nunca probado en Intel para este path HIDL -- hay que esperar que falle o corrompa la imagen, no solo que este sin verificar: el componente Codec2 HIDL es un consumidor de VA-API escrito a mano, el mismo tipo de codigo que tuvo un bug real de corrupcion de P-frames en Intel/iHD en otra parte del proyecto (el bitstream a mano de daemon.c) que nunca se resolvio del todo sin reescribirlo. Se avisa, no se bloquea, en el dialogo de creacion de instancia cuando el host es Intel. El DECODE por hardware es el modulo separado \"hwdec\" -- separado el 22/10/2026: se vio un cuelgue real y reproducible al tener encode y decode activos juntos en la misma instancia en al menos una GPU AMD (Polaris), causa todavia no identificada. Si te pasa, apaga uno de los dos.",
       "queToca": [
         "copia un servicio (binario compilado, .rc, politica de seccomp, manifest VINTF) dentro de /vendor de la instancia -- tiene que hacerse ANTES del primer arranque, /vendor queda de solo lectura apenas bootea",
         "agrega la entrada del encoder a /vendor/etc/media_codecs.xml para que el framework la liste",
-        "agrega el boot flag androidboot.use_redroid_c2=1 al arranque del contenedor (etapa 3, antes hardcodeado a mano en instances.js)",
+        "agrega el boot flag androidboot.use_redroid_c2=1 al arranque del contenedor (etapa 3, antes hardcodeado a mano en instances.js) -- solo tiene efecto en Android 15 (dispara el redroid.c2.sh propio de la imagen oficial); no-op inofensivo en Android 11",
         "requiere un proceso propio corriendo en el host (el daemon VA-API), fuera de cualquier contenedor, escuchando en /dev/vaapi-helper/socket -- el backend lo levanta solo si no esta corriendo",
-        "hace un setprop + reinicio de mediaserver despues de cada boot fresco (etapa 6) -- automatizado desde Fase 5, antes se corria a mano",
-        "comparte el mismo daemon del host y el mismo servicio del lado del contenedor que el modulo \"hwdec\" -- activar cualquiera de los dos por primera vez en una instancia instala los mismos archivos",
+        "hace un setprop + reinicio de mediaserver despues de cada boot fresco (etapa 6) -- automatizado desde Fase 5, antes se corria a mano. En Android 15 es media.c2.hal.selection=aidl; en Android 11 es debug.stagefright.ccodec=4, mas un fix de dma_heap para libion.so (el /dev/ion legacy no existe en ningun kernel de host moderno, y el libion.so de esta version de AOSP no tiene fallback) aplicado a /system y al apex de swcodec justo antes del reinicio -- ver installIonDmaHeapFix en codec2Service.js",
+        "en Android 11, la etapa 6 espera a sys.boot_completed=1 antes de tocar nada -- encontrado de verdad (08/11/2026, primera corrida a traves de la API real de instancias): un proxy de 'listo' que no era la senal real de boot completo (chequear /data/local/tmp en vez de eso) dejaba correr el setprop demasiado temprano, y un paso posterior del boot lo reseteaba en silencio al valor por defecto de la imagen",
+        "comparte el mismo daemon del host y el mismo servicio del lado del contenedor que el modulo \"hwdec\" -- activar cualquiera de los dos por primera vez en una instancia instala los mismos archivos (por androidVersion: hwdec hoy es solo Android 15, asi que no hay escenario donde los dos tiren de variantes distintas en la misma instancia)",
         "se vio un cuelgue real y reproducible al combinar esto con \"hwdec\" (decode) en la misma instancia (al menos en Polaris), causa todavia no identificada"
       ]
     }

@@ -105,7 +105,7 @@ test('the manifest says it is a workaround of a known redroid bug and where it w
   assert.match(m.descripcion, /KNOWN BUG OF REDROID/);
   assert.ok(m.referencias.includes('https://github.com/remote-android/redroid-doc/issues/930'));
   assert.match(m.i18n.es.descripcion, /BUG CONOCIDO DE REDROID/);
-  assert.deepStrictEqual(m.compatibleCon.androidVersion, [15]);
+  assert.deepStrictEqual(m.compatibleCon.androidVersion, [11, 15]);
 });
 
 // ---- the doctor check ----

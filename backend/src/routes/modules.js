@@ -3,6 +3,7 @@ const manifests = require('../lib/moduleManifests');
 const acceptance = require('../lib/moduleAcceptance');
 const catalog = require('../../images.json');
 const hwAccel = require('../lib/hwAccel');
+const codec2Service = require('../lib/codec2Service');
 
 const router = express.Router();
 
@@ -19,8 +20,9 @@ async function withStatus(manifest, imageId, hostGpuVendor) {
     acceptedAt: latest ? latest.acceptedAt : null,
   };
 
+  let img;
   if (imageId) {
-    const img = catalog.find((i) => i.id === imageId);
+    img = catalog.find((i) => i.id === imageId);
     if (img) {
       out.compatible = manifests.isCompatible(manifest, img);
       out.incompatibilityReason = out.compatible ? null : manifests.incompatibilityReason(manifest, img);
@@ -53,6 +55,15 @@ async function withStatus(manifest, imageId, hostGpuVendor) {
     out.encodeBackend = hwAccel.effectiveEncodeBackend();
     const risk = await hwAccel.encodeBackendRisk(hostGpuVendor, out.encodeBackend);
     out.encodeBackendWarning = risk ? risk.reason : null;
+  }
+
+  // hwenc/hwdec on Android 11-13 (HIDL variant): only validated on AMD so far -- see
+  // codec2Service.js's hidlIntelRisk for why Intel is a real, expected-to-fail risk and not
+  // just "untested". Only meaningful once an image is known (needs androidVersion) and the
+  // host already passed the vendor compatibility gate above.
+  if ((manifest.id === 'hwenc' || manifest.id === 'hwdec') && out.hostCompatible && img) {
+    const risk = codec2Service.hidlIntelRisk(img.androidVersion, hostGpuVendor);
+    out.hidlIntelWarning = risk ? risk.reason : null;
   }
 
   return out;

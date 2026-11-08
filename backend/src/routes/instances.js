@@ -344,9 +344,11 @@ router.post('/', async (req, res) => {
     // with `docker rm`).
     try {
       // `display`: the instance's screen size, for the modules that adjust something to it (hwenc limits the
-      // resolution the hardware decoders advertise).
+      // resolution the hardware decoders advertise). `androidVersion`: hwenc/hwdec's AIDL (15) vs
+      // HIDL (11-13) branching (codec2Service.js).
       await moduleRunner.integrate(requiredModuleIds, containerId, {
         display: { width: display.width, height: display.height },
+        androidVersion: img.androidVersion,
       });
       // Not a module (see meminfoFix.js's own comment on why), but the same stage-4 window --
       // Android's own init does the actual /proc/meminfo bind on boot from this, no docker-exec
@@ -395,7 +397,7 @@ router.post('/', async (req, res) => {
     meminfoFix.scheduleRefresh(instance);
     // Stage 6: fire-and-forget post-boot fixups (the same pattern as
     // scheduleWifiFixes), they do not block the response.
-    moduleRunner.scheduleRuntimeFixups(requiredModuleIds, containerId);
+    moduleRunner.scheduleRuntimeFixups(requiredModuleIds, containerId, { androidVersion: img.androidVersion });
     // Stage 7: periodic watchdogs (CIFI and the like) -- started here, not just
     // on /start, since a freshly created instance is also freshly running.
     moduleScheduler.start(instance.id, containerId, requiredModuleIds);
@@ -422,7 +424,12 @@ router.post('/:id/start', async (req, res) => {
     const reconciled = await reconcileDeviceProfile(instance);
     scheduleWifiFixes(reconciled);
     meminfoFix.scheduleRefresh(reconciled);
-    moduleRunner.scheduleRuntimeFixups(requiredModuleIds, reconciled.containerId);
+    // Same catalog lookup as reconcileDeviceProfile/requiredModuleIdsFor -- androidVersion for
+    // hwenc/hwdec's AIDL/HIDL branching (codec2Service.js). undefined if the image is no
+    // longer in the catalog, which codec2Service treats as "assume AIDL" (today's only
+    // behaviour, unchanged).
+    const startedImg = catalog.find((i) => i.id === reconciled.imageId);
+    moduleRunner.scheduleRuntimeFixups(requiredModuleIds, reconciled.containerId, { androidVersion: startedImg?.androidVersion });
     moduleScheduler.start(reconciled.id, reconciled.containerId, requiredModuleIds);
     await applyKnockGuards(reconciled);
     res.json(await withRuntimeStatus(reconciled));
@@ -465,7 +472,10 @@ router.post('/:id/restart', async (req, res) => {
     const reconciled = await reconcileDeviceProfile(instance);
     scheduleWifiFixes(reconciled);
     meminfoFix.scheduleRefresh(reconciled);
-    moduleRunner.scheduleRuntimeFixups(requiredModuleIds, reconciled.containerId);
+    // Same catalog lookup as reconcileDeviceProfile/requiredModuleIdsFor -- see /start's own
+    // comment on this same pattern.
+    const restartedImg = catalog.find((i) => i.id === reconciled.imageId);
+    moduleRunner.scheduleRuntimeFixups(requiredModuleIds, reconciled.containerId, { androidVersion: restartedImg?.androidVersion });
     moduleScheduler.start(reconciled.id, reconciled.containerId, requiredModuleIds);
     await applyKnockGuards(reconciled);
     res.json(await withRuntimeStatus(reconciled));
@@ -782,6 +792,7 @@ router.post('/:id/display', async (req, res) => {
     try {
       await moduleRunner.integrate(requiredModuleIds, containerId, {
         display: { width: display.width, height: display.height },
+        androidVersion: img.androidVersion,
       });
       // Recreate means a brand new container -- the .rc installed in the old one is gone with
       // it, needs reinstalling here same as the create route.
@@ -824,7 +835,7 @@ router.post('/:id/display', async (req, res) => {
       updated = await reconcileDeviceProfile(updated);
       scheduleWifiFixes(updated);
       meminfoFix.scheduleRefresh(updated);
-      moduleRunner.scheduleRuntimeFixups(requiredModuleIds, containerId);
+      moduleRunner.scheduleRuntimeFixups(requiredModuleIds, containerId, { androidVersion: img.androidVersion });
       moduleScheduler.start(updated.id, containerId, requiredModuleIds);
       // Same gate as the create route -- but there it is the ONLY place that ever calls this,
       // so an instance that gained gapps HERE instead (module added after creation, through

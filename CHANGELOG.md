@@ -21,6 +21,25 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
 
 ## [Unreleased]
 
+### Added
+
+- `hwenc`/`hwdec`/`redroid-gralloc-fix`: Android 11 (and, by AOSP source-level inspection, 12/13)
+  support, via a HIDL port of the Codec2 VA-API component (AIDL does not exist before Android 14)
+  plus a `dma_heap` fallback for `libion.so` (legacy `/dev/ion` does not exist on modern host
+  kernels). Validated end-to-end through the real instance API -- not a hand-patched container --
+  on AMD (Ryzen 5700G/Renoir) only. Intel is explicitly untested for this variant and expected to
+  fail or corrupt the picture, not merely unverified (the same class of hand-written-VA-API-
+  consumer bug as the original Intel P-frame issue this project already hit elsewhere), so the
+  create-instance dialog now warns -- never blocks -- when it detects Intel together with this
+  variant.
+
+### Fixed
+
+- `hwenc`'s Android 11 runtime fixups (stage 6) used to race Android's own boot sequence: a
+  `setprop` could apply with no error and then get silently reset moments later by a later boot
+  step, because the readiness check used (`/data/local/tmp` existing) was not the same thing as
+  boot actually finishing. It now waits for `sys.boot_completed=1` first.
+
 ## [0.6.3] - 2026-11-08
 
 ### Fixed

@@ -27,12 +27,25 @@ const execFileAsync = promisify(execFile);
 // below for the explicit "not configured at all" error this now produces instead.
 const ARTIFACTS_DIR = process.env.REDROID_HWENC_ARTIFACTS_DIR || null;
 
+// Codec2 HAL variant: the AIDL HAL (media/codec2/hal/aidl) does not exist before Android 14 --
+// confirmed directly against AOSP source at android-11/12/13's tags, where only
+// media/codec2/hidl/{1.0,1.1} exist. Below 14 this project uses its own HIDL port of the same
+// VaapiEncComponent/VaapiDecComponent code (end-to-end validated on Android 11, 08/11/2026:
+// real VA-API hardware encode through scrcpy, no crashes, h264 output confirmed) -- only the
+// registration layer differs (HIDL's registerAsService() vs AIDL's AServiceManager_addService()),
+// the vendor component logic itself is untouched.
+// `androidVersion` undefined/null (image no longer in the catalog, see instances.js' own
+// comments on this) falls through to 'aidl' -- today's only behaviour, unchanged.
+function variantFor(androidVersion) {
+  return androidVersion != null && androidVersion < 14 ? 'hidl' : 'aidl';
+}
+
 // Relative path inside ARTIFACTS_DIR -> the same path inside the instance's /vendor.
 // Transitive closure of dependencies computed by hand (readelf -d on the binary + its .so
 // files, resolving against this same tree) -- see docs/ARCHITECTURE.md for the detail of how
 // this list was built and why it does NOT include libva/libgbm/libdrm/libEGL (those are
 // dependencies of the host's daemon, not of this binary).
-const FILES = [
+const FILES_AIDL = [
   'bin/hw/android.hardware.media.c2-vaapi-service',
   'etc/init/android.hardware.media.c2-vaapi-service.rc',
   'etc/seccomp_policy/android.hardware.media.c2-vaapi-seccomp_policy',
@@ -56,6 +69,47 @@ const FILES = [
   'lib64/libcap.so',
   'lib64/libstagefright_aidl_bufferpool2.so',
 ];
+
+// Same idea, for the HIDL variant (Android 11, so far -- 12/13 not validated yet, see
+// variantFor's comment and the manifest). Closure computed the same way, against the real
+// Android 11 AOSP tree; notably smaller than the AIDL one -- no libminijail.so/libcap.so/
+// libdmabufheap.so/bufferpool@2.0/bufferqueue@2.0/bufferpool2-V2-ndk.so, confirmed NOT present
+// under /vendor/lib64 on a live, working instance (this binary links the VNDK copies of those
+// instead, reachable from /apex/com.android.vndk.v30 without a vendor-local copy).
+// lib64/libion.so here is OUR patched build (dma_heap fallback, see installIonDmaHeapFix) --
+// without it, Codec2's ION allocator segfaults the moment a real buffer is encoded
+// (C2AllocatorIon::getId() on a null mTraits) because /dev/ion does not exist on any kernel
+// that dropped legacy ION (5.10+) -- this vendor copy covers this HIDL service's own process;
+// the framework/client side needs the SAME fix applied to the /system and swcodec-apex copies,
+// which installIonDmaHeapFix does separately, at stage 6 (those paths are not writable, or do
+// not exist yet, before boot).
+const FILES_HIDL = [
+  'bin/hw/android.hardware.media.c2@1.1-vaapi-service',
+  'etc/init/android.hardware.media.c2@1.1-vaapi-service.rc',
+  'etc/seccomp_policy/android.hardware.media.c2-vaapi-seccomp_policy',
+  'etc/vintf/manifest/manifest_media_c2_vaapi.xml',
+  'lib64/libcodec2.so',
+  'lib64/libcodec2_hidl@1.0.so',
+  'lib64/libcodec2_hidl@1.1.so',
+  'lib64/libcodec2_soft_common.so',
+  'lib64/libcodec2_vndk.so',
+  'lib64/libion.so',
+  'lib64/libavservices_minijail.so',
+  'lib64/libstagefright_bufferpool@2.0.1.so',
+  'lib64/libsfplugin_ccodec_utils.so',
+];
+
+// Kept exported as `FILES` for anything (including existing tests) that only ever cared about
+// the AIDL/15 list -- the variant that was the only one that existed before 08/11/2026.
+const FILES = FILES_AIDL;
+
+// Subfolder of ARTIFACTS_DIR for each variant. The AIDL set keeps the original, flat layout
+// (nothing already deployed on Android 15 needs re-pathing); the HIDL set is new and lives in
+// its own subfolder, since (a) it is a different, smaller closure and (b) it needs an extra
+// file (system-lib64/libion.so) that is not a /vendor path at all.
+function artifactsBaseDir(variant) {
+  return variant === 'hidl' ? path.join(ARTIFACTS_DIR, 'android11-hidl') : ARTIFACTS_DIR;
+}
 
 // The backend has to add this to the container's creation Cmd -- it triggers redroid.c2.sh
 // (already shipped in the official redroid image), which enables debug.stagefright.ccodec.
@@ -208,24 +262,87 @@ async function copyIntoContainer(containerId, srcPath, destRelPath) {
 // first time. Idempotent (docker cp always overwrites): safe to call once per capability if
 // both hwenc and hwdec are active on the same instance, the second call just re-copies the
 // same files.
-async function installFiles(containerId) {
+async function installFiles(containerId, androidVersion) {
   if (!ARTIFACTS_DIR) {
     throw new Error('REDROID_HWENC_ARTIFACTS_DIR is not set -- hwenc/hwdec need a local folder with the '
       + 'AOSP-built Codec2 VA-API artifacts (see backend/src/modules/hwenc/README.md, "Pending"), and there '
       + 'is no default to fall back to.');
   }
-  log(`injecting ${FILES.length} files into ${containerId}...`);
-  for (const relPath of FILES) {
-    await copyIntoContainer(containerId, path.join(ARTIFACTS_DIR, relPath), relPath);
+  const variant = variantFor(androidVersion);
+  const files = variant === 'hidl' ? FILES_HIDL : FILES_AIDL;
+  const base = artifactsBaseDir(variant);
+  log(`injecting ${files.length} files (${variant}) into ${containerId}...`);
+  for (const relPath of files) {
+    await copyIntoContainer(containerId, path.join(base, relPath), relPath);
   }
   // redroid-nodcc.rc: without it Mesa enables DCC on SurfaceFlinger's real buffer and VCN
   // cannot encode it ("VCN - DCC surfaces not supported"). Does not come out of the AOSP
   // build, it is a static 2-line file that lives with the hwenc module, not in ARTIFACTS_DIR
   // -- kept there since this file predates the encode/decode split and is encode-specific
   // (decode-only has nothing to do with VCN/DCC), loaded lazily to avoid a require() cycle.
+  // Same file regardless of variant -- it is about the host GPU (AMD VCN/DCC), not about which
+  // Codec2 HAL registration the component uses.
   // eslint-disable-next-line global-require
   const hwencDir = require('./moduleManifests').moduleDir('hwenc');
   await copyIntoContainer(containerId, path.join(hwencDir, 'redroid-nodcc.rc'), 'etc/init/redroid-nodcc.rc');
+}
+
+// Copies a file to an arbitrary absolute path inside a LIVE (already booted) container --
+// unlike copyIntoContainer (stage 4, pre-boot, always under /vendor), this is for stage 6
+// fixups against paths that do not exist (or are not writable) before Android's own init has
+// booted and mounted them. Same chown/chmod dance as copyIntoContainer, parameterized on the
+// destination instead of assuming /vendor.
+async function copyFileToAbsPath(containerId, srcPath, destAbsPath) {
+  if (!fs.existsSync(srcPath)) {
+    throw new Error(`Artifact ${srcPath} is missing -- is REDROID_HWENC_ARTIFACTS_DIR (${ARTIFACTS_DIR}) the right one?`);
+  }
+  const tmpPath = path.join(os.tmpdir(), `hwenc-${containerId.slice(0, 12)}-${path.basename(destAbsPath)}`);
+  fs.copyFileSync(srcPath, tmpPath);
+  await execFileAsync('chown', ['root:root', tmpPath]);
+  await execFileAsync('chmod', ['0644', tmpPath]);
+  await execFileAsync('docker', ['cp', tmpPath, `${containerId}:${destAbsPath}`]);
+  fs.unlinkSync(tmpPath);
+}
+
+// Android 11-13's libion.so only knows legacy /dev/ion -- removed from upstream Linux (5.10+,
+// replaced by DMA-BUF Heaps) and confirmed, by reading the AOSP source directly, unfixed and
+// byte-identical through android-13.0.0_r83 (not an 11-specific oversight). FILES_HIDL's own
+// lib64/libion.so (our patched build, dma_heap fallback) covers the VENDOR copy this service's
+// own process links -- but the FRAMEWORK/client side of Codec2 (CCodecBufferChannel, running in
+// whatever process opened the MediaCodec) links the /system and swcodec-apex copies instead,
+// which come straight from the base image, unpatched. Confirmed by two separate, sequential
+// crashes while validating this end-to-end (08/11/2026): C2AllocatorIon::getId() (vendor copy)
+// then C2AllocatorIon::setUsageMapper() (system/apex copies, once the first was fixed).
+//
+// This can only run POST-boot (stage 6), not alongside installFiles (stage 4): the swcodec
+// apex overlay this also patches does not exist until Android's own init mounts it during boot,
+// and -- once it does exist -- `docker cp` still cannot reach it directly (confirmed: it only
+// sees the container's build-time rootfs layers, not a mount created live inside the
+// container's own namespace, the same way /tmp or apex paths are invisible to it before boot).
+// `docker exec` DOES see the live namespace, so the file is staged on /data first (a normal,
+// always-writable volume) and copied into place from there -- the same pattern `adb push` +
+// `adb shell cp` proved out by hand this session, without adding an adb dependency to the
+// backend.
+const APEX_SWCODEC_LIBION_STAGE = '/data/local/tmp/codec2service-libion-fix.so';
+
+async function installIonDmaHeapFix(containerId, androidVersion) {
+  if (!ARTIFACTS_DIR) {
+    throw new Error('REDROID_HWENC_ARTIFACTS_DIR is not set -- hwenc/hwdec need a local folder with the '
+      + 'AOSP-built Codec2 VA-API artifacts (see backend/src/modules/hwenc/README.md, "Pending"), and there '
+      + 'is no default to fall back to.');
+  }
+  const base = artifactsBaseDir(variantFor(androidVersion));
+  const src = path.join(base, 'system-lib64/libion.so');
+  // Called after waitForBootCompleted (ensureRuntimeReady), so /data/local/tmp should already
+  // exist -- mkdir -p kept anyway, idempotent and cheap, as a safety net rather than the
+  // readiness gate itself (that used to be this line's job; see waitForBootCompleted's comment
+  // for why that was not enough on its own).
+  await execAndroidWithRetry(containerId, ['mkdir', '-p', '/data/local/tmp']);
+  await copyFileToAbsPath(containerId, src, '/system/lib64/libion.so');
+  await execFileAsync('docker', ['cp', src, `${containerId}:${APEX_SWCODEC_LIBION_STAGE}`]);
+  await execAndroidWithRetry(containerId, ['cp', APEX_SWCODEC_LIBION_STAGE, '/apex/com.android.media.swcodec/lib64/libion.so']);
+  await execAndroidWithRetry(containerId, ['rm', '-f', APEX_SWCODEC_LIBION_STAGE]);
+  log(`libion.so dma_heap fix applied to /system and the swcodec apex of ${containerId}`);
 }
 
 // Stage 3 (see moduleRunner.js): needed whenever EITHER capability is requested.
@@ -238,11 +355,20 @@ async function ensureHostInfraReady() {
   await hwAccel.ensureDaemonRunning();
 }
 
-// Stage 6: unlike integrate(), this runs AFTER the boot, on an already-live instance.
-// media.c2.hal.selection defaults to "hidl" in this framework, so Codec2Client never looks
-// for AIDL stores like ours until it is forced to "aidl" -- and since GetServiceNames() is
-// cached once per process, mediaserver (which already started with the old value) needs to
-// be restarted to pick up the new one. Needed whenever EITHER capability is active.
+// Stage 6: unlike integrate(), this runs AFTER the boot, on an already-live instance. Needed
+// whenever EITHER capability is active. The runtime switch that actually turns Codec2 on
+// differs by variant (see variantFor):
+// - AIDL (15): media.c2.hal.selection defaults to "hidl" in this framework, so Codec2Client
+//   never looks for AIDL stores like ours until it is forced to "aidl".
+// - HIDL (11-13): debug.stagefright.ccodec gates MediaCodecList wholesale (option 0 drops every
+//   Codec2 entry regardless of HAL-level registration -- confirmed by reading
+//   Codec2InfoBuilder::buildMediaCodecList() directly; the official Android 11 image ships with
+//   it at 0). Forcing it to 4 ("all components, normal ranks") is this variant's equivalent
+//   switch. Also needs the dma_heap fix above applied first (installIonDmaHeapFix) -- without
+//   it CCodec crashes the moment it actually tries to allocate a buffer, HAL registration alone
+//   is not enough to tell.
+// Either way, GetServiceNames()/MediaCodecList is cached once per process, so mediaserver
+// (already started with the old value) needs restarting to pick up the new one.
 const RUNTIME_READY_MAX_ATTEMPTS = 8;
 const RUNTIME_READY_RETRY_DELAY_MS = 3000;
 
@@ -265,8 +391,27 @@ async function execAndroidWithRetry(containerId, argv, { noRetryCodes = [] } = {
   throw lastErr;
 }
 
-async function ensureRuntimeReady(containerId) {
-  await execAndroidWithRetry(containerId, ['setprop', 'media.c2.hal.selection', 'aidl']);
+// HIDL-only (see below): waits for sys.boot_completed=1 before touching anything else.
+// Found for real (08/11/2026, first live run through the actual module system): gating stage
+// 6 on /data/local/tmp existing (installIonDmaHeapFix's own retry) is NOT equivalent to boot
+// actually finishing -- debug.stagefright.ccodec got set to 4 successfully (no error, no
+// retry) but read back as 0 once boot genuinely completed moments later, meaning some late-
+// boot step (sys.boot_completed=1's own trigger, presumably) re-asserts the image's default
+// AFTER /data is already writable but BEFORE boot is actually done. Waiting for the real
+// signal instead of a proxy for it fixes the race at its source.
+async function waitForBootCompleted(containerId) {
+  await execAndroidWithRetry(containerId, ['sh', '-c', 'test "$(getprop sys.boot_completed)" = 1']);
+}
+
+async function ensureRuntimeReady(containerId, androidVersion) {
+  const variant = variantFor(androidVersion);
+  if (variant === 'hidl') {
+    await waitForBootCompleted(containerId);
+    await installIonDmaHeapFix(containerId, androidVersion);
+    await execAndroidWithRetry(containerId, ['setprop', 'debug.stagefright.ccodec', '4']);
+  } else {
+    await execAndroidWithRetry(containerId, ['setprop', 'media.c2.hal.selection', 'aidl']);
+  }
   try {
     await execAndroidWithRetry(containerId, ['pkill', 'mediaserver'], { noRetryCodes: [1] });
   } catch (e) {
@@ -277,11 +422,37 @@ async function ensureRuntimeReady(containerId) {
     if (e.code !== 1) throw e;
     log(`pkill mediaserver: there was no live process in ${containerId} (it probably already restarted on its own)`);
   }
-  log('media.c2.hal.selection=aidl applied, mediaserver restarted');
+  log(variant === 'hidl'
+    ? 'debug.stagefright.ccodec=4 applied, mediaserver restarted'
+    : 'media.c2.hal.selection=aidl applied, mediaserver restarted');
+}
+
+// Android 11-13 (HIDL variant) hwenc/hwdec has only been validated on AMD (Ryzen 5700G/Renoir,
+// 08/11/2026) -- never on Intel. Worth a real warning, not just "untested": the HIDL path's
+// Codec2 component (VaapiEncComponent.cpp, in redroid-hwenc-rescue/android-11-13-hidl-amd-only)
+// is a hand-written VA-API consumer, structurally like tier5-vaapi-daemon's own hand-rolled
+// bitstream writer -- and THAT had a real, confirmed P-frame corruption bug on Intel/iHD (see
+// hwAccel.js's encodeBackendRisk) that was never fully fixed by hand, only worked around by
+// rewriting it against libavcodec. There is no reason to believe this separate component is
+// free of an analogous problem on Intel: it runs inside the container's own Codec2 framework,
+// a completely different code path from daemon.c (a host process), so that fix does not cover
+// it. Warn, do not block -- same "fuera de la base, no se bloquea" posture as everywhere else in
+// this project (docs/KNOWN-COMBINATIONS.md), and consistent with encodeBackendRisk's own choice.
+function hidlIntelRisk(androidVersion, vendor) {
+  if (variantFor(androidVersion) === 'hidl' && vendor === 'intel') {
+    return {
+      reason: 'el port HIDL de hwenc/hwdec para Android 11-13 solo fue validado en AMD (Ryzen '
+        + '5700G/Renoir) -- nunca se probo en Intel, y hay motivo concreto para esperar que '
+        + 'falle o corrompa el video (el mismo tipo de bug de P-frames en Intel/iHD que tuvo el '
+        + 'bitstream a mano de daemon.c, nunca resuelto del todo sin reescribirlo).',
+    };
+  }
+  return null;
 }
 
 module.exports = {
-  ARTIFACTS_DIR, FILES, REQUIRED_BOOT_FLAGS, C2_ENCODER_NAME,
+  ARTIFACTS_DIR, FILES, FILES_AIDL, FILES_HIDL, REQUIRED_BOOT_FLAGS, C2_ENCODER_NAME,
+  variantFor, artifactsBaseDir,
   decodeSizeLimit, addCodecsToXml, patchMediaCodecsXml, installFiles,
-  prepareCreate, ensureHostInfraReady, ensureRuntimeReady,
+  prepareCreate, ensureHostInfraReady, ensureRuntimeReady, installIonDmaHeapFix, hidlIntelRisk,
 };

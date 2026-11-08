@@ -26,7 +26,7 @@ function prepareCreate() {
 }
 
 async function integrate(containerId, ctx = {}) {
-  await svc.installFiles(containerId);
+  await svc.installFiles(containerId, ctx.androidVersion);
   await svc.patchMediaCodecsXml(containerId, ctx, { addEncoder: true, addDecoders: false });
 }
 
@@ -34,8 +34,8 @@ async function ensureHostInfraReady() {
   await svc.ensureHostInfraReady();
 }
 
-async function ensureRuntimeReady(containerId) {
-  await svc.ensureRuntimeReady(containerId);
+async function ensureRuntimeReady(containerId, ctx = {}) {
+  await svc.ensureRuntimeReady(containerId, ctx.androidVersion);
 }
 
 module.exports = {

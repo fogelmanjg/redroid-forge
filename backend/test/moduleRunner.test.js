@@ -184,6 +184,36 @@ test('moduleRunner.scheduleRuntimeFixups: calls the stage-6 hook with the contai
   assert.deepEqual(requireFixtureEntry(root, 'fx-fixup').calls, ['containerXYZ']);
 }));
 
+test('moduleRunner.scheduleRuntimeFixups: passes ctx through as the hook\'s second argument (added 08/11/2026 for hwenc/hwdec\'s androidVersion branching)', () => withFixtureModules([
+  {
+    id: 'fx-fixup-ctx',
+    etapa: [6],
+    entryBody: `
+      module.exports.calls = [];
+      module.exports.ensureRuntimeReady = async (containerId, ctx) => { module.exports.calls.push([containerId, ctx]); };
+    `,
+  },
+], async (root) => {
+  moduleRunner.scheduleRuntimeFixups(['fx-fixup-ctx'], 'containerXYZ', { androidVersion: 11 });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(requireFixtureEntry(root, 'fx-fixup-ctx').calls, [['containerXYZ', { androidVersion: 11 }]]);
+}));
+
+test('moduleRunner.scheduleRuntimeFixups: ctx defaults to {} when the caller omits it', () => withFixtureModules([
+  {
+    id: 'fx-fixup-noctx',
+    etapa: [6],
+    entryBody: `
+      module.exports.calls = [];
+      module.exports.ensureRuntimeReady = async (containerId, ctx) => { module.exports.calls.push(ctx); };
+    `,
+  },
+], async (root) => {
+  moduleRunner.scheduleRuntimeFixups(['fx-fixup-noctx'], 'containerXYZ');
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(requireFixtureEntry(root, 'fx-fixup-noctx').calls, [{}]);
+}));
+
 test('moduleRunner.scheduleRuntimeFixups: it does not bring the process down if the stage-6 hook rejects', () => withFixtureModules([
   {
     id: 'fx-fixup-fails',

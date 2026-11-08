@@ -1,5 +1,25 @@
 [
   {
+    "id": "android-11-official",
+    "label": "Android 11 · Official Redroid (community)",
+    "dockerImage": "redroid/redroid:11.0.0-latest",
+    "androidVersion": 11,
+    "gpuMode": "guest",
+    "needsHwsimWifi": false,
+    "hasGapps": false,
+    "hasMagisk": false,
+    "hwEncCapable": true,
+    "needsGrallocFix": true,
+    "soporte": "comunidad",
+    "notaSoporte": "Unmodified official image, under evaluation (08/11). Community support, not official like Android 15: here to validate host mode and a HIDL port of the VA-API hwenc service (AIDL Codec2, used on 15, does not exist before Android 14 -- confirmed against AOSP source). needsGrallocFix is true: the same gralloc.gbm.so SIGFPE divide-by-zero bug as Android 15 is present byte-identical in this official image on gpuMode=host -- confirmed and fixed (redroid-gralloc-fix module). hwEncCapable is true (08/11): end-to-end hardware encode is validated through the real instance API (POST /instances with modules=[hwenc] against a freshly created container, not a hand-patched one) -- real VA-API encode via scrcpy, confirmed via logcat (VaapiEncComponent), no crashes -- but only on AMD (Ryzen 5700G/Renoir); never tested on Intel, and expected to fail or corrupt the picture there rather than merely being unverified (see the hwenc module manifest's hidlIntelRisk note). Warned, not blocked, when the create-instance dialog detects an Intel host. Includes a second, Android-11-specific bug (legacy ION missing on modern host kernels, fixed with a dma_heap fallback patch to libion) and a boot-race fix in stage 6 (it now waits for sys.boot_completed=1, found necessary because a weaker readiness proxy let a setprop apply too early and get silently reset by a later boot step).",
+    "i18n": {
+      "es": {
+        "label": "Android 11 · Redroid oficial (comunidad)",
+        "notaSoporte": "Imagen oficial sin modificar, en evaluacion (08/11). Soporte de comunidad, no oficial como Android 15: esta aca para validar modo host y un port HIDL del servicio hwenc de VA-API (el Codec2 por AIDL que usa la 15 no existe antes de la version 14 -- confirmado contra el codigo fuente de AOSP). needsGrallocFix esta en true: el mismo bug de gralloc.gbm.so (SIGFPE, division por cero) de Android 15 esta presente byte-identico en esta imagen oficial con gpuMode=host -- confirmado y arreglado (modulo redroid-gralloc-fix). hwEncCapable esta en true (08/11): el encode por hardware de punta a punta esta validado a traves de la API real de instancias (POST /instances con modules=[hwenc] contra un contenedor recien creado, no uno parcheado a mano) -- encode VA-API real via scrcpy, confirmado por logcat (VaapiEncComponent), sin crashes -- pero solo en AMD (Ryzen 5700G/Renoir); nunca probado en Intel, y se espera que falle o corrompa la imagen ahi, no solo que este sin verificar (ver la nota hidlIntelRisk del manifiesto del modulo hwenc). Se avisa, no se bloquea, cuando el dialogo de creacion de instancia detecta un host Intel. Incluye un segundo bug propio de Android 11 (ION legacy ausente en kernels de host modernos, arreglado con un fallback a dma_heap en libion) y un fix de una carrera de boot en la etapa 6 (ahora espera a sys.boot_completed=1, necesario porque un proxy de 'listo' mas debil dejaba aplicar un setprop demasiado temprano y un paso posterior del boot lo reseteaba en silencio)."
+      }
+    }
+  },
+  {
     "id": "android-15-official",
     "label": "Android 15 · Official Redroid",
     "dockerImage": "redroid/redroid:15.0.0-latest",

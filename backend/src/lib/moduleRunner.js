@@ -25,13 +25,15 @@ const STAGE_EXPORT_NAME = {
   // Stage 4: between runtime.create() and runtime.start() -- the only window in
   // which /vendor is writable (see ARCHITECTURE.md). It receives the
   // containerId already created (still stopped), and a context
-  // `{ display: { width, height } }`.
+  // `{ display: { width, height }, androidVersion }`.
   4: 'integrate',
   // Stage 5: companion infrastructure on the host, independent of any particular
   // instance (e.g. the VA-API daemon of hwAccel.js). No arguments, idempotent by
   // the module's own contract.
   5: 'ensureHostInfraReady',
-  // Stage 6: against an instance that has already started. It receives the live containerId.
+  // Stage 6: against an instance that has already started. It receives the live
+  // containerId and a context `{ androidVersion }` (added 08/11/2026 for hwenc/hwdec's
+  // AIDL/HIDL branching -- see scheduleRuntimeFixups below).
   6: 'ensureRuntimeReady',
   // Stage 7: periodic watchdog, called on its own schedule (manifest's
   // `schedule.intervalMs`, see moduleScheduler.js) for as long as the instance
@@ -134,7 +136,11 @@ async function ensureHostInfraReady(requiredModuleIds) {
 // it does not block the HTTP response of start/restart, and a module that fails
 // here must not bring down the instance's startup (it is alive anyway, this is
 // an adjustment on something that already works, not a precondition).
-function scheduleRuntimeFixups(requiredModuleIds, containerId) {
+// `ctx`: optional, same spirit as stage 4's -- today only `{ androidVersion }`, which hwenc/
+// hwdec need to pick between their AIDL (15) and HIDL (11-13) Codec2 variants (see
+// codec2Service.js). A stage-6 hook that does not need it (the large majority) just ignores
+// the extra argument, same as any JS function called with more arguments than it declares.
+function scheduleRuntimeFixups(requiredModuleIds, containerId, ctx = {}) {
   for (const manifest of modulesForStage(requiredModuleIds, 6)) {
     let fn;
     try {
@@ -144,7 +150,7 @@ function scheduleRuntimeFixups(requiredModuleIds, containerId) {
       // eslint-disable-next-line no-continue
       continue;
     }
-    Promise.resolve(fn(containerId)).catch((e) => {
+    Promise.resolve(fn(containerId, ctx)).catch((e) => {
       warn(`stage 6 of module "${manifest.id}" failed for ${containerId}: ${e.message}`);
     });
   }
