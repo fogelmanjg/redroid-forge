@@ -111,12 +111,6 @@ function artifactsBaseDir(variant) {
   return variant === 'hidl' ? path.join(ARTIFACTS_DIR, 'android11-hidl') : ARTIFACTS_DIR;
 }
 
-// The backend has to add this to the container's creation Cmd -- it triggers redroid.c2.sh
-// (already shipped in the official redroid image), which enables debug.stagefright.ccodec.
-// Without it the framework filters ALL Codec2 components no matter how well they are
-// registered. Needed whenever EITHER encode or decode is active.
-const REQUIRED_BOOT_FLAGS = ['androidboot.use_redroid_c2=1'];
-
 const C2_ENCODER_NAME = 'c2.hardware.encoder.h264';
 
 // Standard resolution steps (long side x short side), from smallest to largest.
@@ -345,9 +339,12 @@ async function installIonDmaHeapFix(containerId, androidVersion) {
   log(`libion.so dma_heap fix applied to /system and the swcodec apex of ${containerId}`);
 }
 
-// Stage 3 (see moduleRunner.js): needed whenever EITHER capability is requested.
+// Stage 3 (see moduleRunner.js): needed whenever EITHER capability is requested. The
+// `androidboot.use_redroid_c2=1` boot flag this used to add here is now part of every instance's
+// base cmd regardless of modules (routes/instances.js) -- see its comment there, and
+// CHANGELOG.md's v0.7.1 entry, for why it stopped being hwenc/hwdec-specific.
 function prepareCreate() {
-  return { binds: [hwAccel.daemonBind()], cmd: REQUIRED_BOOT_FLAGS };
+  return { binds: [hwAccel.daemonBind()], cmd: [] };
 }
 
 // Stage 5: host infrastructure (the VA-API daemon), independent of any particular instance.
@@ -438,7 +435,7 @@ async function ensureRuntimeReady(containerId, androidVersion) {
 // reworded; see redroid-hwenc's DEVLOG.md (2026-11-09 entry) for the actual test.
 
 module.exports = {
-  ARTIFACTS_DIR, FILES, FILES_AIDL, FILES_HIDL, REQUIRED_BOOT_FLAGS, C2_ENCODER_NAME,
+  ARTIFACTS_DIR, FILES, FILES_AIDL, FILES_HIDL, C2_ENCODER_NAME,
   variantFor, artifactsBaseDir,
   decodeSizeLimit, addCodecsToXml, patchMediaCodecsXml, installFiles,
   prepareCreate, ensureHostInfraReady, ensureRuntimeReady, installIonDmaHeapFix,

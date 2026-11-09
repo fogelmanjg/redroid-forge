@@ -91,9 +91,9 @@ if (-not $Bitrate) { $Bitrate = "default (8M)" }
 
 @{ LastDevice = $Selected; LastBitrate = $Bitrate } | ConvertTo-Json | Set-Content $StateFile
 
-# --audio-codec=aac: redroid has no Opus encoder, and opus is scrcpy's default -- without
-# this, audio silently fails. See docs/SCRCPY-TIPS.md for this and other first-run gotchas.
-$ScrcpyArgs = @("-s", $Target, "--audio-codec=aac")
+# No --audio-codec override: scrcpy's own default (Opus) works since v0.7.1 -- it used to be
+# forced to aac here because redroid had no Opus encoder registered. See docs/SCRCPY-TIPS.md.
+$ScrcpyArgs = @("-s", $Target)
 if ($Bitrate -ne "default (8M)") { $ScrcpyArgs += "--video-bit-rate=$Bitrate" }
 if ($env:SCRCPY_EXTRA_ARGS) { $ScrcpyArgs += ($env:SCRCPY_EXTRA_ARGS -split '\s+') }
 

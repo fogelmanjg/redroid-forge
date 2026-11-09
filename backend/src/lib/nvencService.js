@@ -176,12 +176,11 @@ async function patchMediaCodecsXml(containerId) {
   fs.unlinkSync(tmpPath);
 }
 
-// Stage 3: same boot flag hwenc/hwdec need (androidboot.use_redroid_c2=1, see
-// codec2Service.js's own REQUIRED_BOOT_FLAGS comment) -- it is a property of the official
-// redroid image's own init script, not of VA-API specifically, reused as-is. Plus the bind for
-// this module's own daemon socket.
+// Stage 3: the bind for this module's own daemon socket. The androidboot.use_redroid_c2=1 boot
+// flag this used to add here (shared with hwenc/hwdec) is now part of every instance's base cmd
+// regardless of modules -- see routes/instances.js's comment, and CHANGELOG.md's v0.7.1 entry.
 function prepareCreate() {
-  return { binds: [nvencAccel.daemonBind()], cmd: codec2Service.REQUIRED_BOOT_FLAGS };
+  return { binds: [nvencAccel.daemonBind()], cmd: [] };
 }
 
 async function ensureHostInfraReady() {

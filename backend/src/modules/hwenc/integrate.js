@@ -40,7 +40,6 @@ async function ensureRuntimeReady(containerId, ctx = {}) {
 
 module.exports = {
   prepareCreate, integrate, ensureHostInfraReady, ensureRuntimeReady,
-  REQUIRED_BOOT_FLAGS: svc.REQUIRED_BOOT_FLAGS,
 };
 
 if (require.main === module) {

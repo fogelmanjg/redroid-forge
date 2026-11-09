@@ -107,10 +107,10 @@ LAST_DEVICE="$SELECTED"
 LAST_BITRATE="$BITRATE"
 EOF
 
-# --audio-codec=aac: redroid has no Opus encoder, and opus is scrcpy's default -- without
-# this, audio silently fails (or scrcpy exits with "Failed to initialize audio/opus").
-# See docs/SCRCPY-TIPS.md for this and other first-run gotchas (hwdec, codec, bitrate).
-SCRCPY_ARGS=(-s "$TARGET" --audio-codec=aac)
+# No --audio-codec override: scrcpy's own default (Opus) works since v0.7.1 -- it used to be
+# forced to aac here because redroid had no Opus encoder registered. See docs/SCRCPY-TIPS.md for
+# this and other first-run gotchas (hwdec, codec, bitrate).
+SCRCPY_ARGS=(-s "$TARGET")
 [ "$BITRATE" != "default (8M)" ] && SCRCPY_ARGS+=(--video-bit-rate="$BITRATE")
 # shellcheck disable=SC2206 # intentional word-splitting of user-provided extra flags
 [ -n "${SCRCPY_EXTRA_ARGS:-}" ] && SCRCPY_ARGS+=($SCRCPY_EXTRA_ARGS)

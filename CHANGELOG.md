@@ -21,6 +21,28 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-11-09
+
+### Fixed
+
+- Opus audio (scrcpy's own default codec) failed on every instance with `Failed to initialize
+  audio/opus` / `NAME_NOT_FOUND` -- a real bug, investigated in depth on 31/10/2026
+  (`MediaCodec.createEncoderByType` traced, `mediaswcodec` `strace`d, HAL registration checked)
+  without finding the cause. Root-caused today by diffing a full `getprop` dump between a working
+  and a failing instance: the only relevant difference was `ro.boot.use_redroid_c2` (a read-only
+  boot-time property), which triggers the official image's own `/vendor/bin/redroid.c2.sh` --
+  nothing but two `setprop`s (`debug.stagefright.ccodec=4`,
+  `debug.stagefright.c2inputsurface=-1`). It used to be added only by the `hwenc`/`hwdec`/`nvenc`
+  modules, on the mistaken assumption that it was VA-API-specific -- it is not: isolated in a
+  disposable container with zero modules and default `gpuMode`, confirmed purely additive
+  (`scrcpy --list-encoders` before/after: same OMX-named aliases stay working exactly as before,
+  plus the native `c2.android.*` entries, HEVC, AV1, and Opus encode, which has no OMX-era
+  software encoder to fall back to -- the actual reason this was the one codec that failed while
+  AAC/FLAC worked). Made a default for every instance regardless of modules
+  (`routes/instances.js`); `hwenc`/`hwdec`/`nvenc` no longer contribute it themselves.
+  `scripts/connect.sh`/`.ps1` no longer force `--audio-codec=aac` -- scrcpy's own default (Opus,
+  lower latency/bitrate) now works as-is.
+
 ## [0.7.0] - 2026-11-09
 
 ### Added

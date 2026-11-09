@@ -73,8 +73,10 @@ Same shape as `hwenc`/`codec2Service.js`, implemented in `backend/src/lib/nvencS
 sharing only the generic Codec2/`media_codecs.xml` plumbing, reused via plain imports):
 
 - **`prepareCreate()`** (stage 3): the bind for this module's own daemon socket
-  (`nvencAccel.daemonBind()`, mounted at the fixed path the guest component dials, `/dev/venus`)
-  plus the same `androidboot.use_redroid_c2=1` boot flag hwenc/hwdec need.
+  (`nvencAccel.daemonBind()`, mounted at the fixed path the guest component dials, `/dev/venus`).
+  The `androidboot.use_redroid_c2=1` boot flag this used to contribute too (shared with
+  hwenc/hwdec) is now part of every instance's base cmd regardless of modules — see
+  `CHANGELOG.md`'s v0.7.1 entry.
 - **`integrate(containerId)`** (stage 4): copies the AOSP-built service into `/vendor` (same
   `REDROID_NVENC_ARTIFACTS_DIR`-rooted pattern as `REDROID_HWENC_ARTIFACTS_DIR`) and adds
   `c2.hardware.encoder.h264` to `/vendor/etc/media_codecs.xml` if it isn't there yet — same entry

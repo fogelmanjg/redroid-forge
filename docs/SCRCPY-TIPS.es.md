@@ -13,19 +13,20 @@ se usan. Referencia completa:
 
 | Síntoma | Por qué | Solución |
 |---|---|---|
-| Sin audio, o scrcpy imprime `Failed to initialize audio/opus` | El codec de audio default de scrcpy es **Opus**, y redroid no tiene encoder de Opus | Agregar `--audio-codec=aac` (ya es el default en `scripts/connect.sh`/`.ps1`) |
 | El audio anda y después se corta solo, el video sigue | La captura de audio falló después de arrancar; por defecto scrcpy no lo trata como error fatal | Agregar `--require-audio` si preferís que falle en vez de seguir sin sonido |
 | Nada de audio, con ningún codec | La captura de audio necesita Android 11+; está deshabilitada en imágenes más viejas | Nada que hacer — usar `--no-audio` y no perseguirlo |
 | Video entrecortado, errores de decodificación, o scrcpy cae solo a software | El decode por hardware (`--hwdec=auto`, el default) falló para esa combinación de GPU/driver | Probar `--hwdec=disabled` (decode por software directo) |
 | Imagen pixelada/bloques, o la conexión no llega | El bitrate default es 8 Mbps — demasiado para un link lento/compartido | `--video-bit-rate=4M` o `2M` (los scripts de conexión ya lo ofrecen como opción de menú) |
 | Latencia alta, se siente demorado | H.265 cuesta más latencia que H.264 por una ganancia de calidad marginal acá | Quedarse con el default `--video-codec=h264` |
 
-**Verificado en instancias redroid reales** (con `scrcpy --list-encoders`, chequeado contra una
-imagen Android 11 y una Android 15): los únicos encoders de audio presentes son **AAC** y
-**FLAC** — no hay ningún encoder de Opus ni Vorbis, en ninguna de las dos versiones. Si
-`--audio-codec=aac` no alcanza por algún motivo, `--audio-codec=raw` (PCM sin comprimir) es un
-fallback que no necesita ningún encoder del dispositivo, a costa de ancho de banda. Encoders de
-video presentes: `h264`, `vp8`, `vp9` (sin h265/av1).
+**El audio Opus (el default propio de scrcpy) anda de entrada desde v0.7.1** — verificado en vivo
+con una grabación real, confirmada válida con `ffprobe`. Antes fallaba con `Failed to initialize
+audio/opus` porque `--list-encoders` solo mostraba los alias "hybrid" con nombre OMX (AAC/FLAC,
+sin Opus); el fix (convertir `androidboot.use_redroid_c2=1` en un boot flag default para toda
+instancia, ver `CHANGELOG.md`) también suma encoders de video HEVC/AV1, puramente encima de lo que
+ya andaba — si todavía no te llega audio, es alguna otra fila de esta tabla, no esto.
+`--audio-codec=raw` (PCM sin comprimir) sigue siendo un fallback que no necesita ningún encoder
+del dispositivo, a costa de ancho de banda.
 
 ## Atajos que vale la pena conocer (MOD = Alt izquierdo **o** Super/Win izquierdo, por defecto)
 

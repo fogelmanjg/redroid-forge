@@ -315,6 +315,21 @@ router.post('/', async (req, res) => {
       `androidboot.redroid_dpi=${display.dpi}`,
       `androidboot.redroid_fps=${display.fps}`,
       `androidboot.redroid_gpu_mode=${img.gpuMode}`,
+      // Triggers the official image's own /vendor/bin/redroid.c2.sh (Android 15; harmless no-op
+      // otherwise), which just does `setprop debug.stagefright.ccodec 4` +
+      // `setprop debug.stagefright.c2inputsurface -1`. Used to be added only by hwenc/hwdec/nvenc
+      // (see codec2Service.js's old REQUIRED_BOOT_FLAGS) on the mistaken assumption that it was
+      // VA-API-specific -- confirmed 09/11/2026, by diffing a working vs. a failing instance's
+      // full `getprop` output and then isolating it in a throwaway container with no modules at
+      // all, that it is a plain software-codec switch: with it OFF (today's default for anyone
+      // not using hwenc/hwdec/nvenc), `scrcpy --list-encoders` only shows the OMX-named "hybrid"
+      // aliases (h264/vp8/vp9/aac/flac); with it ON, the same names are still there (nothing
+      // removed or renamed) plus the native c2.android.* entries AND codecs with no OMX alias at
+      // all -- HEVC, AV1, and Opus encode (no software Opus encoder ever shipped as OMX). Opus
+      // specifically needs this: it is the only reason `scripts/connect.sh`/`.ps1` used to force
+      // `--audio-codec=aac` (see CHANGELOG v0.7.1). Made a default here instead of staying
+      // module-gated.
+      'androidboot.use_redroid_c2=1',
     ];
 
     // Stage 3 (moduleRunner.js): every required module that declares "etapa"/
@@ -773,6 +788,8 @@ router.post('/:id/display', async (req, res) => {
       `androidboot.redroid_dpi=${display.dpi}`,
       `androidboot.redroid_fps=${display.fps}`,
       `androidboot.redroid_gpu_mode=${img.gpuMode}`,
+      // See the sibling cmd array above (the fresh-create path) for why this is here.
+      'androidboot.use_redroid_c2=1',
     ];
     const createReq = await moduleRunner.prepareCreate(requiredModuleIds);
     binds.push(...createReq.binds);

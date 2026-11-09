@@ -1153,18 +1153,36 @@ mechanism is picked up again (section 8 of `REQUIREMENTS.md`), not before.
   - *Alternative without a VPN:* private DNS / host network-level filtering (blocking by domain, without
     per-app granularity).
   - Per-app rules: decide whether they are stored in the module's manifest or per instance.
-- **More audio codecs (idea, 06/10/2026).** Today audio over scrcpy only works with `--audio-codec=aac`; the
-  default (opus) fails. scrcpy offers opus, aac, flac and raw, so the limit is in the encoders the Android
-  image exposes, not in scrcpy. It is not for the first version.
-  - *Prior check (~5 min, on the jgustavo46 instance):* scrcpy's log with opus and `dumpsys media.codec`, to
-    confirm why it fails. Unverified hypothesis: the official image's `media_codecs.xml` does not register
-    the `c2.android.opus.encoder` encoder (AOSP ships it as software), just as happened with the decoders.
-  - *If that is it:* it is registered from the integration module when the instance is created (the same
-    mechanism as `addCodecsToXml` for the decoders), without a custom image. With opus as the default (lower
-    latency and bitrate than aac).
-  - `raw` needs no encoder (more bandwidth; useful on a LAN and for diagnostics). `flac` is an AOSP software
-    encoder: test whether it is registered.
-  - No hardware acceleration: the CPU cost of audio is negligible.
+- ~~**More audio codecs (idea, 06/10/2026).**~~ **RESOLVED 09/11/2026.** The actual cause was not what
+  the hypothesis below guessed (not a missing `media_codecs.xml` registration -- `c2.android.opus.encoder`
+  was already declared, both the hypothesis and a much deeper 31/10 investigation that tried
+  `MediaCodec.createEncoderByType` directly and even `strace`d `mediaswcodec` found the same
+  `NAME_NOT_FOUND` either way). Found by diffing a full `getprop` dump between an instance where Opus
+  worked and one where it didn't: the only relevant difference was `ro.boot.use_redroid_c2`, a read-only
+  boot-time property. Isolated completely in a disposable container (official image, zero modules, default
+  `gpuMode`, only this one boot flag passed) -- it triggers the official image's own
+  `/vendor/bin/redroid.c2.sh`, which does nothing but `setprop debug.stagefright.ccodec 4` +
+  `setprop debug.stagefright.c2inputsurface -1`. It used to be added only by `hwenc`/`hwdec`/`nvenc`
+  (mistakenly assumed to be VA-API-specific); it is a plain software-codec switch with no such
+  dependency, confirmed purely additive via a before/after `scrcpy --list-encoders` diff (same
+  OMX-named aliases stay, plus the native `c2.android.*` names, HEVC, AV1, and Opus encode -- nothing
+  removed or renamed). Made a default boot flag for every instance in v0.7.1 instead of staying
+  module-gated.
+  - <details><summary>Original idea (06/10/2026), kept for context</summary>
+    Today audio over scrcpy only works with `--audio-codec=aac`; the default (opus) fails. scrcpy offers
+    opus, aac, flac and raw, so the limit is in the encoders the Android image exposes, not in scrcpy. It
+    is not for the first version.
+    - *Prior check (~5 min, on the jgustavo46 instance):* scrcpy's log with opus and `dumpsys media.codec`,
+      to confirm why it fails. Unverified hypothesis: the official image's `media_codecs.xml` does not
+      register the `c2.android.opus.encoder` encoder (AOSP ships it as software), just as happened with
+      the decoders.
+    - *If that is it:* it is registered from the integration module when the instance is created (the same
+      mechanism as `addCodecsToXml` for the decoders), without a custom image. With opus as the default
+      (lower latency and bitrate than aac).
+    - `raw` needs no encoder (more bandwidth; useful on a LAN and for diagnostics). `flac` is an AOSP
+      software encoder: test whether it is registered.
+    - No hardware acceleration: the CPU cost of audio is negligible.
+    </details>
 - **Zero-copy decode and 4K at 60 fps (decided 06/10/2026: after the first complete functional version, like
   the audio codecs).** Today the frame goes from the GPU to RAM and is copied into gralloc; at 1080p that is
   more than enough (>200 fps, ~3x less CPU than software), but 4K has a ceiling of ~55 fps because of the

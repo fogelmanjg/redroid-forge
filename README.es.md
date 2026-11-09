@@ -181,7 +181,7 @@ máquina en la red que tenga scrcpy y `adb`:
 
 ```bash
 adb connect <ip-del-server>:<adbPort>
-scrcpy -s <ip-del-server>:<adbPort> --audio-codec=aac
+scrcpy -s <ip-del-server>:<adbPort>
 ```
 
 Esto sirve para el caso de reusar una notebook vieja + TV como "cliente" liviano: la notebook

@@ -21,9 +21,11 @@ second argument, `{ display: { width, height } }`.
   `moduleManifests.js` scans both locations, see the comment of `loadAll()` there.
 - **`integrate.js`** — exposes one hook per stage, with the fixed name `moduleRunner.js` expects for each
   (see `STAGE_EXPORT_NAME` there):
-  - `prepareCreate()` (stage 3): what to add to `binds`/`cmd` before `docker create` — the bind of the VA-API
-    daemon's socket and the boot flag `androidboot.use_redroid_c2=1`. It used to live hardcoded by hand in
-    `instances.js`; `REQUIRED_BOOT_FLAGS` was exported but nobody read it.
+  - `prepareCreate()` (stage 3): what to add to `binds`/`cmd` before `docker create` — just the bind of the
+    VA-API daemon's socket now. The `androidboot.use_redroid_c2=1` boot flag it used to contribute here
+    moved to every instance's base cmd in `routes/instances.js` (09/11/2026) once it turned out to be a
+    plain software-codec switch (it also unlocks Opus audio encode), not something specific to this
+    module — see `CHANGELOG.md`'s v0.7.1 entry.
   - `integrate(containerId, ctx)` (stage 4): copies the VA-API Codec2 component into the `/vendor` of a
     freshly created instance (not started yet) and registers its encoder and decoders. It can also be run
     on its own for manual debugging (`node integrate.js <containerId>`).

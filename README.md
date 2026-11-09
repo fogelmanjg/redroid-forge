@@ -178,7 +178,7 @@ scrcpy and `adb`:
 
 ```bash
 adb connect <server-ip>:<adbPort>
-scrcpy -s <server-ip>:<adbPort> --audio-codec=aac
+scrcpy -s <server-ip>:<adbPort>
 ```
 
 This is useful for reusing an old laptop + TV as a light "client": the laptop only runs `scrcpy`

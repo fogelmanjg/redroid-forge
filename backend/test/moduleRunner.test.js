@@ -269,9 +269,10 @@ test('moduleRunner: a required module without an "entry" (the pure contract modu
 // effectively finds and loads backend/src/modules/hwenc/integrate.js.
 test('moduleRunner.prepareCreate: real hwenc module, stage 3 (the only hook without child_process/docker)', () => withRealManifests(async () => {
   const hwAccel = require('../src/lib/hwAccel');
-  const { REQUIRED_BOOT_FLAGS } = require('../src/modules/hwenc/integrate');
   const result = await moduleRunner.prepareCreate(['hwenc']);
-  assert.deepEqual(result, { binds: [hwAccel.daemonBind()], cmd: REQUIRED_BOOT_FLAGS });
+  // cmd: [] -- androidboot.use_redroid_c2=1 moved to every instance's base cmd (see
+  // routes/instances.js), it is no longer this module's own contribution (v0.7.1).
+  assert.deepEqual(result, { binds: [hwAccel.daemonBind()], cmd: [] });
 }));
 
 // Same, for the sibling hwdec module (decode) -- covers that its own manifest/entry is
@@ -279,9 +280,8 @@ test('moduleRunner.prepareCreate: real hwenc module, stage 3 (the only hook with
 // codec2Service.prepareCreate(), see both modules' integrate.js).
 test('moduleRunner.prepareCreate: real hwdec module, stage 3 (same shared prepareCreate as hwenc)', () => withRealManifests(async () => {
   const hwAccel = require('../src/lib/hwAccel');
-  const { REQUIRED_BOOT_FLAGS } = require('../src/lib/codec2Service');
   const result = await moduleRunner.prepareCreate(['hwdec']);
-  assert.deepEqual(result, { binds: [hwAccel.daemonBind()], cmd: REQUIRED_BOOT_FLAGS });
+  assert.deepEqual(result, { binds: [hwAccel.daemonBind()], cmd: [] });
 }));
 
 test('moduleRunner.watchdogModules: returns only the stage-7 modules among the given ids', () => withFixtureModules([
