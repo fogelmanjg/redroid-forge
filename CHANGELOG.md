@@ -21,17 +21,28 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-11-09
+
 ### Added
 
 - `hwenc`/`hwdec`/`redroid-gralloc-fix`: Android 11 (and, by AOSP source-level inspection, 12/13)
   support, via a HIDL port of the Codec2 VA-API component (AIDL does not exist before Android 14)
   plus a `dma_heap` fallback for `libion.so` (legacy `/dev/ion` does not exist on modern host
   kernels). Validated end-to-end through the real instance API -- not a hand-patched container --
-  on AMD (Ryzen 5700G/Renoir) only. Intel is explicitly untested for this variant and expected to
-  fail or corrupt the picture, not merely unverified (the same class of hand-written-VA-API-
-  consumer bug as the original Intel P-frame issue this project already hit elsewhere), so the
-  create-instance dialog now warns -- never blocks -- when it detects Intel together with this
-  variant.
+  on both AMD (Ryzen 5700G/Renoir) and Intel (Iris Xe). Intel on this HIDL path hits the exact
+  same malformed-bitstream bug (`Overread SPS by N bits`) as the AIDL/daemon.c path on Android 15,
+  confirmed to be the same underlying Intel/iHD driver issue -- fixed the same way (the `ffmpeg`
+  encode backend), already covered by the create-instance dialog's existing encode-backend
+  warning, no separate HIDL-specific one needed. Android 12/13 are assumed to work the same way
+  (same AOSP-source gap, same component), not separately tested yet.
+- `gapps`/`aurora-store`/`arm-translation`: extended to Android 11 (the `x86_64-30_r10` SDK
+  system image) alongside the existing Android 15 one -- plain ext4 partitions instead of erofs,
+  a few renamed/missing file paths in the gapps set, and an older, pre-"berberis"
+  `ndk_translation` generation for `arm-translation`. Confirmed end to end on real hardware
+  (Iris Xe/host): gapps boots and signs in, aurora-store installs, and `arm-translation` runs a
+  real ARM64-only app correctly. None of these three combinations are in the known-combinations
+  registry yet -- manifests document them as locally-extracted, unsupported-combination packages
+  for now.
 
 ### Fixed
 
@@ -39,6 +50,20 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
   `setprop` could apply with no error and then get silently reset moments later by a later boot
   step, because the readiness check used (`/data/local/tmp` existing) was not the same thing as
   boot actually finishing. It now waits for `sys.boot_completed=1` first.
+- `hwenc`: dropped the stale, Android-11-HIDL-specific Intel risk warning (`hidlIntelRisk`) now
+  that Intel is confirmed working there with the `ffmpeg` encode backend -- superseded by the
+  more general `encodeBackendRisk` the create-instance dialog already shows.
+
+### Security
+
+- Closed a loopback-auth bypass: a local reverse proxy (e.g. `plenum-caddy`, via manual routes)
+  relaying external traffic to this app's own loopback address made every relayed request look,
+  at the TCP level, identical to a trusted local tool (like `scrcpy-redroid.sh`) -- so visitors
+  arriving through that route silently got `NONE_MODE_USER` regardless of `AUTH_MODE`, never
+  asked to log in. The loopback bypass now also requires the absence of an `X-Forwarded-For`
+  header -- a proxy relaying someone else's traffic always adds that header; a tool running
+  directly on this host never does, and nothing off-host can set it here since it can't reach
+  `127.0.0.1` in the first place.
 
 ## [0.6.3] - 2026-11-08
 
