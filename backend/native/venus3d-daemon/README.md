@@ -52,6 +52,16 @@ See `venus3d-daemon.service.example` for the systemd unit (same shape as
 
 ## Known issue: content-dependent texture corruption on the RTX 4060 (01/11/2026)
 
+**Update (2026-11-09):** guest artifacts for this module had gone missing everywhere (not on the
+fleet, not on GitHub, not in the 4TB backup) and were rebuilt from source and published as
+[`redroid-nvidia` `v1.0.0`](https://github.com/fogelmanjg/redroid-nvidia/releases/tag/v1.0.0) —
+see its `DEVLOG.md`, 2026-11-09 entry, for the rebuild. Re-tested live on both GPUs with this
+rebuilt artifact set: the GTX 1050 Ti stayed clean end to end. This bug still reproduces on the
+RTX 4060, but watched live over a real session instead of inferred from a game's automated
+screens, it's **rare and self-resolves within a couple of frames** — noticeably milder than the
+description below, which came from CIFI's own heavy, automated content churn. Root cause below is
+still unresolved either way.
+
 Real app testing on jgustavo48 (RTX 4060) with a real game (CIFI, a Unity idle game) found two
 related symptoms that don't show up on simple screens (login, static text) but do on
 content-heavy ones (a dialog with its own icon/texture, a screen with lots of simultaneous

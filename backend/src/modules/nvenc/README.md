@@ -151,6 +151,20 @@ daemon's own handling of them needed to branch.
   static screen) produced 144-frame and 58-frame clips, both `ffprobe`-valid; sampled frames
   (including mid-animation, app drawer half-open) are crisp and correct, zero tiling/corruption.
   Not yet tried on an RTX 4060.
+- **Re-validated on both GTX 1050 Ti and RTX 4060, 09/11/2026**, after the `venus3d` guest
+  artifacts (missing everywhere, see that module's own README) were rebuilt and published as
+  [`redroid-nvidia` `v1.0.0`](https://github.com/fogelmanjg/redroid-nvidia/releases/tag/v1.0.0):
+  clean on the 1050 Ti; real NVENC encode confirmed live on the 4060 too (`NvencEncComponent`
+  logging fresh frames, `Vulkan device initialized: 1`), with `venus3d`'s own known texture
+  artifact present but rare/self-resolving in real use, not a video-encode issue. **New, real,
+  unresolved finding from the same session**: `c2.android.opus.encoder` does not register at all
+  in this exact `nvenc`+`venus3d` combination, on either GPU — `ro.boot.use_redroid_c2=1` and
+  `debug.stagefright.ccodec=4` are both set correctly, and manually restarting `mediaswcodec`
+  doesn't fix it (ruling out a startup-ordering race with those props). AAC/FLAC still register
+  and work. `nvenc` alone (no `venus3d`, `gpuMode=guest`) was not re-checked for this regression
+  this session — unknown whether it's `venus3d`-specific or triggered by any second AIDL
+  `IComponentStore` registration. Not root-caused; see `redroid-nvidia/DEVLOG.md`'s 2026-11-09
+  entry for the investigation so far.
 - The daemon (`backend/native/nvenc-daemon/nvenc_scm_daemon`) is currently running on jgustavo47
   as a plain background process, **not yet installed as the systemd unit** — `install`ing
   `nvenc-daemon.service.example` into `/etc/systemd/system/` was blocked by the host's own
