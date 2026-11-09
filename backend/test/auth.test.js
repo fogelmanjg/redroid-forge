@@ -120,6 +120,13 @@ test('mode "local": a loopback request bypasses auth entirely, same fixed user a
   }
 });
 
+test('mode "local": a loopback request carrying X-Forwarded-For (a reverse proxy relaying someone else) does NOT bypass auth', () => {
+  const auth = freshAuth('local');
+  const req = { headers: { 'x-forwarded-for': '100.73.0.46' }, ip: '127.0.0.1' };
+  auth.attachUser(req, {}, () => {});
+  assert.equal(req.user, undefined);
+});
+
 test('mode "local": a non-loopback request with no cookie still needs one (the bypass is not just "no cookie")', () => {
   const auth = freshAuth('local');
   const req = { headers: {}, ip: '192.168.1.50' };

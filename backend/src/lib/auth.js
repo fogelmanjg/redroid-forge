@@ -111,13 +111,29 @@ function readCookie(req, name) {
 // never sets `trust proxy`), so this cannot be faked by anything that is not actually loopback.
 const LOOPBACK_ADDRESSES = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
 
+// Real incident, 08/11/2026: a loopback-sourced connection is no longer unique to a trusted local
+// tool once a reverse proxy on THIS SAME HOST is pointed at this app's own loopback address too
+// (Caddy, via plenum-caddy's manual-routes, dialing 127.0.0.1 -- see docs/ROADMAP.md's Phase 9
+// notes and settings.js's appBindHosts) -- that proxied connection looks, at the TCP level,
+// exactly like scrcpy-redroid.sh's own direct curl, so every visitor arriving through such a
+// route was silently getting NONE_MODE_USER instead of ever being asked to log in, regardless of
+// AUTH_MODE. Caddy's reverse_proxy adds its own `X-Forwarded-For` to every request it relays --
+// its mere PRESENCE (never its value, which stays untrusted for identity, same reasoning as ever)
+// is what distinguishes "this loopback connection is relaying somebody else's traffic" from "this
+// loopback connection IS the request, from a tool running on this host" -- not spoofable by
+// anything outside this host either, for the same reason LOOPBACK_ADDRESSES itself is not: nothing
+// not already on this host can dial 127.0.0.1 to attach that header here in the first place.
+function isTrustedLocalTool(req) {
+  return LOOPBACK_ADDRESSES.has(req.ip) && !req.headers['x-forwarded-for'];
+}
+
 // Sets req.user from the session cookie (local/oidc), the fixed bypass user (none), or the same
-// bypass user for a loopback request regardless of mode. Runs on every request, including
-// unauthenticated ones -- it never itself rejects a request, that is requireAuth/
+// bypass user for a genuinely local loopback request regardless of mode. Runs on every request,
+// including unauthenticated ones -- it never itself rejects a request, that is requireAuth/
 // requireCapability's job, so that e.g. GET /api/auth/me can answer "not logged in" instead of
 // 401ing before the frontend even gets to render a login screen.
 function attachUser(req, res, next) {
-  if (AUTH_MODE === 'none' || LOOPBACK_ADDRESSES.has(req.ip)) { req.user = NONE_MODE_USER; return next(); }
+  if (AUTH_MODE === 'none' || isTrustedLocalTool(req)) { req.user = NONE_MODE_USER; return next(); }
   const payload = session.verify(readCookie(req, session.COOKIE_NAME));
   if (payload) req.user = { id: payload.uid, role: payload.role, username: payload.username };
   next();

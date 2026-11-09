@@ -49,3 +49,68 @@ once without colliding).
 
 See `venus3d-daemon.service.example` for the systemd unit (same shape as
 `nvenc-daemon.service.example`).
+
+## Known issue: content-dependent texture corruption on the RTX 4060 (01/11/2026)
+
+Real app testing on jgustavo48 (RTX 4060) with a real game (CIFI, a Unity idle game) found two
+related symptoms that don't show up on simple screens (login, static text) but do on
+content-heavy ones (a dialog with its own icon/texture, a screen with lots of simultaneous
+draws): some textures render as solid black (missing), and text/UI elements show a mild-to-severe
+double-exposure/shear artifact. Confirmed via `gpuMode=guest` + `nvenc` alone (no venus3d): **zero
+corruption, zero missing textures** — isolates this to venus3d's own rendering, not to nvenc's
+capture/encode path (nvenc only encodes whatever SurfaceFlinger already composited).
+
+**Ruled out as a build regression**: swapped jgustavo48's `virgl_test_server` +
+`libvirglrenderer.so.1` for jgustavo47's exact, already-proven-working binaries (byte-for-byte,
+md5-verified) — same corruption still reproduced on content-heavy screens on the 4060. Simple
+screens (login, "offline income") looked clean or near-clean with either binary. This points at
+a real, content/load-dependent NVIDIA driver gap specific to the RTX 4060 (Ada) — not a bug in
+this project's own code — consistent with the already-documented VA-space mapping bug
+(`compatibleCon`/manifest notes, NVIDIA's own open-gpu-kernel-modules issues #1364/#1165/#1140/#1396),
+though this specific texture-corruption signature hasn't been tied to one of those issue numbers
+yet.
+
+Host currently left with jgustavo47's binaries in place (`/opt/redroid-forge/venus3d-daemon/`) —
+not worse than this project's own from-source build, and a known-good baseline to keep testing
+against.
+
+**Not yet done, next concrete step**: instrument `virgl_test_server`/`vtest_renderer.c` (or
+Venus's own `vkr_queue_sync_submit`/`vtest_submit_cmd2` fence-bookkeeping, per
+`redroid-nvidia/DEVLOG.md`'s 2026-09-24 race-condition lead) specifically around whatever command
+sequence a dialog-with-new-texture triggers, to catch the real moment the corruption is
+introduced — not yet attempted.
+
+### The GTX 1050 Ti had this exact symptom too, and it got fixed (worth re-checking before anything else)
+
+The user's own recollection (01/11/2026): the 1050 Ti showed this same "textures missing /
+corrupted under real content" symptom at some point, and it was fixed — possibly as a side effect
+of something that wasn't aimed at this specific bug ("de rebote"). Worth keeping in mind every
+time this resurfaces: NVIDIA's own undocumented behavior here means a fix found for one real
+problem can silently close a different one, so re-reading old fixes with fresh eyes is cheap and
+has already paid off once.
+
+The best-documented candidate is `redroid-nvidia/DEVLOG.md`'s 2026-09-26 "checkerboard bug,
+solved" entry (five real bugs fixed in `nvenc_scm_daemon.c`/`vtest_gpu_encode.c`, the NVENC
+*capture* daemon, not venus3d's own renderer): wrong DRM modifier candidate picked (took the
+first of six instead of probing which one the driver actually assigned), `rowPitch` computed by
+arithmetic instead of read back from the real image layout, display-width confused with the
+buffer's real (padded) width, a reported `modifier == 0` wrongly overridden by a guessed non-linear
+one instead of trusted as genuinely linear, and `copy_image`'s own modifier wrongly tied to the
+source's. After these, DEVLOG explicitly confirms (2026-09-26, "cross-machine GPU/driver
+comparison" entry) the 1050 Ti came out clean end to end.
+
+**Checked tonight whether `vtest_gpu_alloc.c` (this project's own venus3d code path — this is what
+allocates CIFI's own GPU-only render-target textures, the actual thing going black) has an
+analogous, unfixed version of that same bug class**: it does not. It already probes the real
+candidate list via `VkImageDrmFormatModifierListCreateInfoEXT` + reads back the driver's real
+choice via `vkGetImageDrmFormatModifierPropertiesEXT` (the "wrong turn 1" fix), reads the real
+`rowPitch` via `vkGetImageSubresourceLayout` after binding (the "wrong turn 2" fix), and never
+conflates display width with buffer width (the "wrong turn 3" fix) — this file was ported from
+`waydroid-nvidia`'s own already-fixed vtest patches, not written fresh, so it inherited these three
+fixes from the start. **So the nvenc-capture fix doesn't translate here by simple analogy** — if
+the 1050 Ti's fix really is what's keeping it clean today, the mechanism must be something other
+than these three specific modifier/stride bugs (maybe the GEM-handle-leak fix, maybe the
+`force_idr` session-reset fix, maybe something in how `mediaswcodec`/the HIDL-vs-AIDL codec
+selection interacts with Venus being active at the same time — none of these three checked yet).
+Next time this comes up: check those three instead of re-deriving the modifier/stride reasoning
+again, since that specific angle is now ruled out.
