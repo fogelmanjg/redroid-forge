@@ -2796,10 +2796,6 @@ async function updateEncodeSelect({ select, optHwenc, optNvenc, status, imageId,
     // Polaris, legacy on Intel) -- shown, never blocked (same "warns, does not gate" philosophy
     // as docs/KNOWN-COMBINATIONS.md). The option stays enabled and selectable.
     setStatus(hwenc.encodeBackendWarning, 'warn-text');
-  } else if (!optHwenc.hidden && !optHwenc.disabled && hwenc.hidlIntelWarning) {
-    // Android 11-13 (HIDL variant) hwenc on Intel: only validated on AMD so far, real reason to
-    // expect failure (codec2Service.js's hidlIntelRisk) -- warned, not blocked, same posture.
-    setStatus(hwenc.hidlIntelWarning, 'warn-text');
   } else {
     setStatus(t('new.hwencOk', { vendor: hwenc.hostGpuVendor || nvenc.hostGpuVendor || '?' }), 'ok-text');
   }

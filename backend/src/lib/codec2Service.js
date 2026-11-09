@@ -427,32 +427,19 @@ async function ensureRuntimeReady(containerId, androidVersion) {
     : 'media.c2.hal.selection=aidl applied, mediaserver restarted');
 }
 
-// Android 11-13 (HIDL variant) hwenc/hwdec has only been validated on AMD (Ryzen 5700G/Renoir,
-// 08/11/2026) -- never on Intel. Worth a real warning, not just "untested": the HIDL path's
-// Codec2 component (VaapiEncComponent.cpp, in redroid-hwenc-rescue/android-11-13-hidl-amd-only)
-// is a hand-written VA-API consumer, structurally like tier5-vaapi-daemon's own hand-rolled
-// bitstream writer -- and THAT had a real, confirmed P-frame corruption bug on Intel/iHD (see
-// hwAccel.js's encodeBackendRisk) that was never fully fixed by hand, only worked around by
-// rewriting it against libavcodec. There is no reason to believe this separate component is
-// free of an analogous problem on Intel: it runs inside the container's own Codec2 framework,
-// a completely different code path from daemon.c (a host process), so that fix does not cover
-// it. Warn, do not block -- same "fuera de la base, no se bloquea" posture as everywhere else in
-// this project (docs/KNOWN-COMBINATIONS.md), and consistent with encodeBackendRisk's own choice.
-function hidlIntelRisk(androidVersion, vendor) {
-  if (variantFor(androidVersion) === 'hidl' && vendor === 'intel') {
-    return {
-      reason: 'el port HIDL de hwenc/hwdec para Android 11-13 solo fue validado en AMD (Ryzen '
-        + '5700G/Renoir) -- nunca se probo en Intel, y hay motivo concreto para esperar que '
-        + 'falle o corrompa el video (el mismo tipo de bug de P-frames en Intel/iHD que tuvo el '
-        + 'bitstream a mano de daemon.c, nunca resuelto del todo sin reescribirlo).',
-    };
-  }
-  return null;
-}
+// REMOVED 09/11/2026: this used to warn that the HIDL variant (Android 11-13) was only
+// validated on AMD and expected to fail/corrupt video on Intel -- the hand-written-VA-API-
+// consumer analogy to daemon.c's own P-frame bug. That analogy turned out to be literally true,
+// not just structurally similar: tested directly, Intel on this HIDL path hits the exact same
+// bitstream bug (`Overread SPS by N bits`) and the exact same fix (the `ffmpeg` encode backend)
+// as the AIDL/daemon.c path. Since hwAccel.encodeBackendRisk's Intel+legacy case already covers
+// this -- it is keyed on vendor+backend, not on which Codec2 variant (AIDL/HIDL) is in front of
+// it -- a second, HIDL-specific warning saying the same thing was redundant. Removed rather than
+// reworded; see redroid-hwenc's DEVLOG.md (2026-11-09 entry) for the actual test.
 
 module.exports = {
   ARTIFACTS_DIR, FILES, FILES_AIDL, FILES_HIDL, REQUIRED_BOOT_FLAGS, C2_ENCODER_NAME,
   variantFor, artifactsBaseDir,
   decodeSizeLimit, addCodecsToXml, patchMediaCodecsXml, installFiles,
-  prepareCreate, ensureHostInfraReady, ensureRuntimeReady, installIonDmaHeapFix, hidlIntelRisk,
+  prepareCreate, ensureHostInfraReady, ensureRuntimeReady, installIonDmaHeapFix,
 };

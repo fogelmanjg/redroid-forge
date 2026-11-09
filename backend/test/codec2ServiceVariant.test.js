@@ -5,7 +5,7 @@ const test = require('node:test');
 const assert = require('node:assert');
 const path = require('node:path');
 const {
-  variantFor, artifactsBaseDir, FILES_AIDL, FILES_HIDL, FILES, ARTIFACTS_DIR, hidlIntelRisk,
+  variantFor, artifactsBaseDir, FILES_AIDL, FILES_HIDL, FILES, ARTIFACTS_DIR,
 } = require('../src/lib/codec2Service');
 
 test('variantFor: below 14 is hidl, 14 and up (and anything unknown) is aidl', () => {
@@ -58,17 +58,7 @@ test('artifactsBaseDir: hidl gets its own subfolder, when ARTIFACTS_DIR is confi
   assert.strictEqual(artifactsBaseDir('hidl'), path.join(ARTIFACTS_DIR, 'android11-hidl'));
 });
 
-test('hidlIntelRisk: flagged on Intel for a HIDL-variant androidVersion (11-13) -- only validated on AMD so far', () => {
-  assert.ok(hidlIntelRisk(11, 'intel'));
-  assert.ok(hidlIntelRisk(12, 'intel'));
-  assert.ok(hidlIntelRisk(13, 'intel'));
-});
-
-test('hidlIntelRisk: not flagged on AMD -- the validated vendor for this variant', () => {
-  assert.strictEqual(hidlIntelRisk(11, 'amd'), null);
-});
-
-test('hidlIntelRisk: not flagged on Intel for the AIDL variant (14+) -- different, unrelated code path', () => {
-  assert.strictEqual(hidlIntelRisk(15, 'intel'), null);
-  assert.strictEqual(hidlIntelRisk(undefined, 'intel'), null);
-});
+// hidlIntelRisk itself was removed 09/11/2026 -- Intel on the HIDL path turned out to hit the
+// exact same bug (and fix) as Intel+legacy on the AIDL/daemon.c path, which
+// hwAccel.encodeBackendRisk already covered vendor+backend-generically. See codec2Service.js's
+// comment where the function used to be, and redroid-hwenc's DEVLOG.md (2026-11-09).
