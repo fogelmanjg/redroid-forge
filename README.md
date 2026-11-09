@@ -45,7 +45,8 @@ means validated with evidence on real hardware, not a guarantee.
 | **Access control** | ✅ | Three roles (admin/operator/viewer) with per-instance ownership. Pluggable: `none` (default, zero-friction), `local` (built-in accounts), `oidc` (any number of standard identity providers at once — Keycloak, Google, Plenum, another federation, ... — roles assigned here, never read from the provider), `both` (local accounts and OIDC on the same login screen). A local account can also be reached through a linked OIDC identity (opt-in, proven by logging into both at once — never by matching a claimed email). A setup wizard creates the first admin live from `none` mode, and a self-lockout guard keeps `local`/`both` from ever becoming a permanently closed door. Switching modes and adding/editing/removing OIDC providers can both be done live from the Identities panel — no `.env` edit needed — though a restart is still required to apply, same rule as every other setting in this app. |
 | **Network exposure control** | ✅ | The app and every instance bind to `127.0.0.1` only, by default — `redroid` itself has no access control of its own. Opt into any specific interface (or all of them) per instance and for the app itself, from the UI; Docker/container-internal interfaces (`docker0`, `br-*`, `veth*`, ...) are filtered out of that picker by default, with an admin override. |
 | **Doctor** | ✅ | Host diagnostics with the exact command to fix what's missing — it only diagnoses, never runs anything on its own. |
-| **Screen viewing** | ✅ | scrcpy connector scripts (`connect.sh`/`connect.ps1`), a port for viewing from an Android device itself, no bundled web viewer by design (see below). |
+| **Screen viewing** | ✅ | scrcpy connector scripts (`connect.sh`/`connect.ps1`), a port for viewing from an Android device itself. |
+| | 📝 planned | Bundled web viewer. |
 | **Federation** | 📝 planned | `jg-dashboard` and Plenum becoming consumers of this app via `oidc`, reusing each host's existing identity provider instead of a separate login. |
 | **Port knocking** | ✅ done | Per-instance, per-interface SPA (`fwknop`) gate for the ADB/scrcpy port, on top of the network controls above -- opened from the UI by an already-authenticated session, never by the connecting device. |
 
@@ -211,8 +212,11 @@ REDROID_FORGE_URL=http://<server-ip>:8080 scripts/connect.sh  # redroid-forge on
 powershell -File scripts\connect.ps1
 ```
 
-There is deliberately **no bundled web-based screen viewer** (no Caddy, no reverse proxy, no auth
-stack to set up) — the connector script plus a scrcpy client is the whole dependency. If you want
+There is **no bundled web-based screen viewer yet** — a planned feature, not shipped today. Until
+then, the connector script plus a scrcpy client is the whole dependency: no Caddy, no reverse
+proxy, no auth stack to set up on redroid-forge's side. That's not a statement that those are
+incompatible with it — a reverse proxy or auth layer in front of redroid-forge is entirely your
+own choice to run, redroid-forge just doesn't set one up or manage one for you. If you want
 a nicer interactive client instead of (or alongside) these scripts, take a look at
 [**scrcpy-manager**](https://git.liaima.dev/liaima/scrcpy-manager) (a terminal UI with mouse
 support, saved connection profiles, and multiple live scrcpy sessions at once) — a separate project
