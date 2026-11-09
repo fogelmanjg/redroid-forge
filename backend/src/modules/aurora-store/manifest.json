@@ -10,10 +10,12 @@
     "after the instance has booted, pushes the cached APK in and runs 'pm install' like any other user app -- no /system write, no effect on the instance's own first-boot image",
     "writes the same WebView command line the gapps module writes (--no-sandbox --single-process): Aurora's own login screen opens a WebView and crashes inside the container without it. Applied independently of whether gapps is also enabled. This REDUCES the isolation of the WebView of that instance",
     "pinned to 4.8.3, not the latest release: 4.8.4 crashes on its own app-list screens (a known Jetpack Compose bug in that release's UI rewrite)",
-    "depends on a community-run, reverse-engineered Play API that Google can break at any time -- much less solid a guarantee than the hash-pinned official SDK images gapps/arm-translation use"
+    "depends on a community-run, reverse-engineered Play API that Google can break at any time -- much less solid a guarantee than the hash-pinned official SDK images gapps/arm-translation use",
+    "Android 11 added 08/11/2026: unlike gapps, this module has no Android-version-specific logic at all (a plain 'pm install' of a downloaded APK, no /system partition layout to match) -- extending it is low-risk, but it had not actually been run on Android 11 as of this note"
   ],
   "compatibleCon": {
     "androidVersion": [
+      11,
       15
     ],
     "gpuMode": [
@@ -25,7 +27,7 @@
     6
   ],
   "entry": "./integrate.js",
-  "version": 1,
+  "version": 2,
   "i18n": {
     "es": {
       "licencia": "GPLv3 (https://github.com/whyorean/AuroraStore). Software libre: a diferencia de GApps/traducción ARM, redroid-forge la descarga e instala solo, no tenés nada que poner vos.",
@@ -35,7 +37,8 @@
         "después de que la instancia bootea, copia el APK cacheado adentro y corre 'pm install' como cualquier otra app de usuario -- sin escritura a /system, sin efecto sobre la imagen de primer arranque de la instancia",
         "escribe la misma línea de comandos de WebView que escribe el módulo gapps (--no-sandbox --single-process): la pantalla de login de Aurora abre un WebView y se cae dentro del contenedor sin eso. Se aplica independientemente de si gapps también está habilitado. Esto REDUCE el aislamiento del WebView de esa instancia",
         "fijado en 4.8.3, no el último release: 4.8.4 se cae en sus propias pantallas de lista de apps (un bug conocido de Jetpack Compose en el rediseño de UI de ese release)",
-        "depende de una API de Play de ingeniería inversa manejada por la comunidad, que Google puede romper en cualquier momento -- una garantía mucho menos sólida que las imágenes oficiales de SDK con hash fijado que usan gapps/traducción ARM"
+        "depende de una API de Play de ingeniería inversa manejada por la comunidad, que Google puede romper en cualquier momento -- una garantía mucho menos sólida que las imágenes oficiales de SDK con hash fijado que usan gapps/traducción ARM",
+        "Android 11 agregado 08/11/2026: a diferencia de gapps, este módulo no tiene ninguna lógica específica de versión de Android (un simple 'pm install' de un APK descargado, sin layout de partición /system que respetar) -- extenderlo es de bajo riesgo, pero no se había corrido realmente en Android 11 a la fecha de esta nota"
       ]
     }
   }

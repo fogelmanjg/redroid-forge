@@ -11,10 +11,12 @@
     "does NOT download anything and does NOT include any Google software: the files come from a folder of the host that you provide (REDROID_FORGE_GAPPS_DIR, by default backend/data/gapps)",
     "after every start it writes a WebView command line (--no-sandbox --single-process) and marks the device as provisioned: without it the Google sign-in screen crashes inside the container. This REDUCES the isolation of the WebView of that instance",
     "the instance is an uncertified device for Google: its Android ID (GSF) has to be registered by hand at https://www.google.com/android/uncertified within 48 hours of the first boot, or Google blocks GApps access on that instance. The Android ID is shown in the instance",
-    "Play services and the Play Store update themselves from Google after the first sign-in (hundreds of MB per instance): that traffic and those versions are Google's, not controlled by this project"
+    "Play services and the Play Store update themselves from Google after the first sign-in (hundreds of MB per instance): that traffic and those versions are Google's, not controlled by this project",
+    "Android 11 support (08/11/2026): extracted from Google's x86_64-30_r10 SDK system image with the same tool used for Android 15 -- product/system_ext there are plain ext4, not erofs, and 3 file names differ, both handled by the tool now. Not in the known-combinations registry yet, so it is injected as a locally-extracted, unsupported-combination package (still sha256-verified file by file): boots and signs in, not otherwise hardened"
   ],
   "compatibleCon": {
     "androidVersion": [
+      11,
       15
     ],
     "gpuMode": [
@@ -27,7 +29,7 @@
     6
   ],
   "entry": "./integrate.js",
-  "version": 2,
+  "version": 3,
   "i18n": {
     "es": {
       "licencia": "Propietaria (Google). redroid-forge no incluye, no aloja ni descarga estos archivos: los ponés vos y sos responsable de cumplir los términos de licencia de Google",
@@ -38,7 +40,8 @@
         "NO descarga nada y NO incluye software de Google: los archivos salen de una carpeta del host que ponés vos (REDROID_FORGE_GAPPS_DIR, por defecto backend/data/gapps)",
         "después de cada arranque escribe una línea de comandos para el WebView (--no-sandbox --single-process) y marca el dispositivo como aprovisionado: sin eso la pantalla de login de Google se cae dentro del contenedor. Esto REDUCE el aislamiento del WebView de esa instancia",
         "la instancia es un dispositivo no certificado para Google: su Android ID (GSF) hay que registrarlo a mano en https://www.google.com/android/uncertified dentro de las 48hs del primer boot, o Google bloquea el acceso a GApps en esa instancia. El Android ID se muestra en la instancia",
-        "Play services y la Play Store se actualizan solos desde Google después del primer login (cientos de MB por instancia): ese tráfico y esas versiones son de Google, no los controla este proyecto"
+        "Play services y la Play Store se actualizan solos desde Google después del primer login (cientos de MB por instancia): ese tráfico y esas versiones son de Google, no los controla este proyecto",
+        "Soporte Android 11 (08/11/2026): extraído de la imagen de sistema del SDK x86_64-30_r10 de Google con la misma herramienta usada para Android 15 -- product/system_ext ahí son ext4 planos, no erofs, y 3 nombres de archivo difieren, ambas cosas ya manejadas por la herramienta. Todavía no está en el registro de combinaciones conocidas, así que se inyecta como paquete extraído localmente sin soporte (igual verificado por sha256 archivo por archivo): bootea y loguea, sin más endurecimiento todavía"
       ]
     }
   }

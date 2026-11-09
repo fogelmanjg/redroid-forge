@@ -12,10 +12,13 @@
     "adds boot properties to the container (ro.dalvik.vm.native.bridge=libndk_translation.so and the ARM -> x86 instruction-set mapping): from then on Android installs and runs arm64 libraries of an app when it carries no x86_64 ones",
     "does NOT register ARM executables in the host kernel (binfmt_misc is shared by all the containers and the host): only apps (through the native bridge) are translated, not command-line ARM programs",
     "translated code is slower than native code (typically 2x to 5x more CPU for the app's native parts), and a few apps detect the translation and refuse to run",
-    "the files must come from the image x86_64-35-ext15_r01 of the SDK: the translator of the older images (r06-r09) makes Unity games crash inside it"
+    "the files must come from the image x86_64-35-ext15_r01 of the SDK: the translator of the older images (r06-r09) makes Unity games crash inside it",
+    "Android 11 added 09/11/2026, from the x86_64-30_r10 SDK image: an older, pre-\"berberis\" generation of ndk_translation -- it has no libberberis_exec_region.so and no cpuinfo.arm64.txt at all (checked file-by-file and with `strings`, genuinely absent, not renamed) and 2 fewer named files than the Android 15 package, offset by this image's lib64/arm64 folder itself carrying a couple more libraries -- still 82 files, not a partial/broken extraction. Not in the known-combinations database yet",
+    "Android 11 confirmed working end to end 09/11/2026 (real device, Iris Xe/host): an ARM64-only app (cifi) installs and runs correctly through this older generation. Loop Sort (Unity IL2CPP) still crashes trying to load, same as the known issue on the Android 15/ext15 package -- so that specific failure is not an ext15-era regression, both generations hit it"
   ],
   "compatibleCon": {
     "androidVersion": [
+      11,
       15
     ],
     "gpuMode": [
@@ -28,7 +31,7 @@
     4
   ],
   "entry": "./integrate.js",
-  "version": 2,
+  "version": 3,
   "i18n": {
     "es": {
       "nombre": "Traducción ARM (apps arm64 en x86_64)",
@@ -41,7 +44,9 @@
         "agrega propiedades de arranque al contenedor (ro.dalvik.vm.native.bridge=libndk_translation.so y el mapeo de conjunto de instrucciones ARM -> x86): desde ahí Android instala y corre las librerías arm64 de una app cuando no trae las x86_64",
         "NO registra ejecutables ARM en el kernel del host (binfmt_misc es compartido por todos los contenedores y el host): se traducen las apps (por el native bridge), no los programas ARM de línea de comandos",
         "el código traducido es más lento que el nativo (típicamente 2x a 5x más CPU en las partes nativas de la app), y unas pocas apps detectan la traducción y se niegan a correr",
-        "los archivos tienen que salir de la imagen x86_64-35-ext15_r01 del SDK: el traductor de las imágenes más viejas (r06-r09) hace que los juegos Unity se caigan dentro de él"
+        "los archivos tienen que salir de la imagen x86_64-35-ext15_r01 del SDK: el traductor de las imágenes más viejas (r06-r09) hace que los juegos Unity se caigan dentro de él",
+        "Android 11 agregado 09/11/2026, desde la imagen SDK x86_64-30_r10: una generación anterior de ndk_translation, previa a \"berberis\" -- no tiene libberberis_exec_region.so ni cpuinfo.arm64.txt en absoluto (verificado archivo por archivo y con `strings`, genuinemente ausente, no renombrado) y 2 archivos nombrados menos que el paquete de Android 15, compensado porque la carpeta lib64/arm64 de esta imagen trae un par más de librerías -- sigue siendo 82 archivos, no una extracción parcial/rota. Todavía no está en la base de combinaciones conocidas",
+        "Android 11 confirmado funcionando de punta a punta 09/11/2026 (hardware real, Iris Xe/host): una app ARM64-only (cifi) instala y corre bien a través de esta generación más vieja. Loop Sort (Unity IL2CPP) sigue crasheando al intentar cargar, igual que el problema ya conocido en el paquete de Android 15/ext15 -- así que esa falla puntual no es una regresión de ext15, las dos generaciones la tienen"
       ]
     }
   },

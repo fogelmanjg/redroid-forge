@@ -47,6 +47,20 @@ const IMAGES = {
         + ' (Loop Sort, deterministic). Use x86_64-35-ext15_r01.zip for the ARM translation; this image is still the validated one for GApps.',
     },
   },
+  // Android 11 (API 30): the gapps module only declared androidVersion 15 until this entry -- there was no
+  // package for Android 11 at all. Google still serves this one (not in the current sys-img2-1.xml index,
+  // same situation as the ext15 entry above, but still downloadable from the same URL).
+  'x86_64-30_r10-linux.zip': {
+    sha1: 'ead1babced6bdfaa8e641faeb6ed115ca603c4a9',
+    version: 'Android 11 (API 30) Google Play x86_64, r10',
+    origen: 'https://dl.google.com/android/repository/sys-img/google_apis_playstore/x86_64-30_r10-linux.zip',
+    ids: { gapps: 'gapps-sdk30-r10-x86_64', 'arm-translation': 'arm-translation-sdk30-r10-x86_64' },
+    // product/system_ext are plain ext4 here (not erofs, see extract.py), and a few file names
+    // differ from the API 35 set extract.py's FILES list was written against -- extract.py picks
+    // its FILES_30 variant and the package.json androidVersion off this.
+    apiLevel: 30,
+    androidVersion: 11,
+  },
 };
 const PROFILES = {
   gapps: { env: 'REDROID_FORGE_GAPPS_DIR', dir: 'gapps' },
@@ -72,7 +86,10 @@ async function main() {
 
   const image = IMAGES[path.basename(zip)];
   if (image && image.notes && image.notes[profile]) console.warn(`\n${image.notes[profile]}\n`);
-  const known = image ? { sha1: image.sha1, version: image.version, origen: image.origen, id: image.ids[profile] } : undefined;
+  const known = image ? {
+    sha1: image.sha1, version: image.version, origen: image.origen, id: image.ids[profile],
+    apiLevel: image.apiLevel, androidVersion: image.androidVersion,
+  } : undefined;
   const sha1 = await sha1File(zip);
   if (!known) {
     console.warn(`WARNING: ${path.basename(zip)} is not an image this tool was validated with (${Object.keys(IMAGES).join(', ')}). It will be tried anyway; the package will be reported as unsupported.`);
@@ -95,7 +112,7 @@ async function main() {
     '-v', `${out}:/out`,
     '-v', `${path.join(__dirname, 'sdk-extract', 'extract.py')}:/extract.py:ro`,
     'alpine:3.20',
-    'sh', '-c', 'apk add --no-cache python3 erofs-utils unzip >/dev/null && python3 /extract.py',
+    'sh', '-c', 'apk add --no-cache python3 erofs-utils e2fsprogs-extra unzip >/dev/null && python3 /extract.py',
   ], { stdio: 'inherit' });
   if (r.status !== 0) process.exit(r.status || 1);
   console.log(`\nFiles and package.json in ${out}. The ${profile} module verifies them before injecting.`);
