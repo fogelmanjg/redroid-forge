@@ -10,10 +10,12 @@
     "requires gpuMode=host -- this is what actually turns on the guest's Venus Vulkan driver instead of redroid's own software gralloc (nvenc, unlike this module, also still works standalone on gpuMode=guest)",
     "requires a process of its own on the HOST, outside any container -- a patched virgl_test_server (same reasoning as nvenc's own daemon: this backend's Alpine/musl image cannot dlopen() the real NVIDIA userspace driver); install it as the systemd unit documented in backend/native/venus3d-daemon/ before enabling this module",
     "no stage 6 (no mediaserver restart needed -- this is a graphics driver, not a Codec2 service)",
-    "NOT RECOMMENDED together with \"nvenc\" yet: real use (both active on the same instance) has caused the Android guest's own system_server to go unresponsive and restart under load, with NVIDIA DRM fence-import errors in the same window -- not yet root-caused (01/11/2026), suspected on nvenc's side (see that module's own queToca) but not confirmed"
+    "NOT RECOMMENDED together with \"nvenc\" yet: real use (both active on the same instance) has caused the Android guest's own system_server to go unresponsive and restart under load, with NVIDIA DRM fence-import errors in the same window -- not yet root-caused (01/11/2026), suspected on nvenc's side (see that module's own queToca) but not confirmed",
+    "Android 11 (11/11/2026): the 8 guest driver files this module injects were only ever built/validated against Android 15's ABI -- allowed here so it can be tried, but genuinely untested, not confirmed working nor confirmed broken"
   ],
   "compatibleCon": {
     "androidVersion": [
+      11,
       15
     ],
     "gpuMode": [
@@ -41,7 +43,8 @@
         "requiere gpuMode=host -- esto es lo que activa el driver Vulkan Venus del guest en vez del gralloc por software de redroid (nvenc, a diferencia de este modulo, tambien sigue funcionando solo en gpuMode=guest)",
         "requiere un proceso propio en el HOST, fuera de cualquier contenedor -- un virgl_test_server parcheado (misma razon que el daemon de nvenc: la imagen Alpine/musl de este backend no puede dlopen() el driver real de NVIDIA); instalarlo como el servicio systemd documentado en backend/native/venus3d-daemon/ antes de activar este modulo",
         "sin etapa 6 (no hace falta reiniciar mediaserver -- esto es un driver grafico, no un servicio Codec2)",
-        "NO RECOMENDADO todavia junto con \"nvenc\": en uso real (los dos activos en la misma instancia) el propio system_server del guest Android dejo de responder y se reinicio bajo carga, con errores de fence de NVIDIA DRM en la misma ventana -- todavia no identificado (01/11/2026), se sospecha del lado de nvenc (ver el queToca de ese modulo) pero no esta confirmado"
+        "NO RECOMENDADO todavia junto con \"nvenc\": en uso real (los dos activos en la misma instancia) el propio system_server del guest Android dejo de responder y se reinicio bajo carga, con errores de fence de NVIDIA DRM en la misma ventana -- todavia no identificado (01/11/2026), se sospecha del lado de nvenc (ver el queToca de ese modulo) pero no esta confirmado",
+        "Android 11 (11/11/2026): los 8 archivos de driver del guest que inyecta este modulo solo se compilaron/validaron contra el ABI de Android 15 -- se habilita aca para poder probarlo, pero es genuinamente no probado, ni confirmado funcionando ni confirmado roto"
       ]
     }
   }

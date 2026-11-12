@@ -1,5 +1,6 @@
 const fs = require('fs');
 const os = require('os');
+const path = require('path');
 const binder = require('./binder');
 const { execFile } = require('child_process');
 const { promisify } = require('util');
@@ -7,6 +8,7 @@ const runtime = require('./dockerRuntime');
 const store = require('./store');
 const hwAccel = require('./hwAccel');
 const nvencAccel = require('./nvencAccel');
+const venus3dAccel = require('./venus3dAccel');
 const fwknop = require('./fwknop');
 const images = require('../../images.json');
 
@@ -280,6 +282,26 @@ async function checkHwAccel() {
 
 // nvenc's own daemon is NEVER spawned by this backend (see nvencAccel.js's top comment) --
 // unlike checkHwAccel above, "fail" here never means "the backend itself could not start it".
+// Same path-resolution convention as hwAccel.js's DAEMON_BIN (path.join(__dirname, ...)), so the
+// fix below always shows an ExecStart that actually matches THIS install, not a generic example.
+const NVENC_DAEMON_BIN = path.join(__dirname, '..', '..', 'native', 'nvenc-daemon', 'nvenc_scm_daemon');
+function nvencServiceUnit() {
+  return [
+    '[Unit]',
+    'Description=redroid-forge NVENC encode daemon (nvenc module, NVIDIA hosts only)',
+    'After=network.target',
+    '',
+    '[Service]',
+    `ExecStartPre=/bin/mkdir -p ${nvencAccel.NVENC_ROOT}`,
+    `ExecStart=${NVENC_DAEMON_BIN} ${nvencAccel.SOCKET_PATH}`,
+    'Restart=on-failure',
+    'RestartSec=2',
+    '',
+    '[Install]',
+    'WantedBy=multi-user.target',
+  ].join('\n');
+}
+
 async function checkNvenc() {
   const vendor = await hwAccel.detectGpuVendor();
   if (vendor !== 'nvidia') {
@@ -291,11 +313,104 @@ async function checkNvenc() {
       detail: `NVIDIA GPU detected, nvenc daemon running at ${nvencAccel.SOCKET_PATH}.`,
     };
   }
+  const built = fs.existsSync(NVENC_DAEMON_BIN);
   return {
     status: 'warn',
-    detail: `NVIDIA GPU detected, but no nvenc daemon answers at ${nvencAccel.SOCKET_PATH} yet -- only relevant if an instance has the "nvenc" module enabled.`,
-    fix: 'Install and start the systemd unit documented in backend/native/nvenc-daemon/README.md (it runs on the HOST, this backend cannot spawn it itself).',
+    detail: built
+      ? `NVIDIA GPU detected, the nvenc daemon binary is built, but nothing answers at ${nvencAccel.SOCKET_PATH} yet -- only relevant if an instance has the "nvenc" module enabled.`
+      : `NVIDIA GPU detected, but the nvenc daemon is not built yet (${NVENC_DAEMON_BIN} does not exist) -- only relevant if an instance has the "nvenc" module enabled.`,
+    fix: [
+      'Runs on the HOST, not inside this container (this backend cannot spawn it itself -- see backend/native/nvenc-daemon/README.md).',
+      ...(built ? [] : ['', 'Build it first:', '  cd backend/native/nvenc-daemon && make']),
+      '',
+      'Create /etc/systemd/system/nvenc-daemon.service on the HOST with exactly this content',
+      '(same as nvenc-daemon.service.example, but with the paths already resolved for this install):',
+      nvencServiceUnit(),
+      '',
+      'Then run:',
+      '  sudo systemctl daemon-reload && sudo systemctl enable --now nvenc-daemon',
+    ].join('\n'),
+  };
+}
+
+// Host-side daemon for the venus3d module (real 3D on NVIDIA hosts). Same "never spawned by this
+// backend" reasoning as checkNvenc above, but UNLIKE nvenc_scm_daemon this one is not buildable
+// from source in this repo at all: it is a patched fork of upstream virglrenderer (see
+// backend/native/venus3d-daemon/README.md's "Where the binary comes from" -- proprietary-adjacent,
+// build-host-specific, deliberately not committed here, same criterion as
+// REDROID_HWENC_ARTIFACTS_DIR/REDROID_NVENC_ARTIFACTS_DIR). So there is no single expected binary
+// path the way NVENC_DAEMON_BIN has -- only the CONVENTIONAL one venus3d-daemon.service.example
+// uses, which an admin following that example would use but is also free not to.
+const VENUS3D_CONVENTIONAL_DIR = '/opt/redroid-forge/venus3d-daemon';
+const VENUS3D_BINARIES = ['virgl_test_server', 'virgl_render_server', 'libvirglrenderer.so.1'];
+function venus3dServiceUnit(installDir) {
+  return [
+    '[Unit]',
+    'Description=redroid-forge Venus 3D renderer daemon (venus3d module, NVIDIA hosts only)',
+    'After=network.target',
+    '',
+    '[Service]',
+    `ExecStartPre=/bin/mkdir -p ${venus3dAccel.VENUS_ROOT}`,
+    `WorkingDirectory=${installDir}`,
+    `Environment=LD_LIBRARY_PATH=${installDir}`,
+    `ExecStart=${installDir}/virgl_test_server --venus --rendernode /dev/dri/renderD128 --socket-path ${venus3dAccel.HOST_SOCKET_PATH}`,
+    'Restart=on-failure',
+    'RestartSec=2',
+    '',
+    '[Install]',
+    'WantedBy=multi-user.target',
+  ].join('\n');
+}
+
+async function checkVenus3d() {
+  const vendor = await hwAccel.detectGpuVendor();
+  if (vendor !== 'nvidia') {
+    return { status: 'ok', detail: `GPU detected: ${vendor}. The venus3d module is NVIDIA-only.` };
   }
+  if (await venus3dAccel.socketAnswers()) {
+    return {
+      status: 'ok',
+      detail: `NVIDIA GPU detected, venus3d daemon running at ${venus3dAccel.HOST_SOCKET_PATH}.`,
+    };
+  }
+  const present = VENUS3D_BINARIES.every((f) => fs.existsSync(path.join(VENUS3D_CONVENTIONAL_DIR, f)));
+  if (present) {
+    return {
+      status: 'warn',
+      detail: `NVIDIA GPU detected, the venus3d daemon binaries are present at ${VENUS3D_CONVENTIONAL_DIR}, but nothing answers at ${venus3dAccel.HOST_SOCKET_PATH} yet -- only relevant if an instance has the "venus3d" module enabled.`,
+      fix: [
+        'Runs on the HOST, not inside this container (see backend/native/venus3d-daemon/README.md).',
+        '',
+        'Create /etc/systemd/system/venus3d-daemon.service on the HOST with exactly this content',
+        `(same as venus3d-daemon.service.example, paths resolved for ${VENUS3D_CONVENTIONAL_DIR}):`,
+        venus3dServiceUnit(VENUS3D_CONVENTIONAL_DIR),
+        '',
+        'Then run:',
+        '  sudo systemctl daemon-reload && sudo systemctl enable --now venus3d-daemon',
+      ].join('\n'),
+    };
+  }
+  return {
+    status: 'warn',
+    detail: `NVIDIA GPU detected, but no venus3d daemon binaries were found at the conventional path (${VENUS3D_CONVENTIONAL_DIR}) -- only relevant if an instance has the "venus3d" module enabled.`,
+    fix: [
+      'Unlike the nvenc module, this daemon is NOT built from source in this repo: it is a patched',
+      "fork of upstream virglrenderer (gitlab.freedesktop.org/virgl/virglrenderer, plus Shiro836/",
+      "waydroid-nvidia's vtest patches and this project's own VCMD_ENCODE_RESOURCE addition),",
+      'proprietary-adjacent and build-host-specific -- see backend/native/venus3d-daemon/README.md\'s',
+      '"Where the binary comes from" for the exact patch list and build recipe',
+      '(meson setup build -Dvenus=true -Dunstable-apis=true).',
+      '',
+      `Provide these 3 files yourself, from a previous build on this or another host: ${VENUS3D_BINARIES.join(', ')}.`,
+      `Once you have them, place them together at a path of your choice (e.g. ${VENUS3D_CONVENTIONAL_DIR})`,
+      'and create /etc/systemd/system/venus3d-daemon.service on the HOST with this content',
+      '(adjust the paths below if you used a different directory):',
+      venus3dServiceUnit(VENUS3D_CONVENTIONAL_DIR),
+      '',
+      'Then run:',
+      '  sudo systemctl daemon-reload && sudo systemctl enable --now venus3d-daemon',
+    ].join('\n'),
+  };
 }
 
 // Port-knocking (docs/ROADMAP.md Phase 9). Two independent questions bundled into one check:
@@ -509,12 +624,13 @@ function checkKnownDb() {
 }
 
 async function runAll() {
-  const [dockerSocket, hwsim, imagePresence, hwAccelCheck, nvencCheck, grallocFix, fwknopCheck] = await Promise.all([
+  const [dockerSocket, hwsim, imagePresence, hwAccelCheck, nvencCheck, venus3dCheck, grallocFix, fwknopCheck] = await Promise.all([
     checkDockerSocket(),
     checkHwsim(),
     checkImagesPresent(),
     checkHwAccel(),
     checkNvenc(),
+    checkVenus3d(),
     checkGrallocFix().catch((e) => [{ id: 'redroid-gralloc-fix', label: 'Known redroid bug: gralloc crash on 10-bit formats', status: 'warn', detail: `could not be checked: ${e.message}` }]),
     checkFwknop(),
   ]);
@@ -530,6 +646,7 @@ async function runAll() {
     { id: 'gpu', label: 'GPU / /dev/dri', ...checkGpu() },
     { id: 'hw-accel', label: 'HW acceleration (hwenc, VA-API)', ...hwAccelCheck },
     { id: 'hw-accel-nvenc', label: 'HW acceleration (nvenc, NVIDIA)', ...nvencCheck },
+    { id: 'hw-accel-venus3d', label: 'HW acceleration (venus3d, NVIDIA 3D)', ...venus3dCheck },
     { id: 'known-db', label: 'Known-combinations database', ...checkKnownDb() },
     { id: 'fwknop', label: 'Port-knocking (fwknop)', ...fwknopCheck },
     ...imagePresence,

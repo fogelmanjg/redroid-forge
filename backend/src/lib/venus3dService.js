@@ -25,16 +25,30 @@ const execFileAsync = promisify(execFile);
 // output because the guest's vendor partition needs its own copy (see the README for why).
 const ARTIFACTS_DIR = process.env.REDROID_VENUS3D_ARTIFACTS_DIR || null;
 
-// Pure data: relative path under ARTIFACTS_DIR -> relative path under the instance's /vendor.
-// Every file here is a real GPU driver component, not a transitive .so closure to resolve --
-// unlike nvencService.js's FILES (a Codec2 service binary pulling in ~50 framework libraries),
-// none of these need anything beyond what the stock image's /vendor already ships (libc++,
-// libdrm, liblog, etc. are already there).
-const FILES = [
+// Same split as codec2Service.js's artifactsBaseDir(variant): a different AOSP tree/ABI per
+// Android major version gets its own subfolder under ARTIFACTS_DIR instead of a second env var
+// (one admin-facing knob, same as hwenc/hwdec). Android 15 keeps the original flat layout (it
+// was the only version this module supported until the Android 11 port, 11-12/11/2026) --
+// android11 is additive, not a replacement, so nothing already deployed for 15 moves.
+function artifactsBaseDir(androidVersion) {
+  return androidVersion === 11 ? path.join(ARTIFACTS_DIR, 'android11') : ARTIFACTS_DIR;
+}
+
+// Pure data: relative path under the resolved artifacts base dir -> relative path under the
+// instance's /vendor. Every file here is a real GPU driver component, not a transitive .so
+// closure to resolve -- unlike nvencService.js's FILES (a Codec2 service binary pulling in ~50
+// framework libraries), none of these need anything beyond what the stock image's /vendor
+// already ships (libc++, libdrm, liblog, etc. are already there) -- except libdrm.so itself,
+// shipped by this module on BOTH Android versions (see the comment on FILES_COMMON below).
+//
+// Shared between Android 15 and 11: both guest trees want the same four components at the same
+// /vendor-relative destinations (vulkan.virtio.so as the Vulkan ICD, the two ANGLE libraries as
+// the GLES/EGL implementation, libdrm.so as a dependency neither tree's stock image ships
+// unversioned). Only their SOURCE build differs (two different AOSP trees/ABIs), which is why
+// this is relative-path data, resolved against whatever artifactsBaseDir() picks.
+const FILES_COMMON = [
   ['lib64/vulkan.virtio.so', 'lib64/hw/vulkan.virtio.so'],
   ['lib/vulkan.virtio.so', 'lib/hw/vulkan.virtio.so'],
-  ['lib64/libminigbm_gralloc.so', 'lib64/libminigbm_gralloc.so'],
-  ['lib/libminigbm_gralloc.so', 'lib/libminigbm_gralloc.so'],
   ['lib64/libEGL_angle.so', 'lib64/egl/libEGL_angle.so'],
   ['lib64/libGLESv2_angle.so', 'lib64/egl/libGLESv2_angle.so'],
   ['lib/libEGL_angle.so', 'lib/egl/libEGL_angle.so'],
@@ -47,9 +61,28 @@ const FILES = [
   // reason). dlopen() from the sphal linker namespace failed outright ("library libdrm.so not
   // found") until this module shipped its own, from the SAME AOSP tree build everything else
   // here comes from (confirmed ABI-compatible: it is the exact file nvenc's own, already-working
-  // service links against).
+  // service links against). Confirmed, separately, to be the same gap on the Android 11 tree
+  // (readelf -d on that tree's own gralloc.minigbm.so/vulkan.virtio.so: both NEEDED libdrm.so;
+  // the stock 11 image only ships the versioned libdrm.so.2) -- same fix, that tree's own build.
   ['lib64/libdrm.so', 'lib64/libdrm.so'],
   ['lib/libdrm.so', 'lib/libdrm.so'],
+];
+
+// Android 15 only. libminigbm_gralloc.so: that tree's minigbm Android.bp splits the cros_gralloc
+// backend (where the nvidia_venus.c Venus/vtest backend lives) into its own cc_library_shared,
+// separate from the gralloc.minigbm HAL shim that links against it (see installGrallocCros()
+// below). libdmabufheap.so: the Sixth real gap below, specific to that same split build.
+//
+// NEITHER applies to the Android 11 port (11-12/11/2026): that tree's external/minigbm/Android.bp
+// has no such split at all -- nvidia_venus.c is added directly to minigbm_defaults' srcs and
+// statically linked, via libminigbm_cros_gralloc, straight into the single gralloc.minigbm
+// cc_library_shared (confirmed by reading that tree's Android.bp; there is no "libminigbm_gralloc"
+// module in it to build in the first place). And libdmabufheap.so is not a NEEDED entry of either
+// gralloc.minigbm.so or vulkan.virtio.so built from that tree (confirmed via readelf -d) -- this
+// older tree's minigbm never split dma-buf heap handling into its own shared lib to begin with.
+const FILES_ANDROID15_ONLY = [
+  ['lib64/libminigbm_gralloc.so', 'lib64/libminigbm_gralloc.so'],
+  ['lib/libminigbm_gralloc.so', 'lib/libminigbm_gralloc.so'],
   // Sixth real gap, found replacing gralloc.cros.so itself (see installGrallocCros() below):
   // the new gralloc.minigbm.so build links libdmabufheap.so (minigbm_cros_gralloc_defaults'
   // own shared_libs, not something the stock monolithic gralloc.cros.so ever needed) -- and
@@ -60,6 +93,17 @@ const FILES = [
   ['lib64/libdmabufheap.so', 'lib64/libdmabufheap.so'],
   ['lib/libdmabufheap.so', 'lib/libdmabufheap.so'],
 ];
+
+const FILES_15 = [...FILES_COMMON, ...FILES_ANDROID15_ONLY];
+const FILES_11 = FILES_COMMON;
+
+// Default export kept as `FILES` (Android 15's list) for anything still importing it directly --
+// filesFor(androidVersion) is the version-aware entry point everything in this file now uses.
+const FILES = FILES_15;
+
+function filesFor(androidVersion) {
+  return androidVersion === 11 ? FILES_11 : FILES_15;
+}
 
 function log(msg) { console.log(`[venus3dService] ${msg}`); }
 
@@ -79,17 +123,19 @@ async function copyIntoContainer(containerId, srcPath, destRelPath) {
   fs.unlinkSync(tmpPath);
 }
 
-async function installFiles(containerId) {
+async function installFiles(containerId, androidVersion) {
   if (!ARTIFACTS_DIR) {
     throw new Error('REDROID_VENUS3D_ARTIFACTS_DIR is not set -- the venus3d module needs a local folder with the '
       + 'patched Mesa/minigbm guest artifacts (see backend/src/modules/venus3d/README.md), and there is no '
       + 'default to fall back to.');
   }
-  log(`injecting ${FILES.length} files into ${containerId}...`);
-  for (const [srcRel, destRel] of FILES) {
-    await copyIntoContainer(containerId, path.join(ARTIFACTS_DIR, srcRel), destRel);
+  const base = artifactsBaseDir(androidVersion);
+  const files = filesFor(androidVersion);
+  log(`injecting ${files.length} files into ${containerId} (androidVersion=${androidVersion}, base=${base})...`);
+  for (const [srcRel, destRel] of files) {
+    await copyIntoContainer(containerId, path.join(base, srcRel), destRel);
   }
-  await installGrallocCros(containerId);
+  await installGrallocCros(containerId, androidVersion);
   await patchGpuConfigSh(containerId);
   await patchSurfaceflingerRc(containerId);
   await patchLegacyGrallocRc(containerId);
@@ -121,12 +167,19 @@ async function installFiles(containerId) {
 // manually recover the stock file if this module ever needs to be backed out of an existing
 // instance by hand. Only replaces at stage 4 (container created, not started) -- `/vendor`
 // is already read-only by the time anything could `docker exec` into it.
+// Same relative layout (source lib*/hw/gralloc.minigbm.so -> dest lib*/hw/gralloc.cros.so) on
+// both Android versions -- only artifactsBaseDir() changes which tree's build it resolves
+// against. On Android 11 that file is the WHOLE patched backend statically linked in (see
+// FILES_ANDROID15_ONLY's comment above: no separate libminigbm_gralloc.so to go with it there);
+// on 15 it is the thin shim that dlopen()s the one FILES_ANDROID15_ONLY ships. Same destination,
+// same replace-and-back-up logic either way.
 const GRALLOC_CROS_PATHS = [
   ['lib64/hw/gralloc.cros.so', 'lib64/hw/gralloc.minigbm.so'],
   ['lib/hw/gralloc.cros.so', 'lib/hw/gralloc.minigbm.so'],
 ];
 
-async function installGrallocCros(containerId) {
+async function installGrallocCros(containerId, androidVersion) {
+  const base = artifactsBaseDir(androidVersion);
   for (const [crosRel] of GRALLOC_CROS_PATHS) {
     const backupTmp = path.join(os.tmpdir(), `venus3d-${containerId.slice(0, 12)}-${path.basename(crosRel)}.orig`);
     await execFileAsync('docker', ['cp', `${containerId}:/vendor/${crosRel}`, backupTmp]);
@@ -134,7 +187,7 @@ async function installGrallocCros(containerId) {
     fs.unlinkSync(backupTmp);
   }
   for (const [crosRel, patchedRel] of GRALLOC_CROS_PATHS) {
-    await copyIntoContainer(containerId, path.join(ARTIFACTS_DIR, patchedRel), crosRel);
+    await copyIntoContainer(containerId, path.join(base, patchedRel), crosRel);
   }
 }
 
@@ -241,9 +294,32 @@ async function patchGpuConfigSh(containerId) {
   // SkiaVkRenderEngine, was what actually crashed trying classic DRI2/GBM against /dev/dri/card0,
   // completely bypassing the Venus/vtest Vulkan ICD this module installs). This is the real,
   // final piece that makes the guest's Vulkan path the one actually exercised at all.
+  //
+  // An EIGHTH gap, Android-11-specific, found porting this module to that version (11/11/2026):
+  // SurfaceFlinger.cpp's own init() calls RenderEngine::create() (line ~678) a full 65 lines
+  // BEFORE it constructs and starts StartPropertySetThread (line ~743), the thread whose only
+  // job is to set "service.sf.present_timestamp". When RenderEngine::create() goes through
+  // ANGLE's Vulkan backend, it transitively calls into the system Vulkan loader's own
+  // EnumerateDeviceExtensionProperties() (frameworks/native/vulkan/libvulkan/driver.cpp), which
+  // blocks forever on android::base::WaitForPropertyCreation("service.sf.present_timestamp") --
+  // a real, permanent, self-inflicted ordering deadlock in this AOSP source tree whenever
+  // RenderEngine actually uses Vulkan at init time (confirmed via a native ANR trace,
+  // /data/anr/anr_*, showing the full symbolicated stack: GLESRenderEngine::create() ->
+  // DisplayVkAndroid::initialize() -> RendererVk::initialize() -> libvulkan.so ->
+  // WaitForPropertyCreation(), stuck in a futex forever; system_server then deadlocks right
+  // back on SurfaceFlinger via LightsService's own getPhysicalDisplayIds() call, which is what
+  // was actually visible from outside -- the Watchdog-triggered zygote/netd restart loop every
+  // ~70s). Pre-seeding the property here (gpu_config.sh runs well before surfaceflinger starts)
+  // satisfies WaitForPropertyCreation() immediately; StartPropertySetThread still overwrites it
+  // with the real computed value once SurfaceFlinger finishes initializing, same as always --
+  // this only unblocks the wait, it does not pretend to know the real value. Confirmed fixing
+  // this exact deadlock and letting Android 11 + venus3d boot all the way to
+  // sys.boot_completed=1 on a real RTX 4060 (11/11/2026). Not Android-15-specific in cause (the
+  // 15-tree's own SurfaceFlinger.cpp was never checked for the same ordering) but harmless
+  // either way: a later legitimate setprop from StartPropertySetThread always wins.
   let patched = original.replace(
     /(\n\s*panfrost\)\n\s*setprop ro\.hardware\.vulkan panfrost\n\s*;;\n)/,
-    '$1        nvidia-drm)\n            setprop ro.hardware.vulkan virtio\n            setprop ro.hardware.gralloc cros\n            setprop ro.hardware.egl angle\n            setprop debug.renderengine.backend skiavkthreaded\n            ;;\n',
+    '$1        nvidia-drm)\n            setprop ro.hardware.vulkan virtio\n            setprop ro.hardware.gralloc cros\n            setprop ro.hardware.egl angle\n            setprop debug.renderengine.backend skiavkthreaded\n            setprop service.sf.present_timestamp false\n            ;;\n',
   );
   // A SEVENTH real gap, found after booting all the way through with scrcpy: gpu_setup_host()
   // unconditionally overwrites ro.hardware.egl back to "mesa" right after the nvidia-drm case
@@ -323,5 +399,6 @@ async function patchSurfaceflingerRc(containerId) {
 }
 
 module.exports = {
-  ARTIFACTS_DIR, FILES, installFiles, prepareCreate, ensureHostInfraReady,
+  ARTIFACTS_DIR, FILES, FILES_15, FILES_11, filesFor, artifactsBaseDir,
+  installFiles, prepareCreate, ensureHostInfraReady,
 };

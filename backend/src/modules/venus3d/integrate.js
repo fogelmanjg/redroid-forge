@@ -12,8 +12,12 @@ function prepareCreate() {
   return svc.prepareCreate();
 }
 
-async function integrate(containerId) {
-  await svc.installFiles(containerId);
+// `ctx`: moduleRunner's stage-4 context, `{ display, androidVersion }` -- androidVersion is
+// what venus3dService.js's installFiles() now needs to pick between the Android 15 and
+// Android 11 artifact sets/layouts (see its own artifactsBaseDir()/filesFor(), same pattern as
+// codec2Service.js's variantFor() for hwenc/hwdec's own AIDL/HIDL split).
+async function integrate(containerId, ctx = {}) {
+  await svc.installFiles(containerId, ctx.androidVersion);
 }
 
 async function ensureHostInfraReady() {
