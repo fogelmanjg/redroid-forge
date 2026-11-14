@@ -61,6 +61,15 @@ const DEFAULTS = {
   // setting: one VA-API daemon serves every instance on this host, there is no per-instance
   // backend (see docs comment in the plan this shipped from, 07/11/2026).
   encodeBackend: null,
+  // ADB port range handed out to new instances (portAllocator.js) and knock-opened by fwknop.js
+  // -- same null-means-"never touched through the UI" precedence as encodeBackend above: null
+  // falls back to ADB_PORT_START/ADB_PORT_END (or 5555/5595), and once set through the UI that
+  // wins. Unlike encodeBackend, this needs TWO independent consumers to pick up a change live:
+  // portAllocator.js reads settings.get() fresh on every call already (no supervisor to
+  // restart), but fwknop.js's access.conf is a FILE, regenerated and reloaded explicitly by
+  // routes/settings.js right after this is saved (fwknop.restart()) -- see that route's comment.
+  adbPortStart: null,
+  adbPortEnd: null,
 };
 
 function get(file = settingsFile()) {

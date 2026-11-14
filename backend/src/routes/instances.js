@@ -271,6 +271,27 @@ router.get('/', async (req, res) => {
   res.json(await instanceSupport.attachSupport(withStatus));
 });
 
+// Live check for the create dialog's optional "ADB port" field and the Configure panel's port
+// field (routes shared by both, see portAllocator.js) -- before either actually submits, so a
+// taken port is caught here instead of as a raw 409 (create) or a Docker 500 (if it slipped
+// through, same incident doctor.js's "ADB port range availability" check exists for).
+// Declared before any other instance-scoped GET below for the same reason modules.js's
+// gapps/arm-translation status routes are declared before '/:id' there -- this path segment is
+// never a real instance id. `excludeInstanceId`: the instance being edited, so its own current
+// port is never reported as a conflict with itself.
+router.get('/adb-port-check', async (req, res) => {
+  const port = Number(req.query.port);
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    return res.status(400).json({ error: '"port" must be an integer between 1 and 65535' });
+  }
+  try {
+    const status = await portAllocator.portStatus(port, { excludeInstanceId: req.query.excludeInstanceId });
+    res.json(status);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 router.post('/', async (req, res) => {
   try {
     permissions.assertCan(req.user, 'create');
@@ -304,7 +325,24 @@ router.post('/', async (req, res) => {
     // instance (see requiredModuleIdsFor()) so that start/restart do not depend on
     // the image still being in the catalog afterwards.
     const requiredModuleIds = moduleGate.requiredModuleIds(img, modules);
-    const adbPort = portAllocator.nextPort();
+    // Explicit "adbPort" in the request overrides the auto-allocated one -- checked against the
+    // live host (not just this project's own instances) BEFORE touching Docker at all, same
+    // "fail with a clear message, not a raw Docker 500" reasoning as doctor.js's range check.
+    // Omitted (the common case): unchanged, still just the next free port in the configured range.
+    const requestedPort = instanceParams.parseAdbPort(req.body);
+    let adbPort;
+    if (requestedPort !== undefined) {
+      const portStatus = await portAllocator.portStatus(requestedPort);
+      if (!portStatus.free) {
+        throw httpError(
+          `ADB port ${requestedPort} is already in use (${portStatus.usedBy === 'host' ? 'by something else on the host' : `by instance "${portStatus.usedBy.slice('instance:'.length)}"`})`,
+          409,
+        );
+      }
+      adbPort = requestedPort;
+    } else {
+      adbPort = portAllocator.nextPort();
+    }
     const slot = binder.nextFreeSlot({ inUse: await binder.slotsInUseOnHost(runtime.docker).catch(() => []) });
     const volumeName = `redroid-forge-${name}`;
     const binds = [...binder.binderBinds(slot), `${volumeName}:/data`, ...meminfoFix.prepareBinds(volumeName, resources.memoryMb)];
@@ -730,6 +768,22 @@ router.post('/:id/display', async (req, res) => {
     const display = instanceParams.parseDisplay(req.body, instance.display);
     const gpuModeChoice = instanceParams.parseGpuMode(req.body);
     const bindHosts = instanceParams.parseBindHosts(req.body, instance.bindHosts || instanceParams.DEFAULT_BIND_HOSTS);
+    // Same family as gpuMode above: a boot-time choice (Docker's PortBindings are immutable
+    // once a container exists), so changing it always means this same recreate, never a live
+    // update. Omitted = keep the current port, same convention as display's own `fallback`.
+    // Checked against the live host BEFORE anything is removed -- `excludeInstanceId` so this
+    // instance's OWN current binding (still up at this point) is never flagged as a conflict
+    // with itself when the port was not actually changed.
+    const adbPort = instanceParams.parseAdbPort(req.body, instance.adbPort);
+    if (adbPort !== instance.adbPort) {
+      const portStatus = await portAllocator.portStatus(adbPort, { excludeInstanceId: instance.id });
+      if (!portStatus.free) {
+        throw httpError(
+          `ADB port ${adbPort} is already in use (${portStatus.usedBy === 'host' ? 'by something else on the host' : `by instance "${portStatus.usedBy.slice('instance:'.length)}"`})`,
+          409,
+        );
+      }
+    }
     const catalogImg = catalog.find((i) => i.id === instance.imageId);
     if (!catalogImg) {
       throw httpError(`Image "${instance.imageId}" of this instance was not found in the catalog -- it cannot be recreated.`, 409);
@@ -800,7 +854,7 @@ router.post('/:id/display', async (req, res) => {
       image: img.dockerImage,
       cmd,
       binds,
-      adbPort: instance.adbPort,
+      adbPort,
       bindHosts,
       memoryMb: instance.memoryMb,
       cpusetCpus: instance.cpusetCpus,
@@ -828,6 +882,7 @@ router.post('/:id/display', async (req, res) => {
       ...instance,
       containerId,
       display,
+      adbPort,
       bindHosts,
       gpuMode: img.gpuMode,
       requiredModuleIds,

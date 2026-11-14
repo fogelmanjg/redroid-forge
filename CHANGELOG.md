@@ -27,6 +27,36 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
 
 ## [Unreleased]
 
+### Added
+
+- Doctor: a new "ADB port range availability" check. Found live on server01 (10/11/2026) setting
+  up a second checkout: the default `ADB_PORT_START`/`ADB_PORT_END` range (5555-5595) silently
+  overlapped with ports an unrelated, non-redroid-forge orchestrator already running on that host
+  held, and the only symptom was Docker's own "port is already allocated" failing mid-`docker
+  create`. The check now looks at every port actually listening on the host (`network_mode: host`
+  makes this a real check, not a container-local one) and warns/fails *before* that, naming the
+  exact ports already taken.
+- README/`.env.example`: extended the "second instance on a host" guidance (added in 0.6.1) to
+  cover two things a second checkout does NOT inherit from the first, both hit for real on
+  server01 the same day: the ADB port range (see above) and the optional modules' host data
+  (gapps, arm-translation, hwsim-wifi-overlay, `REDROID_HWENC_ARTIFACTS_DIR`) — all local,
+  gitignored content that a fresh checkout starts without, even on a host where a sibling
+  checkout already has it.
+- Settings: the ADB port range (`ADB_PORT_START`/`ADB_PORT_END`, previously `.env`-only) is now
+  also a UI field, with a live check against the real host as you type it ("From"/"To" in
+  Settings) and no restart needed to apply -- `portAllocator.js` already read it fresh on every
+  call, and `fwknop.js`'s on-disk `access.conf` (OPEN_PORTS) is now regenerated and reloaded
+  right after saving. The three previous readers of `ADB_PORT_START`/`ADB_PORT_END`
+  (`portAllocator.js`, `fwknop.js`, `doctor.js`'s own range check) now share one implementation
+  (`portAllocator.range()`/`rangeStatus()`) instead of three copies of the same `ss` parsing.
+- Instance create dialog and Configure panel: an optional "ADB port" field, with the same live
+  host check (`GET /instances/adb-port-check`) -- a taken port is now caught with a clear 409
+  before `docker create`, not Docker's own generic "port is already allocated". Omitted at
+  creation = still auto-allocated (`portAllocator.nextPort()`); omitted while editing = keeps the
+  instance's current port, unchanged. Changing it always means the same real recreate as
+  width/height/gpuMode (`POST /:id/display`) -- Docker's own port publishing is immutable once a
+  container exists, there is no live-update path for it either.
+
 ## [0.8.1] - 2026-11-14
 
 ### Fixed

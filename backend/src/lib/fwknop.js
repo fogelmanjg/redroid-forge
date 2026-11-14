@@ -21,6 +21,7 @@ const crypto = require('crypto');
 const { spawn, execFile } = require('child_process');
 const { promisify } = require('util');
 const { readJsonObject, writeJsonObject } = require('./jsonFileStore');
+const portAllocator = require('./portAllocator');
 
 const execFileAsync = promisify(execFile);
 
@@ -28,9 +29,6 @@ const DATA_DIR = path.join(__dirname, '..', '..', 'data', 'fwknop');
 const KEY_FILE = path.join(DATA_DIR, 'keys.json');
 const FWKNOPD_CONF = path.join(DATA_DIR, 'fwknopd.conf');
 const ACCESS_CONF = path.join(DATA_DIR, 'access.conf');
-
-const ADB_PORT_START = parseInt(process.env.ADB_PORT_START || '5555', 10);
-const ADB_PORT_END = parseInt(process.env.ADB_PORT_END || '5595', 10);
 
 // "1 minute to successfully connect" is the agreed default (ROADMAP Phase 9). Any client-
 // requested window beyond that is a warning, never a block (routes/instances.js) -- so
@@ -58,7 +56,7 @@ function getOrGenerateKeys(file = KEY_FILE) {
 // fwknop has no port-RANGE syntax in OPEN_PORTS (confirmed against its own access.c parser,
 // 26/10/2026 session -- expand_acc_port_list() splits on commas and parse_proto_and_port()
 // strtol's the part after '/', a '-' just fails to parse) -- enumerated explicitly instead.
-function buildOpenPortsList(start = ADB_PORT_START, end = ADB_PORT_END) {
+function buildOpenPortsList(start, end) {
   const ports = [];
   for (let p = start; p <= end; p++) ports.push(`tcp/${p}`);
   return ports.join(',');
@@ -66,8 +64,11 @@ function buildOpenPortsList(start = ADB_PORT_START, end = ADB_PORT_END) {
 
 // access.conf: one stanza, SOURCE pinned to 127.0.0.1 -- legitimacy was already decided by
 // Phase 7's auth before the knock is even sent (see routes/instances.js), the knock itself is
-// just the mechanism, so there is no per-user/per-instance stanza here.
-function renderAccessConf(keys, { start = ADB_PORT_START, end = ADB_PORT_END } = {}) {
+// just the mechanism, so there is no per-user/per-instance stanza here. `start`/`end` default to
+// portAllocator.range() -- evaluated on every CALL (default params are, in JS), not once at
+// module load, so a range saved through Settings is picked up the next time this renders
+// (ensureConfigFiles() below, called again by restart()).
+function renderAccessConf(keys, { start, end } = portAllocator.range()) {
   return [
     'SOURCE              127.0.0.1',
     `OPEN_PORTS          ${buildOpenPortsList(start, end)}`,
@@ -170,6 +171,20 @@ function stop() {
 
 function isRunning() {
   return !!daemonProcess;
+}
+
+// Hot-apply path for a port range changed through Settings (routes/settings.js), same spirit
+// as hwAccel.js's restartDaemonWithCurrentSettings() for encodeBackend: stop() (SIGKILL, no
+// exit-time rule cleanup to wait for -- FLUSH_IPT_AT_EXIT: N makes that safe, see CHAIN_NAME's
+// comment) then start() with no cached `conf`, which makes it call ensureConfigFiles() again
+// and re-render access.conf with the NEW range (renderAccessConf's default now reads
+// portAllocator.range() fresh). Without this, a range saved through the UI would only ever
+// reach fwknopd's own OPEN_PORTS after a full container restart -- portAllocator.js itself
+// needs no such thing (it already reads settings.get() on every call), only this file's
+// on-disk config does.
+function restart() {
+  stop();
+  return start();
 }
 
 // Any `fwknopd` process on the host that is NOT this project's own (matched by command line,
@@ -419,9 +434,9 @@ async function detectBypassingRules(containerIp, { exec = execFileAsync } = {}) 
 }
 
 module.exports = {
-  ADB_PORT_START, ADB_PORT_END, DEFAULT_KNOCK_SECONDS, MAX_FW_TIMEOUT_SECONDS, CHAIN_NAME, FWKNOPD_CONF,
+  DEFAULT_KNOCK_SECONDS, MAX_FW_TIMEOUT_SECONDS, CHAIN_NAME, FWKNOPD_CONF,
   CONTAINER_ADB_PORT, DOCKER_USER_CHAIN,
   getOrGenerateKeys, buildOpenPortsList, renderAccessConf, renderFwknopdConf, ensureConfigFiles,
-  start, stop, isRunning, detectForeignFwknopd, sweepStaleTempRules,
+  start, stop, restart, isRunning, detectForeignFwknopd, sweepStaleTempRules,
   ensureGuardRules, removeGuardRules, requestAccess, getState, detectBypassingRules,
 };

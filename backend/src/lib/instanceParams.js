@@ -184,7 +184,27 @@ function countCpus(cpusetCpus) {
   return set.size;
 }
 
+// adbPort override -- same family as gpuMode (a boot-time/creation-time choice, not a live
+// Docker update: Docker's own PortBindings are immutable once a container exists, so changing
+// this always means the same real recreate as display/gpuMode, see POST /:id/display).
+// `fallback`: undefined at creation (omitted = auto-allocate via portAllocator.nextPort()), the
+// instance's OWN current `adbPort` when editing one (omitted = keep it, same "do not reset
+// other fields" convention as parseDisplay's `fallback` above). Whether the resulting port is
+// actually FREE is checked by the caller (routes/instances.js, via portAllocator.portStatus) --
+// this function only validates the shape of what was sent, same division of labor as every
+// other parse* here.
+function parseAdbPort(body = {}, fallback = undefined) {
+  const raw = body.adbPort;
+  if (raw === undefined || raw === null || raw === '') return fallback;
+  const ok = (typeof raw === 'number' && Number.isInteger(raw)) || (typeof raw === 'string' && /^\d{1,5}$/.test(raw));
+  const n = ok ? Number(raw) : NaN;
+  if (!Number.isInteger(n) || n < 1 || n > 65535) {
+    throw httpError('"adbPort" must be an integer between 1 and 65535', 400);
+  }
+  return n;
+}
+
 module.exports = {
   parseDisplay, DEFAULTS, LIMITS, parseResources, MEMORY_MB_LIMITS, CPUSET_RE, parseGpuMode, GPU_MODES,
-  parseBindHosts, DEFAULT_BIND_HOSTS, IP_SHAPE_RE, countCpus, parseKnockRequiredHosts,
+  parseBindHosts, DEFAULT_BIND_HOSTS, IP_SHAPE_RE, countCpus, parseKnockRequiredHosts, parseAdbPort,
 };

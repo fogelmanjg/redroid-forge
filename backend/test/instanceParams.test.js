@@ -5,6 +5,7 @@ const assert = require('node:assert/strict');
 
 const {
   parseResources, parseGpuMode, parseBindHosts, DEFAULT_BIND_HOSTS, countCpus, parseKnockRequiredHosts,
+  parseAdbPort,
 } = require('../src/lib/instanceParams');
 
 test('parseResources: empty body -> no limit at all, same behavior as before this existed', () => {
@@ -148,4 +149,23 @@ test('parseKnockRequiredHosts: never allows localhost or the wildcard, even if s
     () => parseKnockRequiredHosts({ knockRequiredHosts: ['::'] }, ['::']),
     /localhost and the wildcard/,
   );
+});
+
+test('parseAdbPort: omitted -> the fallback (undefined at creation = auto-allocate, the instance\'s own current port when editing)', () => {
+  assert.equal(parseAdbPort({}), undefined);
+  assert.equal(parseAdbPort({}, 5800), 5800);
+  assert.equal(parseAdbPort({ adbPort: '' }, 5800), 5800);
+});
+
+test('parseAdbPort: accepts an integer or a digit-only string within 1-65535', () => {
+  assert.equal(parseAdbPort({ adbPort: 5800 }), 5800);
+  assert.equal(parseAdbPort({ adbPort: '5800' }), 5800);
+});
+
+test('parseAdbPort: rejects out-of-range, non-integer and malformed values', () => {
+  assert.throws(() => parseAdbPort({ adbPort: 0 }), /between 1 and 65535/);
+  assert.throws(() => parseAdbPort({ adbPort: 65536 }), /between 1 and 65535/);
+  assert.throws(() => parseAdbPort({ adbPort: 1.5 }), /between 1 and 65535/);
+  assert.throws(() => parseAdbPort({ adbPort: 'abc' }), /between 1 and 65535/);
+  assert.throws(() => parseAdbPort({ adbPort: '5555 extra' }), /between 1 and 65535/);
 });

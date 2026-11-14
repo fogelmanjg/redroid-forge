@@ -115,6 +115,18 @@ gunzip -c image.tar.gz | docker load</pre>
           </label>
           <p class="muted" data-i18n="settings.encodeBackend.restartHint"></p>
         </fieldset>
+        <fieldset class="display-fields" style="grid-template-columns: 1fr 1fr;">
+          <legend data-i18n="settings.adbPortRange.legend">ADB port range</legend>
+          <p class="muted" data-i18n="settings.adbPortRange.hint" style="grid-column: 1 / -1;"></p>
+          <label><span data-i18n="settings.adbPortRange.fromLabel">From</span>
+            <input type="number" min="1" max="65535" id="settings-adb-port-start" />
+          </label>
+          <label><span data-i18n="settings.adbPortRange.toLabel">To</span>
+            <input type="number" min="1" max="65535" id="settings-adb-port-end" />
+          </label>
+          <p id="settings-adb-port-range-warn" class="resources-warn-error" hidden style="grid-column: 1 / -1;"></p>
+          <p class="muted" data-i18n="settings.adbPortRange.restartHint" style="grid-column: 1 / -1;"></p>
+        </fieldset>
         <fieldset class="display-fields" id="settings-operator-pool-fieldset" hidden>
           <legend data-i18n="settings.operatorPool.legend">Shared quota across every operator (optional)</legend>
           <p class="muted" data-i18n="settings.operatorPool.hint"></p>
@@ -162,6 +174,10 @@ gunzip -c image.tar.gz | docker load</pre>
         <label><span data-i18n="new.memoryMb">Memory (MB)</span> <input type="number" name="memoryMb" placeholder="4096" min="256" max="65536" step="256" /></label>
         <label><span data-i18n="new.cpusetCpus">Cpuset</span> <input type="text" name="cpusetCpus" placeholder="0,1,8,9" pattern="[0-9,-]*" /></label>
       </fieldset>
+      <label><span data-i18n="new.adbPort">ADB port (optional)</span>
+        <input type="number" name="adbPort" id="new-instance-adb-port" min="1" max="65535" data-i18n-placeholder="new.adbPortPlaceholder" />
+      </label>
+      <p id="new-instance-adb-port-warn" class="resources-warn-error" hidden></p>
       <fieldset class="display-fields">
         <legend data-i18n="new.gpuModeLegend">GPU mode (optional -- fixed for the instance's lifetime)</legend>
         <label><span data-i18n="new.gpuMode">Mode</span>

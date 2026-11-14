@@ -169,6 +169,24 @@ plain `git clone` syntax, nothing specific to this project. Each checkout is ful
 second one's `.env` (e.g. `CONTAINER_NAME=redroid-forge-prod`), since the container name defaults
 to the same `redroid-forge` for every checkout and two containers can't share one name.
 
+Two more things a second checkout does NOT inherit from the first one, found live on server01
+(10/11/2026) after each one caused a real failure there:
+
+- **`ADB_PORT_START`/`ADB_PORT_END`** (`.env.example`) must be a range that is actually free on
+  the host — not just non-overlapping with the first checkout's own range, but with anything else
+  listening on this host at all (a completely unrelated process can already hold a port inside
+  the default `5555`-`5595`). `docker create` only reports this as a raw "port is already
+  allocated" once instance creation is already underway; the Doctor tab's "ADB port range
+  availability" check now catches it ahead of time.
+- **The optional modules' host data** (gapps, arm-translation, hwsim-wifi-overlay under
+  `backend/data/`, plus any `REDROID_FORGE_*_DIR`/`REDROID_HWENC_ARTIFACTS_DIR` override pointing
+  outside it) is local, gitignored content — a fresh checkout starts with none of it, even when a
+  sibling checkout on the same host already has it. Copy the relevant `backend/data/<module>`
+  folder(s) over from the existing checkout (or re-extract/re-provide them, see each module's own
+  README) before creating an instance that needs them; each module fails with a clear, specific
+  message naming the missing path/env var rather than a confusing crash, so check the instance
+  creation error (or the Doctor tab) for exactly which one is missing.
+
 ## Viewing the screen from another PC (scrcpy) — e.g. a TV with an old laptop
 
 scrcpy repository: https://github.com/Genymobile/scrcpy

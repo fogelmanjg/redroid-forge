@@ -98,6 +98,19 @@ test('encodeBackend: null by default (never touched through the UI), persists on
   assert.strictEqual(cleared.encodeBackend, null);
 });
 
+test('adbPortStart/adbPortEnd: null by default (portAllocator.js falls back to ADB_PORT_START/END), persist once set, back to null clears both', () => {
+  const file = tmpFile();
+  assert.strictEqual(settings.get(file).adbPortStart, null);
+  assert.strictEqual(settings.get(file).adbPortEnd, null);
+  const after = settings.update({ adbPortStart: 5800, adbPortEnd: 5850 }, file);
+  assert.strictEqual(after.adbPortStart, 5800);
+  assert.strictEqual(after.adbPortEnd, 5850);
+  assert.strictEqual(settings.get(file).adbPortStart, 5800);
+  const cleared = settings.update({ adbPortStart: null, adbPortEnd: null }, file);
+  assert.strictEqual(cleared.adbPortStart, null);
+  assert.strictEqual(cleared.adbPortEnd, null);
+});
+
 test('settingsFile(): REDROID_FORGE_SETTINGS_FILE overrides the default path when no explicit file arg is given', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'settings-env-'));
   const file = path.join(dir, 'settings.json');

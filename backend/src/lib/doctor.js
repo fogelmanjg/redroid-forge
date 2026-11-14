@@ -10,6 +10,7 @@ const hwAccel = require('./hwAccel');
 const nvencAccel = require('./nvencAccel');
 const venus3dAccel = require('./venus3dAccel');
 const fwknop = require('./fwknop');
+const portAllocator = require('./portAllocator');
 const images = require('../../images.json');
 
 const ANDROID_ID_DEADLINE_HOURS = 48;
@@ -664,8 +665,45 @@ function checkKnownDb() {
   }
 }
 
+// Real incident, server01, 10/11/2026: creating an instance failed with Docker's own 500 "Bind
+// for 0.0.0.0:5555 failed: port is already allocated" -- the DEFAULT ADB port range (5555-5595)
+// silently overlapped with ports a completely unrelated, non-redroid-forge orchestrator on that
+// host (a legacy `jg-redroid-svc-*` container setup) already held. Docker only reports that at
+// `docker create` time, mid-creation, with no indication beforehand that the configured range
+// was never free to begin with. This check surfaces the same conflict ahead of time, against the
+// WHOLE host (portAllocator.listeningPorts() relies on `network_mode: host` to see real host
+// sockets, not just this container's own namespace) -- not only this project's other checkouts,
+// which is all the README's "second instance" guidance protected against before this. The range
+// itself and the `ss` lookup both now live in portAllocator.js, shared with the Settings range
+// field and the per-instance port field (routes/settings.js, routes/instances.js) -- this check
+// is just one more reader of it, not its own copy.
+async function checkAdbPortRange() {
+  const { start, end } = portAllocator.range();
+  let taken;
+  let total;
+  try {
+    ({ total, taken } = await portAllocator.rangeStatus({ start, end }));
+  } catch (e) {
+    return {
+      status: 'warn',
+      detail: `Could not check host ports (ss failed: ${e.message}) -- the ADB port range (${start}-${end}) was not verified against other processes on the host.`,
+    };
+  }
+  if (taken.length === 0) {
+    return { status: 'ok', detail: `ADB port range (${start}-${end}): no port already held by something else on the host.` };
+  }
+  return {
+    status: taken.length >= total ? 'fail' : 'warn',
+    detail: `ADB port range (${start}-${end}): ${taken.length} of ${total} port(s) are already bound by something else on the host, not one of this project's own instances (e.g. ${taken.slice(0, 6).join(', ')}${taken.length > 6 ? ', ...' : ''}). An instance that lands on one of these fails at docker create with "port is already allocated".`,
+    fix: 'Run "ss -ltn" on the host to see everything already listening, then pick a range that avoids it in Settings -- "ADB port range" applies live, no restart needed.',
+  };
+}
+
 async function runAll() {
-  const [dockerSocket, hwsim, imagePresence, hwAccelCheck, nvencCheck, venus3dCheck, grallocFix, fwknopCheck, activeAdb] = await Promise.all([
+  const [
+    dockerSocket, hwsim, imagePresence, hwAccelCheck, nvencCheck, venus3dCheck, grallocFix, fwknopCheck,
+    activeAdb, adbPortRange,
+  ] = await Promise.all([
     checkDockerSocket(),
     checkHwsim(),
     checkImagesPresent(),
@@ -675,6 +713,7 @@ async function runAll() {
     checkGrallocFix().catch((e) => [{ id: 'redroid-gralloc-fix', label: 'Known redroid bug: gralloc crash on 10-bit formats', status: 'warn', detail: `could not be checked: ${e.message}` }]),
     checkFwknop(),
     checkActiveAdbConnections(),
+    checkAdbPortRange(),
   ]);
 
   const checks = [
@@ -692,6 +731,7 @@ async function runAll() {
     { id: 'known-db', label: 'Known-combinations database', ...checkKnownDb() },
     { id: 'fwknop', label: 'Port-knocking (fwknop)', ...fwknopCheck },
     { id: 'active-adb-connections', label: 'Active ADB connections (possible scrcpy)', ...activeAdb },
+    { id: 'adb-port-range', label: 'ADB port range availability', ...adbPortRange },
     ...imagePresence,
     ...grallocFix,
     ...checkAndroidIdRegistration(),
@@ -700,4 +740,4 @@ async function runAll() {
   return checks;
 }
 
-module.exports = { runAll, checkKnownDb, checkGrallocFix, checkActiveAdbConnections };
+module.exports = { runAll, checkKnownDb, checkGrallocFix, checkActiveAdbConnections, checkAdbPortRange };

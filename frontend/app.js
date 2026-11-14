@@ -38,6 +38,30 @@ async function api(path, opts) {
   return res.json();
 }
 
+// Live "is this ADB port free?" check shared by the create dialog, the Configure panel and
+// Settings' own range field -- all three talk to the same backend source of truth
+// (portAllocator.js) through two thin endpoints (GET /instances/adb-port-check,
+// GET /settings/adb-port-range-check), so this is wiring, not business logic. Debounced by a
+// token (same "it was unticked while checking" race-guard shape as fileModuleOption further
+// down, just generalized to "the input changed again before this reply came back") rather than
+// a timer id, since a fast typist can fire several requests whose replies arrive out of order.
+function wireLivePortCheck(input, warnEl, buildCheck) {
+  let token = 0;
+  let timer = null;
+  const run = async () => {
+    const mine = ++token;
+    const result = await buildCheck(input.value).catch(() => null);
+    if (mine !== token) return; // superseded by a later keystroke -- its own reply wins instead
+    if (result) { warnEl.hidden = false; warnEl.textContent = result; } else { warnEl.hidden = true; warnEl.textContent = ''; }
+  };
+  input.addEventListener('input', () => {
+    warnEl.hidden = true;
+    clearTimeout(timer);
+    timer = setTimeout(run, 400);
+  });
+  input.addEventListener('blur', () => { clearTimeout(timer); run(); });
+}
+
 // Matches the backend's own name rule (routes/instances.js, both at creation and at
 // PUT /:id/name): lowercase letters, digits and hyphens, 1-40 chars, not starting with a
 // hyphen. Rather than reject "cifi nuevo nuevo" outright, turn whitespace/underscores into
@@ -644,6 +668,36 @@ function buildRestartEditRow(inst) {
   }
   panel.appendChild(grid);
 
+  // --- ADB port: same family as width/height/etc above (Docker's PortBindings are immutable
+  // once a container exists, so this also always means a recreate) -- but kept as its own
+  // field, not folded into `fields`/`grid`, since it needs the live free/taken check the
+  // display fields don't (wireLivePortCheck, shared with the create dialog and Settings).
+  const adbPortWrap = document.createElement('label');
+  adbPortWrap.className = 'display-edit-field';
+  const adbPortSpan = document.createElement('span');
+  adbPortSpan.textContent = t('instances.adbPort.label');
+  const adbPortInput = document.createElement('input');
+  adbPortInput.type = 'number';
+  adbPortInput.min = '1';
+  adbPortInput.max = '65535';
+  adbPortInput.value = inst.adbPort ?? '';
+  adbPortWrap.appendChild(adbPortSpan);
+  adbPortWrap.appendChild(adbPortInput);
+  panel.appendChild(adbPortWrap);
+  const adbPortWarn = document.createElement('p');
+  adbPortWarn.className = 'resources-warn-error';
+  adbPortWarn.hidden = true;
+  panel.appendChild(adbPortWarn);
+  wireLivePortCheck(adbPortInput, adbPortWarn, async (value) => {
+    const port = Number(value);
+    if (!value || port === inst.adbPort) return null; // unchanged, or momentarily empty while editing
+    const status = await api(`/instances/adb-port-check?port=${port}&excludeInstanceId=${inst.id}`);
+    if (status.free) return null;
+    return status.usedBy === 'host'
+      ? t('instances.adbPort.inUseHost')
+      : t('instances.adbPort.inUseInstance', { name: status.usedBy.slice('instance:'.length) });
+  });
+
   const gpuWrap = document.createElement('label');
   gpuWrap.className = 'display-edit-field';
   const gpuSpan = document.createElement('span');
@@ -1000,6 +1054,9 @@ function buildRestartEditRow(inst) {
         gpuMode: gpuSelect.value,
         modules,
         bindHosts,
+        // Empty (cleared by hand) falls back to the instance's own current port, same
+        // "omitted = keep it" convention as every other field here (instanceParams.parseAdbPort).
+        adbPort: adbPortInput.value ? Number(adbPortInput.value) : undefined,
       });
       if (profileSelect.value !== current) await applyDeviceProfile(inst.id, profileSelect.value);
       if (knockChecks.length) {
@@ -1972,9 +2029,42 @@ async function loadSettings() {
     $('#settings-pool-max-vcpus').value = settings.operatorPoolMaxVcpus || '';
     $('#settings-pool-max-memory-mb').value = settings.operatorPoolMaxMemoryMb || '';
     $('#settings-encode-backend').value = settings.encodeBackend || '';
+    $('#settings-adb-port-start').value = settings.adbPortStart || '';
+    $('#settings-adb-port-end').value = settings.adbPortEnd || '';
   } catch (e) {
     alert(e.message);
   }
+}
+
+// Both fields checked together regardless of which one the admin just edited -- unlike a
+// single-port check (wireLivePortCheck above), a range is only meaningful as a pair. The
+// 1-65535/start<=end shape check is the same one routes/settings.js's PUT also enforces, done
+// here first only so a nonsense range never even reaches the host port lookup.
+async function checkAdbPortRangeLive() {
+  const warnEl = $('#settings-adb-port-range-warn');
+  const start = Number($('#settings-adb-port-start').value || 5555);
+  const end = Number($('#settings-adb-port-end').value || 5595);
+  if (!Number.isInteger(start) || !Number.isInteger(end) || start < 1 || end > 65535 || start > end) {
+    warnEl.hidden = false;
+    warnEl.textContent = t('settings.adbPortRange.invalidRange');
+    return;
+  }
+  try {
+    const { taken } = await api(`/settings/adb-port-range-check?start=${start}&end=${end}`);
+    if (taken.length === 0) { warnEl.hidden = true; warnEl.textContent = ''; return; }
+    warnEl.hidden = false;
+    warnEl.textContent = t('settings.adbPortRange.taken', { ports: taken.join(', ') });
+  } catch (e) {
+    warnEl.hidden = true; // a check that itself failed should never block saving
+  }
+}
+{
+  let rangeCheckTimer = null;
+  const scheduleRangeCheck = () => { clearTimeout(rangeCheckTimer); rangeCheckTimer = setTimeout(checkAdbPortRangeLive, 400); };
+  $('#settings-adb-port-start').addEventListener('input', scheduleRangeCheck);
+  $('#settings-adb-port-end').addEventListener('input', scheduleRangeCheck);
+  $('#settings-adb-port-start').addEventListener('blur', checkAdbPortRangeLive);
+  $('#settings-adb-port-end').addEventListener('blur', checkAdbPortRangeLive);
 }
 
 $('#settings-form').addEventListener('submit', async (ev) => {
@@ -1999,6 +2089,8 @@ $('#settings-form').addEventListener('submit', async (ev) => {
       .map((chk) => chk.dataset.address);
     const vcpusVal = $('#settings-pool-max-vcpus').value;
     const memVal = $('#settings-pool-max-memory-mb').value;
+    const adbStartVal = $('#settings-adb-port-start').value;
+    const adbEndVal = $('#settings-adb-port-end').value;
     const settings = await api('/settings', {
       method: 'PUT',
       body: JSON.stringify({
@@ -2006,10 +2098,14 @@ $('#settings-form').addEventListener('submit', async (ev) => {
         operatorPoolMaxVcpus: vcpusVal ? Number(vcpusVal) : null,
         operatorPoolMaxMemoryMb: memVal ? Number(memVal) : null,
         encodeBackend: $('#settings-encode-backend').value || null,
+        adbPortStart: adbStartVal ? Number(adbStartVal) : null,
+        adbPortEnd: adbEndVal ? Number(adbEndVal) : null,
       }),
     });
     $('#settings-backup-dir').value = settings.backupDir;
     $('#settings-encode-backend').value = settings.encodeBackend || '';
+    $('#settings-adb-port-start').value = settings.adbPortStart || '';
+    $('#settings-adb-port-end').value = settings.adbPortEnd || '';
     networkInterfacesCache = null; // the new filter (if changed above) applies to this list too, and to the per-instance Configure panel next time it opens
     renderAppBindHostsList(settings.appBindHosts || [], await loadNetworkInterfacesCache());
     saved.hidden = false;
@@ -2962,7 +3058,18 @@ $('#new-instance-form').addEventListener('submit', async (e) => {
   if (form.cpusetCpus.value) display.cpusetCpus = form.cpusetCpus.value;
   // Empty option = the image's own default, same as never sending it (see instanceParams.parseGpuMode).
   if (form.gpuMode.value) display.gpuMode = form.gpuMode.value;
+  // Empty = auto-allocated (portAllocator.nextPort()), same as never sending it.
+  if (form.adbPort.value) display.adbPort = Number(form.adbPort.value);
   await createInstance(name, imageId, form, modules, display);
+});
+
+wireLivePortCheck($('#new-instance-adb-port'), $('#new-instance-adb-port-warn'), async (value) => {
+  if (!value) return null; // empty = auto-assigned, nothing to check yet
+  const status = await api(`/instances/adb-port-check?port=${encodeURIComponent(value)}`);
+  if (status.free) return null;
+  return status.usedBy === 'host'
+    ? t('instances.adbPort.inUseHost')
+    : t('instances.adbPort.inUseInstance', { name: status.usedBy.slice('instance:'.length) });
 });
 
 // Options whose files the user provides (GApps, ARM translation): when one is ticked, the backend
