@@ -27,6 +27,36 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-11-14
+
+### Fixed
+
+- The VA-API daemon's source (`backend/native/vaapi-daemon/`) was a hand-copied, vendored checkout
+  of redroid-hwenc's `tier5-vaapi-daemon` ("a direct port, no logic changes") -- every real upstream
+  fix or addition needed porting by hand, file by file, and there was no clean way to try a newer
+  redroid-hwenc and roll back if it regressed a GPU this project already had working. The Dockerfile
+  now builds the daemon from a pinned redroid-hwenc tag (`REDROID_HWENC_VERSION`, default `v0.2.0`,
+  the same version the vendored copy matched), overridable per host in that host's own `.env`
+  independently of every other host. Same binary, same protocol -- verified live: rebuilt the image,
+  confirmed the daemon still detects VA-API/the real GPU and starts encode+hwdec exactly as before.
+  The now-dead vendored source and its own `test/` directory were removed (that build/verification
+  tooling lives in redroid-hwenc now).
+- Doctor's "HW acceleration (hwenc, VA-API)" check now shows which redroid-hwenc tag the running
+  daemon was actually built from (`REDROID_FORGE_HWENC_DAEMON_VERSION`, frozen from the build ARG
+  above into the image) -- a build ARG alone is invisible once the image exists, so there was no way
+  to see this at runtime before.
+
+### Added
+
+- Doctor: a new "Active ADB connections (possible scrcpy)" check. Recreating the redroid-forge
+  container (e.g. for the `REDROID_HWENC_VERSION` change above, or any other image rebuild) briefly
+  drops the hwenc daemon's socket -- if an instance has an active scrcpy session right at that
+  moment, that one in-flight frame fails. There is no way to tell from the host side whether an
+  established ADB connection is a shell, logcat, or actually scrcpy (ADB multiplexes everything over
+  one connection, no separate port to tell them apart), so this is a heads-up, never a blocker:
+  matches each instance's `adbPort` against `ss -Htn state established` and names whichever
+  instance(s) have one right now.
+
 ## [0.8.0] - 2026-11-14
 
 ### Added
