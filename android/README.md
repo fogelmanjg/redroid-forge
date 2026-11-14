@@ -2,7 +2,8 @@
 
 `vaapi_codec2/` is the Codec2 service (`android.hardware.media.c2-vaapi-service`) that runs **inside** the
 Android instance and talks to the host's VA-API daemon through the socket `/dev/vaapi-helper/socket`
-(protocol in `backend/native/vaapi-daemon/protocol.h`):
+(protocol in redroid-hwenc's `tier5-vaapi-daemon/protocol.h`, at the tag this project is pinned to --
+see `backend/native/vaapi-daemon/README.md`):
 
 - `component/VaapiEncComponent.*`: the H.264 encoder (`c2.hardware.encoder.h264`).
 - `component/VaapiDecComponent.*`: the hardware decoders `c2.hardware.decoder.{h264,hevc,vp9}`, one

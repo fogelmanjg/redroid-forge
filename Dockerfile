@@ -33,6 +33,29 @@ RUN curl -sL https://ffmpeg.org/releases/ffmpeg-${FFMPEG_VERSION}.tar.xz | tar x
       --enable-vaapi --enable-shared --disable-static && \
     make -j$(nproc) && make install
 
+# The VA-API daemon's own source (backend/native/vaapi-daemon/ used to vendor a hand-copied
+# checkout of redroid-hwenc's tier5-vaapi-daemon -- "a direct port, no logic changes"). That
+# meant every real upstream fix/addition needed porting by hand, file by file, and there was no
+# clean way to try a newer redroid-hwenc and roll back if it broke something on a GPU this
+# project already has working (14/11/2026: this came up concretely over an Intel Haswell/i965
+# profile that might regress other GPUs, with no way to test it without committing to it).
+# Building directly from a pinned tag instead fixes both: bumping REDROID_HWENC_VERSION (one
+# string, overridable per host in that host's own .env, same as every other per-host setting in
+# docker-compose.yml) is the entire upgrade, and rolling back is just reverting that one string
+# and rebuilding -- no vendored files to hand-maintain or diff against upstream ever again. This
+# stage only ever touches redroid-hwenc's own tier5-vaapi-daemon/ directory; nothing else in
+# that repo is pulled in.
+FROM node:22-alpine AS redroid-hwenc-daemon
+RUN apk add --no-cache git build-base libva-dev mesa-dev libdrm-dev vulkan-headers pkgconf
+ARG REDROID_HWENC_VERSION=v0.2.0
+RUN git clone --depth 1 --branch ${REDROID_HWENC_VERSION} \
+      https://github.com/fogelmanjg/redroid-hwenc.git /tmp/redroid-hwenc
+COPY --from=ffmpeg-lgpl /opt/ffmpeg-lgpl/lib/*.so* /usr/lib/
+COPY --from=ffmpeg-lgpl /opt/ffmpeg-lgpl/include /opt/ffmpeg-lgpl/include
+COPY --from=ffmpeg-lgpl /opt/ffmpeg-lgpl/lib/pkgconfig /opt/ffmpeg-lgpl/lib/pkgconfig
+ARG HWDEC=1
+RUN PKG_CONFIG_PATH=/opt/ffmpeg-lgpl/lib/pkgconfig make -C /tmp/redroid-hwenc/tier5-vaapi-daemon HWDEC=$HWDEC
+
 FROM node:22-alpine
 
 # iproute2 -> ip, iw ; kmod -> modprobe/modinfo ; util-linux -> mountpoint ;
@@ -57,21 +80,8 @@ COPY backend/package.json backend/package-lock.json ./
 RUN npm install --omit=dev
 COPY backend ./
 COPY frontend ../frontend
-
-# HWDEC=1 builds the daemon with hardware decode (libavcodec + VA-API; see the
-# ffmpeg-lgpl stage above for why this is now safe to be the default -- flip to 0 only
-# to skip it outright, e.g. to shrink the image on a build that will never use it).
-ARG HWDEC=1
 COPY --from=ffmpeg-lgpl /opt/ffmpeg-lgpl/lib/*.so* /usr/lib/
-COPY --from=ffmpeg-lgpl /opt/ffmpeg-lgpl/include /opt/ffmpeg-lgpl/include
-COPY --from=ffmpeg-lgpl /opt/ffmpeg-lgpl/lib/pkgconfig /opt/ffmpeg-lgpl/lib/pkgconfig
-
-# drm_fourcc.h: depending on the Alpine version it lives in /usr/include/drm, in /usr/include/libdrm or in both;
-# the code and the Makefile (pkg-config libdrm) cover both cases, without symlinks.
-RUN apk add --no-cache --virtual .build-deps build-base libva-dev mesa-dev libdrm-dev vulkan-headers pkgconf \
-  && PKG_CONFIG_PATH=/opt/ffmpeg-lgpl/lib/pkgconfig make -C native/vaapi-daemon HWDEC=$HWDEC \
-  && apk del .build-deps \
-  && rm -rf /opt/ffmpeg-lgpl/include /opt/ffmpeg-lgpl/lib/pkgconfig
+COPY --from=redroid-hwenc-daemon /tmp/redroid-hwenc/tier5-vaapi-daemon/daemon native/vaapi-daemon/daemon
 
 ENV PORT=8080
 CMD ["node", "src/server.js"]

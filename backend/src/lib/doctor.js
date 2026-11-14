@@ -275,7 +275,7 @@ async function checkHwAccel() {
     return {
       status: 'fail',
       detail: `${vendor} GPU detected but the VA-API daemon could not start: ${e.message}`,
-      fix: 'Confirm that the binary is built (backend/native/vaapi-daemon/daemon, see its Makefile) and that /dev/dri is accessible from the backend container.',
+      fix: 'Confirm that the binary is built (backend/native/vaapi-daemon/daemon, built from a pinned redroid-hwenc tag -- see the Dockerfile) and that /dev/dri is accessible from the backend container.',
     };
   }
 }

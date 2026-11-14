@@ -1,24 +1,22 @@
 # vaapi-daemon
 
-A direct port of the daemon of [`redroid-hwenc`](https://github.com/fogelmanjg/redroid-hwenc)
-(tier5-vaapi-daemon), with no logic changes to the encode path — same binary, same protocol. See that
-project's README for the full design (why a host-side daemon instead of native VA-API inside Android, the
-socket protocol, and the per-GPU compatibility table).
+This directory has no source any more (14/11/2026) — the daemon is
+[`redroid-hwenc`](https://github.com/fogelmanjg/redroid-hwenc)'s `tier5-vaapi-daemon`, built straight
+from a pinned tag of that repo by this project's own `Dockerfile` (the `redroid-hwenc-daemon` build
+stage), same binary and protocol as before. See that project's README for the full design (why a
+host-side daemon instead of native VA-API inside Android, the socket protocol, and the per-GPU
+compatibility table) and its own `test/` directory for the daemon's own build/verification tooling —
+none of that lives here any more.
+
+**Which tag gets built** is `REDROID_HWENC_VERSION` (`docker-compose.yml`, default `v0.2.0`), overridable
+per host in that host's own `.env` independently of every other host — pin one GPU to a known-good tag
+while another tries a newer one, with a plain rebuild as the rollback. This used to be a vendored,
+hand-copied checkout that needed porting upstream fixes file by file by hand; that is also gone.
 
 H.264 encode through VA-API on AMD/Intel (`VAEntrypointEncSlice`), H.264 decode through NVDEC on NVIDIA
 (`VAEntrypointVLD`, `nvidia-vaapi-driver` driver), and — new in this project — **vendor-agnostic hardware
 decode** (H.264, HEVC, VP9, ...) on AMD and Intel. One process, independent backends, none of them required
 for the others to work.
-
-## Build
-
-```sh
-make
-```
-
-It requires the development headers of `libva`, `libva-drm`, `libgbm` and `libEGL` (see the backend's
-Dockerfile for the exact packages in the production image). `make HWDEC=1 daemon` adds the hardware decode
-(it needs FFmpeg's libavcodec/libavutil and libdrm too).
 
 ## Who starts it
 
@@ -45,23 +43,13 @@ Design rules:
 
 ### Try it (on any host with Docker and `/dev/dri`)
 
-```sh
-cd backend/native/vaapi-daemon
-docker run --rm --device /dev/dri -v "$PWD":/src -v /path/to/clips:/clips:ro -w /src alpine:latest sh -c '
-  apk add -q --no-cache build-base pkgconf ffmpeg ffmpeg-dev libva-dev libva-utils \
-      mesa-va-gallium intel-media-driver &&
-  cp -r /src /build && cd /build && make hwdec-test &&
-  ./hwdec-test --probe &&
-  ./test/hwdec-verify.sh /dev/dri/renderD128 /clips/*'
-```
-
-`hwdec-verify.sh` decodes every clip in software (ffmpeg) and in hardware (`hwdec-test`) and compares frame
-by frame in output order. **Note:** the `cpu=` it prints includes the MD5 hash and the download of every
-frame to RAM (at 10-bit 4K that is ~25 MB per frame), so it **does not measure the cost of the decode**;
-the real CPU measurements are in `docs/ROADMAP.md`.
-
-For this experiment Alpine's FFmpeg is used, built with `--enable-gpl`: it is fine for testing, but it is
-**not distributed**. The project's image will build its own LGPL libavcodec.
+Build/verification tooling for the daemon's own source (`hwdec-test`, `hwdec-verify.sh`, etc.) now lives
+in [redroid-hwenc's `tier5-vaapi-daemon/`](https://github.com/fogelmanjg/redroid-hwenc/tree/main/tier5-vaapi-daemon)
+directly — clone that repo at the tag this project is pinned to (`REDROID_HWENC_VERSION` above) and follow
+its own README for the exact recipe. `hwdec-verify.sh` decodes every clip in software (ffmpeg) and in
+hardware (`hwdec-test`) and compares frame by frame in output order. **Note:** the `cpu=` it prints
+includes the MD5 hash and the download of every frame to RAM (at 10-bit 4K that is ~25 MB per frame), so it
+**does not measure the cost of the decode**; the real CPU measurements are in `docs/ROADMAP.md`.
 
 ### Results (06/10/2026)
 
@@ -87,7 +75,7 @@ decodes). The DRM node comes from `REDROID_FORGE_DRM_NODE` (by default `/dev/dri
 the daemon behaves as before and does not depend on FFmpeg.
 
 ```sh
-# inside the same container as above, after `make hwdec-test`:
+# in a redroid-hwenc checkout at this project's pinned tag, tier5-vaapi-daemon/:
 make HWDEC=1 daemon     # it also needs: libdrm-dev mesa-dev vulkan-headers mesa-gbm mesa-egl
 ./test/hwdec-stream-verify.sh /dev/dri/renderD128 /clips/*      # capabilities, decode through the socket, 2 streams at once
 ```
@@ -107,7 +95,7 @@ inline through the socket, as before.
 
 The encoder runs in constant-QP mode; `ratectl.h` picks the QP of every frame so the average reaches the bitrate in
 `EncodeRequest.bitrate` (what MediaCodec/scrcpy asked for). Without a bitrate (an older Android component) it keeps its
-historical QP 26. Check the controller on its own with
+historical QP 26. Check the controller on its own in a redroid-hwenc checkout (`tier5-vaapi-daemon/`) with
 `cc -O2 -o /tmp/ratectl-test test/ratectl-test.c -I. -lm && /tmp/ratectl-test`.
 
 ### P frames (`REDROID_FORGE_ENCODE_IDR_PERIOD`)
@@ -121,7 +109,7 @@ latency). Off by default until it has been validated on every GPU.
   its own encoder service, so `(pid, width, height)` identifies the stream and the protocol and the Android component did not
   change. One stream at a time holds the reference; a frame from another stream, a resolution change, a pause longer than
   1.5 s or a failed frame is an IDR, which is always correct (two interleaved streams simply stay all-intra). The policy is in
-  `gop.h` with its own test: `cc -O2 -o /tmp/gop-test test/gop-test.c -I. && /tmp/gop-test`.
+  `gop.h` with its own test, in a redroid-hwenc checkout (`tier5-vaapi-daemon/`): `cc -O2 -o /tmp/gop-test test/gop-test.c -I. && /tmp/gop-test`.
 - Two reconstruction surfaces alternate (the previous one is the reference of the next); the P slice header is written by hand
   like the IDR one (`nal_unit_type` 1, `frame_num` modulo 16, sliding-window reference marking, `cabac_init_idc` 0).
 - Rate control: an IDR may use 3x the budget of a frame (not counted as debt) and the complexity of P frames is estimated

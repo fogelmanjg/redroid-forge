@@ -7,6 +7,12 @@ services:
         # by default since 23/10/2026; set HWDEC=0 only to skip building it (e.g. a smaller image
         # on a host that will never use it).
         HWDEC: ${HWDEC:-1}
+        # Which tagged redroid-hwenc release the daemon gets built from (14/11/2026 -- see the
+        # Dockerfile's own comment on the redroid-hwenc-daemon stage). Pin per host in THIS host's
+        # own .env, independently of every other host -- e.g. a GPU this project already has
+        # working stays on the known-good tag while another host tries a newer one, with a plain
+        # rebuild as the rollback if that one turns out to regress something.
+        REDROID_HWENC_VERSION: ${REDROID_HWENC_VERSION:-v0.2.0}
     container_name: ${CONTAINER_NAME:-redroid-forge}
     privileged: true
     pid: host
