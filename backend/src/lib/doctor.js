@@ -475,6 +475,44 @@ async function checkFwknop() {
   return base;
 }
 
+// Heads-up only, never a blocker (14/11/2026) -- there is no way to tell from the host side
+// whether an established ADB connection is just a shell, `adb logcat`, or scrcpy actually
+// pulling video through the hwenc daemon (ADB multiplexes everything over one connection, no
+// separate port to tell them apart). Whoever reads this already knows what they are about to do
+// (recreate the redroid-forge container itself -- e.g. to change REDROID_HWENC_VERSION, or any
+// other image rebuild) is the only context that makes this worth a warning at all; nothing here
+// can act on it (the backend has no way to see its own container get replaced from the outside).
+async function checkActiveAdbConnections({ exec = execFileAsync, list = () => store.readAll() } = {}) {
+  const byPort = new Map(list().filter((i) => i.adbPort).map((i) => [String(i.adbPort), i]));
+  if (byPort.size === 0) return { status: 'ok', detail: 'There are no instances to check.' };
+
+  let stdout;
+  try {
+    ({ stdout } = await exec('ss', ['-Htn', 'state', 'established']));
+  } catch (e) {
+    return { status: 'ok', detail: `Could not list active connections (${e.message}) -- "ss" not available, nothing to warn about.` };
+  }
+
+  const hit = new Map();
+  for (const line of stdout.split('\n')) {
+    const cols = line.trim().split(/\s+/);
+    if (cols.length < 3) continue;
+    const localPort = cols[2].split(':').pop();
+    if (byPort.has(localPort)) hit.set(localPort, byPort.get(localPort));
+  }
+
+  if (hit.size === 0) return { status: 'ok', detail: 'No instance currently has an established ADB connection.' };
+
+  const names = [...hit.values()].map((i) => i.name).join(', ');
+  return {
+    status: 'warn',
+    detail: `${hit.size} instance(s) with an active ADB connection right now: ${names}. Could just be a shell or `
+      + 'logcat -- but if it is scrcpy, recreating the redroid-forge container (rebuilding the image, e.g. for a '
+      + 'REDROID_HWENC_VERSION change) briefly drops the hwenc daemon and may glitch or interrupt the mirroring '
+      + 'for a moment. Worth a look before rebuilding/recreating the container.',
+  };
+}
+
 async function checkImagesPresent() {
   const localTags = await runtime.listLocalImageTags();
   return images.map((img) => {
@@ -627,7 +665,7 @@ function checkKnownDb() {
 }
 
 async function runAll() {
-  const [dockerSocket, hwsim, imagePresence, hwAccelCheck, nvencCheck, venus3dCheck, grallocFix, fwknopCheck] = await Promise.all([
+  const [dockerSocket, hwsim, imagePresence, hwAccelCheck, nvencCheck, venus3dCheck, grallocFix, fwknopCheck, activeAdb] = await Promise.all([
     checkDockerSocket(),
     checkHwsim(),
     checkImagesPresent(),
@@ -636,6 +674,7 @@ async function runAll() {
     checkVenus3d(),
     checkGrallocFix().catch((e) => [{ id: 'redroid-gralloc-fix', label: 'Known redroid bug: gralloc crash on 10-bit formats', status: 'warn', detail: `could not be checked: ${e.message}` }]),
     checkFwknop(),
+    checkActiveAdbConnections(),
   ]);
 
   const checks = [
@@ -652,6 +691,7 @@ async function runAll() {
     { id: 'hw-accel-venus3d', label: 'HW acceleration (venus3d, NVIDIA 3D)', ...venus3dCheck },
     { id: 'known-db', label: 'Known-combinations database', ...checkKnownDb() },
     { id: 'fwknop', label: 'Port-knocking (fwknop)', ...fwknopCheck },
+    { id: 'active-adb-connections', label: 'Active ADB connections (possible scrcpy)', ...activeAdb },
     ...imagePresence,
     ...grallocFix,
     ...checkAndroidIdRegistration(),
@@ -660,4 +700,4 @@ async function runAll() {
   return checks;
 }
 
-module.exports = { runAll, checkKnownDb, checkGrallocFix };
+module.exports = { runAll, checkKnownDb, checkGrallocFix, checkActiveAdbConnections };
