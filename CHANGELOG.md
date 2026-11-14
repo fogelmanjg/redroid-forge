@@ -27,6 +27,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
 
 ## [Unreleased]
 
+## [0.8.2] - 2026-11-14
+
 ### Added
 
 - Doctor: a new "ADB port range availability" check. Found live on server01 (10/11/2026) setting
