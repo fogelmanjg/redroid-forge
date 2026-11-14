@@ -266,9 +266,12 @@ async function checkHwAccel() {
     // period set. Neither may silently hide the other (an earlier version of this check returned
     // on the IDR warning before ever looking at encodeBackendRisk, dropping the GPU-hang warning
     // exactly on that combination).
+    // Build-time only (14/11/2026) -- a dev run outside the Docker image (or an older image
+    // built before this existed) never has it set; say so plainly instead of printing "undefined".
+    const daemonVersion = process.env.REDROID_FORGE_HWENC_DAEMON_VERSION || 'unknown (not built from the pinned-tag Docker stage)';
     return {
       status: (idrWarning || risk) ? 'warn' : 'ok',
-      detail: `${vendor} GPU detected, VA-API daemon (hwenc) running at ${hwAccel.SOCKET_PATH}, encoder backend: ${backend}.`
+      detail: `${vendor} GPU detected, VA-API daemon (hwenc, redroid-hwenc ${daemonVersion}) running at ${hwAccel.SOCKET_PATH}, encoder backend: ${backend}.`
         + (idrWarning || '') + (risk ? ` ${risk.reason}` : ''),
     };
   } catch (e) {

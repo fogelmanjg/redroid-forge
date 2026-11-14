@@ -68,11 +68,11 @@ FROM node:22-alpine
 # intel-media-driver -> iHD VA-API driver for Intel GPUs (Gen8+ / Iris Xe);
 # mesa-va-gallium only covers AMD (radeonsi) and nouveau -- confirmed live on
 # 05/10 on n02 (TigerLake): without this vaInitialize fails and the daemon dies ;
-# build-base/libva-dev/mesa-dev -> to compile backend/native/vaapi-daemon (only
-# build-time, they are not left installed in the final image, see the stage below) ;
 # fwknop/fwknop-server/iptables -> Single Packet Authorization for per-instance ADB/scrcpy
 # port-knocking (see backend/src/lib/fwknop.js, docs/ROADMAP.md Phase 9) -- `fwknopd` runs
 # as one more supervised child process started by server.js, no separate container
+# (14/11/2026: no build-base/libva-dev/mesa-dev here any more -- the daemon is now built
+# entirely in the redroid-hwenc-daemon stage above, see backend/native/vaapi-daemon/README.md)
 RUN apk add --no-cache iproute2 iw kmod util-linux python3 pciutils docker-cli libva mesa-gbm mesa-egl mesa-va-gallium intel-media-driver fwknop fwknop-server iptables
 
 WORKDIR /app/backend
@@ -82,6 +82,11 @@ COPY backend ./
 COPY frontend ../frontend
 COPY --from=ffmpeg-lgpl /opt/ffmpeg-lgpl/lib/*.so* /usr/lib/
 COPY --from=redroid-hwenc-daemon /tmp/redroid-hwenc/tier5-vaapi-daemon/daemon native/vaapi-daemon/daemon
+# Re-declared here (ARGs don't cross FROM boundaries) just to freeze it into an ENV --
+# Doctor reads this at runtime to show which redroid-hwenc tag is actually running,
+# since a build ARG alone is invisible once the image exists.
+ARG REDROID_HWENC_VERSION=v0.2.0
+ENV REDROID_FORGE_HWENC_DAEMON_VERSION=$REDROID_HWENC_VERSION
 
 ENV PORT=8080
 CMD ["node", "src/server.js"]
