@@ -31,7 +31,7 @@ router.get('/me', (req, res) => {
 });
 
 router.post('/logout', (req, res) => {
-  auth.clearSessionCookie(res);
+  auth.clearSessionCookie(req, res);
   res.json({ ok: true });
 });
 
@@ -103,7 +103,7 @@ router.post('/login', (req, res) => {
   }
   const user = userStore.verifyCredentials(username, password);
   if (!user) return res.status(401).json({ error: 'Wrong username or password' });
-  auth.setSessionCookie(res, user);
+  auth.setSessionCookie(req, res, user);
   res.json({ user });
 });
 
@@ -176,7 +176,7 @@ router.get('/oidc/:providerId/callback', async (req, res) => {
     if (existingLink) {
       const localUser = userStore.findById(existingLink.localUserId);
       if (localUser) {
-        auth.setSessionCookie(res, { id: localUser.id, username: localUser.username, role: localUser.role });
+        auth.setSessionCookie(req, res, { id: localUser.id, username: localUser.username, role: localUser.role });
         return res.redirect('/');
       }
       // The linked local account was deleted since -- fall through to the normal unlinked flow
@@ -205,7 +205,7 @@ router.get('/oidc/:providerId/callback', async (req, res) => {
         'Login succeeded, but no role has been assigned to this account yet -- ask a redroid-forge admin to approve it.',
       );
     }
-    auth.setSessionCookie(res, { id: identity.id, username: identity.username, role: seen.role });
+    auth.setSessionCookie(req, res, { id: identity.id, username: identity.username, role: seen.role });
     res.redirect('/');
   } catch (e) {
     res.status(e.httpStatus || 400).send(`Login failed: ${e.message}`);

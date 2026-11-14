@@ -139,20 +139,34 @@ function attachUser(req, res, next) {
   next();
 }
 
-function setSessionCookie(res, user) {
+// Caddy (or any TLS-terminating reverse proxy in front of this app -- the duckdns domains,
+// Plenum's federation iframe embed) connects to this app over plain HTTP but forwards the
+// original scheme in X-Forwarded-Proto. Read directly off the header rather than Express's
+// trust-proxy/req.secure machinery -- same reasoning as isTrustedLocalTool above not trusting
+// X-Forwarded-For for identity: this header is only ever used here to pick cookie attributes,
+// never to decide who a request is from, so there is nothing to spoof into.
+function isHttpsRequest(req) {
+  return req.headers['x-forwarded-proto'] === 'https';
+}
+
+function setSessionCookie(req, res, user) {
   const cookie = session.sign({ uid: user.id, role: user.role, username: user.username });
+  // Real incident, 14/11/2026: embedded inside Plenum's dashboard (redroid-forge.fogelmanjg-
+  // plenum.duckdns.org in an iframe under dashboard.fogelmanjg-lab.duckdns.org), the login POST
+  // is same-origin to this app but cross-SITE relative to the top-level page, so a SameSite=Lax
+  // cookie got set but was never sent back on the next request -- login "succeeded" and then
+  // immediately re-prompted, forever. SameSite=None requires Secure (browsers drop the cookie
+  // otherwise), so the two always change together here; plain-HTTP access (direct, or over an
+  // SSH tunnel, no X-Forwarded-Proto at all) keeps the original Lax/non-secure behavior, since
+  // a Secure cookie would never be sent back over that connection either.
+  const https = isHttpsRequest(req);
   res.cookie(session.COOKIE_NAME, cookie, {
-    httpOnly: true, sameSite: 'lax', maxAge: session.SESSION_TTL_MS,
-    // secure: the app binds to 127.0.0.1 by default (docs/ROADMAP.md Phase 6) and is reached
-    // over plain HTTP in the common case (direct, or through an SSH tunnel) -- marking the
-    // cookie `secure` unconditionally would silently break login for exactly that default
-    // setup. Whoever terminates real TLS in front of this (reverse proxy, federation mode) is
-    // also the one who would need to set this; not asked for yet, left as a known gap.
+    httpOnly: true, sameSite: https ? 'none' : 'lax', secure: https, maxAge: session.SESSION_TTL_MS,
   });
 }
 
-function clearSessionCookie(res) {
-  res.clearCookie(session.COOKIE_NAME);
+function clearSessionCookie(req, res) {
+  res.clearCookie(session.COOKIE_NAME, { sameSite: isHttpsRequest(req) ? 'none' : 'lax', secure: isHttpsRequest(req) });
 }
 
 // Blocks a request with no logged-in user. A no-op in "none" mode -- req.user is always set.

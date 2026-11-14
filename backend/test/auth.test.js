@@ -98,7 +98,7 @@ test('mode "local": attachUser with no cookie -> no req.user set, requireAuth re
 test('mode "local": a valid session cookie round-trips into req.user, requireAuth then passes', () => {
   const auth = freshAuth('local');
   const res = mockRes();
-  auth.setSessionCookie(res, { id: 'u1', role: 'operator', username: 'alice' });
+  auth.setSessionCookie({ headers: {} }, res, { id: 'u1', role: 'operator', username: 'alice' });
   const cookieHeader = `${res._calls.cookieSet.name}=${res._calls.cookieSet.value}`;
   const req = { headers: { cookie: cookieHeader } };
   auth.attachUser(req, {}, () => {});
@@ -144,8 +144,24 @@ test('mode "local": a tampered/garbage cookie is treated the same as no cookie',
 test('clearSessionCookie: calls res.clearCookie with the session cookie name', () => {
   const auth = freshAuth('local');
   const res = mockRes();
-  auth.clearSessionCookie(res);
+  auth.clearSessionCookie({ headers: {} }, res);
   assert.equal(res._calls.cookieCleared, require('../src/lib/session').COOKIE_NAME);
+});
+
+test('setSessionCookie: behind a TLS-terminating proxy (X-Forwarded-Proto: https), the cookie is SameSite=None/Secure so it survives a cross-site iframe embed', () => {
+  const auth = freshAuth('local');
+  const res = mockRes();
+  auth.setSessionCookie({ headers: { 'x-forwarded-proto': 'https' } }, res, { id: 'u1', role: 'operator', username: 'alice' });
+  assert.equal(res._calls.cookieSet.opts.sameSite, 'none');
+  assert.equal(res._calls.cookieSet.opts.secure, true);
+});
+
+test('setSessionCookie: plain HTTP (no X-Forwarded-Proto) keeps the original Lax/non-secure cookie', () => {
+  const auth = freshAuth('local');
+  const res = mockRes();
+  auth.setSessionCookie({ headers: {} }, res, { id: 'u1', role: 'operator', username: 'alice' });
+  assert.equal(res._calls.cookieSet.opts.sameSite, 'lax');
+  assert.equal(res._calls.cookieSet.opts.secure, false);
 });
 
 test('"both" mode: LOCAL_ENABLED and OIDC_ENABLED are both true, and sessions work the same as either single mode', () => {
