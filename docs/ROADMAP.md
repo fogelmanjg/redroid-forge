@@ -1125,22 +1125,55 @@ mechanism is picked up again (section 8 of `REQUIREMENTS.md`), not before.
 - Other "large" projects to read that could add something (pending in `REQUIREMENTS.md` section 10) — they
   are evaluated and inserted in the corresponding phase when identified, they do not generate a phase of
   their own.
-- **Android does not see the container's real RAM limit (idea, 22/10/2026).** `dumpsys meminfo`
-  inside a redroid container reports the HOST's total RAM (e.g. 63GB, "status moderate"), not the
-  Docker cgroup's actual `memoryMb` ceiling — confirmed with real numbers on a production
-  `jg-dashboard` v1 instance (3030MB used of a 4096MB limit, 74%, after under an hour of uptime; see
-  [[project_redroid_forge_meminfo_cgroup_visibility]] for the full writeup). Because Android never
-  sees the real ceiling, its own low-memory killer/cache trimming never engages preventively — growth
-  goes unchecked until the host kernel's cgroup OOM killer intervenes abruptly, which reads as a
-  stutter/freeze inside whatever app is running, not a video/network symptom. **Counter-intuitive,
-  confirmed by the user with real usage: raising `memoryMb` makes this WORSE, not better** (more
-  visible headroom just lets Android accumulate more before anything stops it — same pattern already
-  seen with the CIFI instance, and with a physical Android phone that needs a manual background-app
-  purge every ~2 days). Likely fix: overlay a container-local `/proc/meminfo` reflecting the real
-  `memoryMb` instead of the host's, so `ActivityManager`'s own memory-pressure handling activates in
-  time. Not designed yet — candidate for a module alongside `cpu-ram`/`AndroidProvisioning`. Likely
-  contributing factor for this specific case: a user used to abundant hardware who never manually
-  closes apps, eventually running into a limit that was always there but never enforced gracefully.
+- ~~**Android does not see the container's real RAM limit (idea, 22/10/2026).**~~ **RESOLVED
+  24/10/2026** by `backend/src/lib/meminfoFix.js` (this entry was never updated to say so at the
+  time). `dumpsys meminfo` inside a redroid container used to report the HOST's total RAM (e.g.
+  63GB, "status moderate"), not the Docker cgroup's actual `memoryMb` ceiling — confirmed with real
+  numbers on a production `jg-dashboard` v1 instance (3030MB used of a 4096MB limit, 74%, after
+  under an hour of uptime; see [[project_redroid_forge_meminfo_cgroup_visibility]] for the full
+  writeup). meminfoFix overlays a container-local `/proc/meminfo` reflecting the real `memoryMb`
+  (MemTotal fixed at create time, MemFree/MemAvailable/Cached refreshed on a tick from the real
+  cgroup stats) via an Android init.rc trigger that reapplies it after Android's own boot-time
+  procfs remount — see that file's own header comment for the full mechanism and its live
+  verification on `aurora-host-test`.
+  **Still true after the fix, confirmed again 14/11/2026 on CIFI (prod):** this only gives
+  Android's low-memory killer a CORRECT ceiling to react to -- it does not, by itself, tell you
+  how much RAM an instance genuinely needs. CIFI (the whole instance, not just the game) ran fine
+  for hours capped at 2GB, then hit a real cgroup OOM kill under a different combination of active
+  apps (gapps services + an active scrcpy session); raised to 3GB it is stable with real headroom
+  (~75% used). The user's own read, worth keeping: of whatever an instance is "using", only a
+  fraction is genuinely hot (read/written constantly); the rest is read rarely (e.g. only when the
+  game goes to the background) -- but Android/Linux will always expand to fill whatever ceiling it
+  is given with cache regardless (same phenomenon as [[feedback_redroid_android_ram_cache_no_alarmar]]),
+  so "give it more and see if it still uses all of it" is not a usable sizing signal on its own.
+  Raising `memoryMb` is no longer counter-intuitively harmful the way it was before this fix (that
+  was specifically about Android never seeing the real ceiling) -- but sizing many simultaneous
+  instances on one host (user's own estimate: aiming for 12+ instances on this host, currently
+  capped around 6-7 by RAM, each using under 1 core) still needs a real way to tell "hot" working
+  set from "cold, rarely touched" memory, or headroom runs out fast.
+- **Let a capped instance swap into finite virtual memory instead of hitting the hard cgroup
+  ceiling (idea, 14/11/2026).** Today `dockerRuntime.create()`/`updateResources()` always set
+  `MemorySwap == Memory` (deliberately, see that file's own comment) -- a cap with *unlimited*
+  swap behind it defeats the point of a cap, so the choice so far has only ever been "no extra
+  swap" or "unlimited swap" (never offered). There is a real middle ground neither of those
+  comments considered: a *finite* `MemorySwap` above `Memory` (e.g. `Memory=2GB,
+  MemorySwap=4GB` -- Docker/the cgroup's `memory.swap.max` gives exactly "2GB physical + 2GB
+  virtual"). The host has swap configured and available (confirmed 14/11/2026 on server01: 67GB
+  total across `/swapfile2`, `/swap.img` and a zram device, only ~6GB in use) -- the mechanism is
+  not blocked by anything at the host level, only unused by this project so far. Motivation: the
+  CIFI OOM-kill right above, plus the open sizing problem in that same entry -- if most of an
+  instance's memory ceiling is genuinely cold (read rarely, e.g. only when the game goes to the
+  background), letting that part page out instead of demanding it all be real RAM could let more
+  instances fit on one host (user's own target: 12+ instances, currently ~6-7). **Known trade-off,
+  not free:** swapping a foreground/UI process's pages (unlike a background service dying cleanly
+  to the OOM killer) tends to show up as jank/lag when paged back in, not a clean kill -- whether
+  that is actually better than today's behavior needs testing per instance, not just turning it on
+  everywhere. Needs, before it is a real feature: a new `swapMb`-style parameter threaded through
+  `instanceParams.parseResources`/`dockerRuntime.create`/`updateResources` (same shape as
+  `memoryMb`/`cpusetCpus` today), probably also a per-instance `MemorySwappiness` knob (0-100,
+  how eagerly the kernel prefers swapping this cgroup's anonymous pages vs reclaiming cache) since
+  the right value is unlikely to be the host's own default (60) for an Android guest. Explicitly
+  not implemented yet -- recorded as a pending idea only, not scheduled.
 - **Configurable ad blocker (idea, 04/10/2026).** At system level and per application. It fits as a Phase 5
   user module (manifest + script), not as part of the core. Design to be decided; options seen:
   - *Local VPN client* (NetGuard tested by hand, it needs no root): it allows per-app (uid) rules. Platform
