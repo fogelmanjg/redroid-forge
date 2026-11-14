@@ -13,6 +13,12 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
   capability.
 - **1.0.0**: reserved for the Phase 10 gate in `docs/ROADMAP.md` ("the project is in a condition to be
   called beta 0.9") -- not claimed before that milestone is actually reached.
+- No third tier between MINOR and PATCH (considered and deliberately rejected, 14/11/2026): once a
+  release needs a judgment call on "how big" a fix is, the one unambiguous signal this policy
+  gives (MINOR means something new, full stop) erodes. The MINOR counter climbing well past, say,
+  0.15 before Phase 10's gate is expected and fine -- that counter and the "beta 0.9" label above
+  are independent by that gate's own wording (a maturity description, not a literal version target);
+  there is no reason to keep them in sync.
 - Every tag stays available forever (nothing gets deleted); "stable" means it also has a non-prerelease
   GitHub Release. Given this project already verifies live against a real backend before every commit
   (see git log), most tags qualify by default -- a tag only gets marked as a GitHub pre-release when it is
@@ -20,6 +26,42 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
   unfinished checkpoint).
 
 ## [Unreleased]
+
+## [0.8.0] - 2026-11-14
+
+### Added
+
+- Android 11 support for the `venus3d` module (real NVIDIA 3D via Venus/vtest), completing the
+  port started 11-12/11/2026: enabled in the module's own manifest for `androidVersion: 11`,
+  guest-artifact injection made version-aware (same split pattern `codec2Service.js` already used
+  for `hwenc`/`hwdec`'s AIDL/HIDL variants) instead of assuming a single Android-15 artifact
+  layout, plus the SurfaceFlinger-vs-Vulkan-loader boot deadlock fix that was blocking Android 11
+  from booting at all with this module active. Confirmed stable boot (no crash loop, no ANR) with
+  the `lib64` guest artifact rebuilt against its real SDK level (30, not Android 15's 34) --
+  **actual on-screen 3D-accelerated rendering is not yet confirmed** (RenderEngine logs an EGL
+  native fence sync failure at startup, `screencap` returns blank after boot); the 32-bit (`lib/`)
+  artifact is also not yet rebuilt against SDK 30. Tracked as a known-incomplete state, not
+  reported as fully working.
+- A browser-tab icon for the dashboard (previously none at all) -- SVG favicon, `favicon.ico`
+  fallback, and an apple-touch-icon for home-screen shortcuts.
+
+### Fixed
+
+- The session cookie was always `SameSite=Lax`/non-secure, which breaks login the moment this app
+  is shown cross-site in an iframe (Plenum's dashboard embeds it from a different registrable
+  domain) -- the browser accepts the cookie on login but refuses to send it back, so the login
+  dialog reappeared forever even with correct credentials. Now reads `X-Forwarded-Proto` (set by
+  Caddy) to use `SameSite=None; Secure` behind TLS, keeping the original behavior for plain-HTTP
+  access.
+- README overstated NVIDIA decode as confirmed on the RTX 4060 (redroid-hwenc's own table says
+  that GPU's decode was never actually run) and understated encode/decode/3D as "just a proof of
+  mechanism" when both have since been validated end to end on GTX 1050 Ti and RTX 4060 (host mode
+  + nvenc + venus3d), with only a minor, transient, self-resolving tiling artifact on the 4060.
+  Also found: Opus audio doesn't register in the nvenc+venus3d combination (unresolved, noted in
+  the module READMEs).
+- The bundled-web-viewer absence and the "no reverse proxy/auth stack bundled" note both read as
+  permanent, deliberate design decisions in the README; corrected to "not built yet" and "not
+  incompatible, just not set up by this project", respectively.
 
 ## [0.7.1] - 2026-11-09
 
