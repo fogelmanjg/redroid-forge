@@ -1174,6 +1174,27 @@ mechanism is picked up again (section 8 of `REQUIREMENTS.md`), not before.
   how eagerly the kernel prefers swapping this cgroup's anonymous pages vs reclaiming cache) since
   the right value is unlikely to be the host's own default (60) for an Android guest. Explicitly
   not implemented yet -- recorded as a pending idea only, not scheduled.
+- **Desktop-style GUI for scrcpy sessions, built into redroid-forge's own frontend (idea,
+  14/11/2026).** Grew out of investigating a tablet decoder bug (see
+  [[project_redroid_forge_scrcpyforandroid_tablet_decoder_bug]]): while reading
+  `miuzarte/ScrcpyForAndroid`'s source to diagnose that bug, the user liked its UI a lot --
+  a device list with saved host:port profiles, per-device settings (codec/bitrate/audio),
+  and on-screen navigation buttons (back/home/recent apps) overlaid directly on the mirrored
+  Android surface, so you never need the host's own keyboard shortcuts to navigate. Confirmed
+  while reading the code: the UI toolkit that app uses (`miuix`, a submodule) is genuinely
+  Compose Multiplatform (`jvm("desktop")` target present, not Android-only) -- but the app
+  itself is a plain `kotlin("android")` module, and its actual engine (MediaCodec hardware
+  decode, `EGL14`/Android `Surface` rendering, an NDK C++ bit for ADB pairing) is 100%
+  Android-only with no desktop equivalent. Forking that app to "add a Debian target" would mean
+  rewriting its whole engine -- which is already what the official desktop `scrcpy` binary does
+  well (ffmpeg/SDL decode), and which this host already drives successfully by hand.
+  **Decided approach, not this app's code:** a new, separate piece of redroid-forge's own
+  frontend -- a GUI that looks and feels like that app (same kind of device list/profiles,
+  per-instance settings, on-screen back/home/recent-apps overlay) but drives the real `scrcpy`
+  CLI as a child process instead of decoding anything itself, the same way the user already
+  launches it by hand today. Not implemented yet -- recorded as a pending idea only, not
+  scheduled; revisit once the decoder-bug writeup above is resolved, since it is what surfaced
+  this idea.
 - **Configurable ad blocker (idea, 04/10/2026).** At system level and per application. It fits as a Phase 5
   user module (manifest + script), not as part of the core. Design to be decided; options seen:
   - *Local VPN client* (NetGuard tested by hand, it needs no root): it allows per-app (uid) rules. Platform
