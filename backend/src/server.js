@@ -1,4 +1,5 @@
 const net = require('net');
+const fs = require('fs');
 const express = require('express');
 const path = require('path');
 const auth = require('./lib/auth');
@@ -17,6 +18,22 @@ net.setDefaultAutoSelectFamilyAttemptTimeout(1500);
 
 const app = express();
 app.use(express.json());
+
+// Recolors the tab icon per deployment (15/11/2026, "para que por el icono sepa cual ambiente
+// queda") -- desa and prod are separate checkouts of the SAME repo (prod only ever updates from
+// a git tag, see the project's own versioning convention), so hand-editing favicon.svg itself
+// would just get overwritten by the next prod update instead of staying different. Reading the
+// color from an env var (set per host in THAT host's own .env, same convention as
+// REDROID_HWENC_VERSION etc.) means the color travels with the deployment, not the code -- a
+// prod that never sets this var keeps today's blue with zero action needed on its side. Must be
+// registered before express.static below so it intercepts the /favicon.svg request instead of
+// falling through to the static file on disk.
+const FAVICON_SVG = fs.readFileSync(path.join(__dirname, '..', '..', 'frontend', 'favicon.svg'), 'utf-8');
+app.get('/favicon.svg', (req, res) => {
+  const color = process.env.REDROID_FORGE_ICON_COLOR || '#3a6df0';
+  res.type('image/svg+xml').send(FAVICON_SVG.replaceAll('#3a6df0', color));
+});
+
 app.use(express.static(path.join(__dirname, '..', '..', 'frontend')));
 
 // Sets req.user on every request (the always-admin bypass user in "none" mode, or whoever the
@@ -51,6 +68,10 @@ const PORT = process.env.PORT || 8080;
 // lives in lib/httpListeners.js (routes/settings.js calls its restart() once appBindHosts
 // actually changes).
 require('./lib/httpListeners').listen(app, PORT);
+// WS upgrade for the scrcpy viewer (Hito 2 of the web viewer work) -- registered AFTER listen()
+// starts creating the real http.Server(s), but httpListeners.onUpgrade's own comment is what
+// actually makes the order not matter here.
+require('./routes/viewer').registerUpgrade();
 // Checks (never applies) whether a newer combinations database exists: on
 // open and once a day. Can be turned off with REDROID_FORGE_DB_CHECK=0.
 require('./lib/knownDbUpdate').startScheduler();

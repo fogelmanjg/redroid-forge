@@ -27,6 +27,33 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-11-15
+
+### Added
+
+- Instances: an embedded live preview ("ventanita") right in the dashboard, toggled per instance
+  with a 👁 button next to its address. Backed by a periodic screenshot (`adb exec-out screencap`)
+  rather than a real scrcpy video session: the shared hardware-encode daemon's VA-API path was
+  found to fail intermittently under host-wide concurrent load (the exact same request that
+  worked three times in a row failed three times in a row minutes later), killing the whole
+  scrcpy-server process rather than just degrading one connection -- and the preview was never
+  meant to be smooth to begin with. Each capture is shrunk and recompressed server-side to a
+  small, heavily-lossy JPEG before going out over a small hand-rolled WebSocket (no `ws`
+  dependency, same posture as the rest of this project's auth/session code).
+- Instances tab: a view-mode switch above the table -- "Completo" (today's full row, unchanged),
+  "Mínimo" (name, address, and only the start/stop/restart/delete buttons that apply -- nothing
+  else, for whoever wants zero detail), and "Visores" (a grid of live preview cards, one per
+  instance, wrapping into as many columns/rows as fit the window). The chosen mode is remembered
+  per browser.
+- "Visores" grid: a preview-size slider (60-400px) that drives the actual backend capture size,
+  not just a CSS stretch of a small fixed image -- dragging it live-resizes every open preview on
+  its very next capture tick, with no reconnect needed.
+- Backend groundwork (not yet exposed in the UI) for a future full-screen, full-video+audio
+  viewer mode: a from-scratch client of the real scrcpy-server protocol (push the official
+  `scrcpy-server.jar` into the container, launch it directly with `app_process`, speak its
+  video/audio/control socket framing) -- reserved for later, independent of the screenshot-based
+  ventanita above, which does not and will not depend on it.
+
 ## [0.8.2] - 2026-11-14
 
 ### Added

@@ -43,6 +43,10 @@ const I18n = (() => {
       'instances.rename.hint': 'Rename',
       'instances.new': '+ New instance',
       'instances.none': 'There are no instances yet.',
+      'instances.viewMode.full': 'Full', 'instances.viewMode.fullHint': 'Every detail, one instance per row',
+      'instances.viewMode.minimal': 'Minimal', 'instances.viewMode.minimalHint': 'Name, address and the start/stop/restart/delete buttons only -- no viewer, no extra detail',
+      'instances.viewMode.viewers': 'Viewers', 'instances.viewMode.viewersHint': 'A grid of live previews, one per instance',
+      'instances.viewMode.size': 'Preview size',
       'instances.deviceProfile.default': 'redroid (default)', 'instances.deviceProfile.apply': 'Apply',
       'instances.deviceProfile.header': 'Device profile (restarts the instance -- does not recreate the container)',
       'instances.deviceProfile.applyNowHint': 'Applies now and restarts the instance -- anything running inside will be killed.',
@@ -69,6 +73,8 @@ const I18n = (() => {
       'instances.network.selectAtLeastOne': 'Select at least one network to bind to.',
       'instances.network.localOnlyHint': 'Reachable only from this host (localhost)',
       'instances.network.exposedHint': 'Reachable from outside this host -- redroid has no access control of its own',
+      'instances.viewer.ventanitaShowHint': 'Show a small live preview (a still refreshed every couple seconds, no audio, no input yet)',
+      'instances.viewer.ventanitaHideHint': 'Hide the live preview',
       'instances.knock.header': 'Port-knocking',
       'instances.knock.toggle': 'Open access',
       'instances.knock.requireLabel': 'Require a knock on {address} before the ADB port answers',
@@ -270,6 +276,10 @@ const I18n = (() => {
       'instances.rename.hint': 'Renombrar',
       'instances.new': '+ Nueva instancia',
       'instances.none': 'Todavía no hay instancias.',
+      'instances.viewMode.full': 'Completo', 'instances.viewMode.fullHint': 'Todo el detalle, una instancia por fila',
+      'instances.viewMode.minimal': 'Mínimo', 'instances.viewMode.minimalHint': 'Nombre, dirección y los botones de iniciar/detener/reiniciar/borrar únicamente -- sin visor, sin ningún otro detalle',
+      'instances.viewMode.viewers': 'Visores', 'instances.viewMode.viewersHint': 'Una grilla de vistas previas en vivo, una por instancia',
+      'instances.viewMode.size': 'Tamaño de vista previa',
       'instances.deviceProfile.default': 'redroid (default)', 'instances.deviceProfile.apply': 'Aplicar',
       'instances.deviceProfile.header': 'Perfil de dispositivo (reinicia la instancia -- no recrea el contenedor)',
       'instances.deviceProfile.applyNowHint': 'Se aplica ahora y reinicia la instancia -- lo que esté corriendo adentro se cierra.',
@@ -296,6 +306,8 @@ const I18n = (() => {
       'instances.network.selectAtLeastOne': 'Elegí al menos una red para bindear.',
       'instances.network.localOnlyHint': 'Accesible solo desde este host (localhost)',
       'instances.network.exposedHint': 'Accesible desde fuera de este host -- redroid no tiene ningún control de acceso propio',
+      'instances.viewer.ventanitaShowHint': 'Mostrar una vista previa chica (una imagen que se actualiza cada par de segundos, sin audio, todavía sin control)',
+      'instances.viewer.ventanitaHideHint': 'Ocultar la vista previa en vivo',
       'instances.knock.header': 'Port-knocking',
       'instances.knock.toggle': 'Abrir acceso',
       'instances.knock.requireLabel': 'Requerir un knock en {address} antes de que el puerto ADB responda',
@@ -479,11 +491,13 @@ const I18n = (() => {
     return tr && tr[field] !== undefined ? tr[field] : obj[field];
   }
 
-  // Applies the static texts of the HTML (data-i18n = innerHTML, data-i18n-placeholder = placeholder).
+  // Applies the static texts of the HTML (data-i18n = innerHTML, data-i18n-placeholder =
+  // placeholder, data-i18n-title = title/tooltip).
   function apply() {
     document.documentElement.lang = lang;
     document.querySelectorAll('[data-i18n]').forEach((el) => { el.innerHTML = t(el.dataset.i18n); });
     document.querySelectorAll('[data-i18n-placeholder]').forEach((el) => { el.placeholder = t(el.dataset.i18nPlaceholder); });
+    document.querySelectorAll('[data-i18n-title]').forEach((el) => { el.title = t(el.dataset.i18nTitle); });
   }
 
   function setLang(next) {

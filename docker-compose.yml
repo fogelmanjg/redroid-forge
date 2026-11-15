@@ -114,6 +114,11 @@ services:
       - REDROID_FORGE_OIDC_PROVIDERS=${REDROID_FORGE_OIDC_PROVIDERS:-}
       - REDROID_FORGE_OIDC_REDIRECT_BASE_URL=${REDROID_FORGE_OIDC_REDIRECT_BASE_URL:-}
       - REDROID_FORGE_OIDC_BOOTSTRAP_ADMIN_ID=${REDROID_FORGE_OIDC_BOOTSTRAP_ADMIN_ID:-}
+      # Tab icon color (15/11/2026) -- a hex color, e.g. "#e63946". Empty/unset keeps the
+      # repo's own default blue (#3a6df0) -- set per host in THAT host's own .env so desa and
+      # prod (separate checkouts of this same repo) can look different without either one's
+      # code diverging from the other.
+      - REDROID_FORGE_ICON_COLOR=${REDROID_FORGE_ICON_COLOR:-}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - /lib/modules:/lib/modules:ro

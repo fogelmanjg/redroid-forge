@@ -124,7 +124,25 @@ const LOOPBACK_ADDRESSES = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
 // anything outside this host either, for the same reason LOOPBACK_ADDRESSES itself is not: nothing
 // not already on this host can dial 127.0.0.1 to attach that header here in the first place.
 function isTrustedLocalTool(req) {
-  return LOOPBACK_ADDRESSES.has(req.ip) && !req.headers['x-forwarded-for'];
+  // `req.ip` is an Express-ism (only set on an Express Request); a raw http.IncomingMessage --
+  // what an 'upgrade' handler gets, see resolveUser's own comment below -- has no such field,
+  // only the underlying socket's address. Falling back to that covers both callers with the
+  // same logic instead of needing two.
+  const ip = req.ip || req.socket?.remoteAddress;
+  return LOOPBACK_ADDRESSES.has(ip) && !req.headers['x-forwarded-for'];
+}
+
+// -> the resolved user, or undefined if nobody is logged in (never throws; same "not logged in
+// is an expected case" posture as session.verify itself). Factored out of attachUser so the WS
+// upgrade handshake (routes/viewer.js) can resolve a user from a raw http.IncomingMessage the
+// exact same way an Express request does -- an 'upgrade' event never goes through Express
+// middleware at all, so attachUser itself never runs for it; duplicating this logic instead of
+// sharing it would be exactly the kind of two-places-to-keep-in-sync this project avoids
+// elsewhere (see dockerRuntime.js's writeFile comment on mirroring readFile's own mechanism).
+function resolveUser(req) {
+  if (AUTH_MODE === 'none' || isTrustedLocalTool(req)) return NONE_MODE_USER;
+  const payload = session.verify(readCookie(req, session.COOKIE_NAME));
+  return payload ? { id: payload.uid, role: payload.role, username: payload.username } : undefined;
 }
 
 // Sets req.user from the session cookie (local/oidc), the fixed bypass user (none), or the same
@@ -133,9 +151,7 @@ function isTrustedLocalTool(req) {
 // requireCapability's job, so that e.g. GET /api/auth/me can answer "not logged in" instead of
 // 401ing before the frontend even gets to render a login screen.
 function attachUser(req, res, next) {
-  if (AUTH_MODE === 'none' || isTrustedLocalTool(req)) { req.user = NONE_MODE_USER; return next(); }
-  const payload = session.verify(readCookie(req, session.COOKIE_NAME));
-  if (payload) req.user = { id: payload.uid, role: payload.role, username: payload.username };
+  req.user = resolveUser(req);
   next();
 }
 
@@ -177,6 +193,6 @@ function requireAuth(req, res, next) {
 }
 
 module.exports = {
-  AUTH_MODE, LOCAL_ENABLED, OIDC_ENABLED, VALID_MODES, attachUser, requireAuth, setSessionCookie, clearSessionCookie, readCookie,
+  AUTH_MODE, LOCAL_ENABLED, OIDC_ENABLED, VALID_MODES, attachUser, resolveUser, requireAuth, setSessionCookie, clearSessionCookie, readCookie,
   localPathOpen, oidcPathOpen,
 };

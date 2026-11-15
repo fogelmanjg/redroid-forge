@@ -72,8 +72,27 @@ FROM node:22-alpine
 # port-knocking (see backend/src/lib/fwknop.js, docs/ROADMAP.md Phase 9) -- `fwknopd` runs
 # as one more supervised child process started by server.js, no separate container
 # (14/11/2026: no build-base/libva-dev/mesa-dev here any more -- the daemon is now built
-# entirely in the redroid-hwenc-daemon stage above, see backend/native/vaapi-daemon/README.md)
-RUN apk add --no-cache iproute2 iw kmod util-linux python3 pciutils docker-cli libva mesa-gbm mesa-egl mesa-va-gallium intel-media-driver fwknop fwknop-server iptables
+# entirely in the redroid-hwenc-daemon stage above, see backend/native/vaapi-daemon/README.md) ;
+# android-tools -> `adb` (15/11/2026, web viewer work: backend/src/lib/scrcpy/forward.js and
+# launchServer.js shell out to the real `adb` client, same mechanism scripts/connect.sh already
+# used from the HOST -- this is the first thing the BACKEND CONTAINER ITSELF ever needed it for.
+# Found missing the hard way: `spawn adb ENOENT` running the real viewer against a live instance,
+# the host's own `adb` (used only by the scrcpy-probe.js dev script, run directly on the host) had
+# masked this until the actual server process needed it too)
+RUN apk add --no-cache iproute2 iw kmod util-linux python3 pciutils docker-cli libva mesa-gbm mesa-egl mesa-va-gallium intel-media-driver fwknop fwknop-server iptables android-tools curl
+
+# scrcpy-server.jar itself (15/11/2026, web viewer work) -- Apache 2.0, same trust level as `adb`
+# right above, so a pinned+checksummed download rather than a user-provided+sha256-registry
+# folder like gapps/arm-translation genuinely need (pushServer.js's own comment explains why).
+# MUST match launchServer.js's hardcoded SCRCPY_VERSION exactly -- the real scrcpy-server does
+# its own version check against what the client passed on its argv and refuses to start on a
+# mismatch, so these two pins only ever move together, by hand, never independently.
+ARG SCRCPY_SERVER_VERSION=5.0.1
+ARG SCRCPY_SERVER_SHA256=764eb6f79811d5211fe9df341120882ba9994c7a61b897d7bf3fb662e53bc536
+RUN mkdir -p /usr/local/share/scrcpy && \
+    curl -sLo /usr/local/share/scrcpy/scrcpy-server \
+      "https://github.com/Genymobile/scrcpy/releases/download/v${SCRCPY_SERVER_VERSION}/scrcpy-server-v${SCRCPY_SERVER_VERSION}" && \
+    echo "${SCRCPY_SERVER_SHA256}  /usr/local/share/scrcpy/scrcpy-server" | sha256sum -c -
 
 WORKDIR /app/backend
 COPY backend/package.json backend/package-lock.json ./

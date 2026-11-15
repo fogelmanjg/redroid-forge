@@ -10,6 +10,12 @@ const settings = require('./settings');
 let activeServers = [];
 let boundApp = null;
 let boundPort = null;
+// Registered once at startup (routes/viewer.js, for the scrcpy-viewer WS upgrade) and re-attached
+// to every server listen() creates, including the fresh ones restart() makes after an
+// appBindHosts change -- an 'upgrade' listener does not survive onto a brand new http.Server the
+// way an Express route does (routes live on `app`, which restart() keeps; listeners live on the
+// `server`, which restart() throws away and recreates).
+let upgradeHandlers = [];
 
 // 127.0.0.1 is ALWAYS listened on, with no way to opt out -- nothing on this very host (e.g.
 // scrcpy-redroid.sh, which SSHes in and reaches for localhost) could reach this app at all
@@ -59,6 +65,7 @@ function listen(app, port) {
       console.error('Is another process already using this port? Set PORT in .env to a free one.');
       process.exit(1);
     });
+    upgradeHandlers.forEach((handler) => server.on('upgrade', handler));
     activeServers.push(server);
   })));
 }
@@ -94,4 +101,15 @@ async function restart() {
   await listen(boundApp, boundPort);
 }
 
-module.exports = { computeBindHosts, listen, closeAll, restart };
+// Registers an 'upgrade' handler on every server this module manages, now and after any future
+// restart(). Safe to call before OR after the first listen() -- activeServers is already
+// populated synchronously by the time listen()'s own Promise.all resolves (app.listen() returns
+// the server object, and it is pushed, before 'listening' itself ever fires), so calling this
+// right after requiring server.js's own listen() line works; calling it earlier (activeServers
+// still empty) just defers attaching to the next listen()/restart() via upgradeHandlers.
+function onUpgrade(handler) {
+  upgradeHandlers.push(handler);
+  activeServers.forEach((server) => server.on('upgrade', handler));
+}
+
+module.exports = { computeBindHosts, listen, closeAll, restart, onUpgrade };

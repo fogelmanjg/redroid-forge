@@ -1,4 +1,6 @@
+const path = require('path');
 const Docker = require('dockerode');
+const { buildSingleFileTar } = require('./tarFile');
 
 // A pure adapter over dockerode — it ports container-runtime.service.ts from
 // plenum-redroid, without the rest of its dependencies.
@@ -207,6 +209,16 @@ async function readFile(containerId, filePath) {
   return file;
 }
 
+// The write-direction counterpart of readFile: puts ONE file into a container, running or
+// stopped, at an exact path -- `docker cp`'s own mechanism (putArchive), same as readFile uses
+// getArchive. Needed by scrcpy/pushServer.js to push scrcpy-server.jar without shelling out to
+// `adb push` (lighter, and this project's existing convention for reaching into a container --
+// see androidExec.js's own docker-exec-not-adb choice).
+async function writeFile(containerId, destPath, data, { mode } = {}) {
+  const tar = buildSingleFileTar(path.basename(destPath), data, mode);
+  await docker.getContainer(containerId).putArchive(tar, { path: path.dirname(destPath) });
+}
+
 async function readLogs(container) {
   const stream = await container.logs({ stdout: true, stderr: true, follow: true });
   const chunks = [];
@@ -251,5 +263,6 @@ async function runEphemeral(image, cmd, binds, timeoutMs = 30000) {
 
 module.exports = {
   docker, listLocalImageTags, create, start, stop, restart, remove, removeVolume, rename,
-  inspect, inspectVolume, getImageDigest, getPid, getBridgeIp, exec, runEphemeral, readLogs, readFile, updateResources,
+  inspect, inspectVolume, getImageDigest, getPid, getBridgeIp, exec, runEphemeral,
+  readLogs, readFile, writeFile, updateResources,
 };

@@ -213,6 +213,74 @@ let openRenameId = null;
 // panel opens (see its toggle button below), same pattern as userModulesCache/
 // networkInterfacesCache for the other edit panels.
 let directoryCache = null;
+
+// Ventanita toggle state (Hito 2 of the web viewer work), per user via localStorage -- default
+// off for every instance: nobody pays the cost of a real scrcpy-server session (real encode on
+// the device, even at 5fps) just for having opened the dashboard, per the plan's own decided
+// "native capability, opt-in behavior" split. Persisted so a reload keeps whatever the user
+// explicitly turned on, same spirit as I18n's own `lang` localStorage key.
+function loadVentanitaIds() {
+  try { return new Set(JSON.parse(localStorage.getItem('ventanitaIds') || '[]')); } catch (e) { return new Set(); }
+}
+function saveVentanitaIds(ids) {
+  try { localStorage.setItem('ventanitaIds', JSON.stringify(Array.from(ids))); } catch (e) { /* no storage: just won't persist across reloads */ }
+}
+let ventanitaIds = loadVentanitaIds();
+
+// Instances tab view mode (15/11/2026) -- "full" (today's row-pair table, unchanged), "minimal"
+// (name+address+actions only, for someone who, in the user's own words, "no quiere saber nada de
+// nada"), "viewers" (a grid of live previews, one per instance). Persisted per browser, same
+// spirit as ventanitaIds/I18n's own `lang` key -- a reload keeps whichever view this user picked,
+// not necessarily what anyone else using this dashboard prefers.
+function loadInstanceViewMode() {
+  const v = localStorage.getItem('instanceViewMode');
+  return (v === 'minimal' || v === 'viewers') ? v : 'full';
+}
+function saveInstanceViewMode(mode) {
+  try { localStorage.setItem('instanceViewMode', mode); } catch (e) { /* no storage: just won't persist */ }
+}
+let instanceViewMode = loadInstanceViewMode();
+
+// Preview tile size for "viewers" mode only -- the slider's current value in px. Drives BOTH the
+// CSS display size (.instances-grid .viewer-ventanita-img in style.css) AND, since 15/11/2026,
+// the actual backend capture size (screenshotCapture.js, via Viewer.mountVentanita's `size`
+// argument and Viewer.setSize/setSizeAll for a live resize) -- stretching the old fixed ~80px
+// capture past its native size with CSS alone just looked blurry, so the slider now asks the
+// backend to capture bigger instead of faking it client-side. Clamped to the slider's own
+// [60,400] range so a hand-edited/stale localStorage value can't push it absurdly large or to 0;
+// the backend clamps independently too (screenshotCapture.js's own clampSize), since this value
+// also travels over the wire and must not be trusted as-is there either.
+function loadViewersSize() {
+  const v = parseInt(localStorage.getItem('viewersSize'), 10);
+  return (Number.isFinite(v) && v >= 60 && v <= 400) ? v : 200;
+}
+function saveViewersSize(px) {
+  try { localStorage.setItem('viewersSize', String(px)); } catch (e) { /* no storage: just won't persist */ }
+}
+let viewersSize = loadViewersSize();
+
+$$('.view-mode-btn').forEach((btn) => {
+  btn.classList.toggle('active', btn.dataset.viewMode === instanceViewMode);
+  btn.addEventListener('click', () => {
+    if (btn.dataset.viewMode === instanceViewMode) return;
+    instanceViewMode = btn.dataset.viewMode;
+    saveInstanceViewMode(instanceViewMode);
+    $$('.view-mode-btn').forEach((b) => b.classList.toggle('active', b === btn));
+    loadInstances({ silent: true });
+  });
+});
+const viewersSizeSlider = $('#viewers-size-slider');
+viewersSizeSlider.value = viewersSize;
+$('#instances-grid').style.setProperty('--ventanita-size', `${viewersSize}px`);
+viewersSizeSlider.addEventListener('input', () => {
+  viewersSize = parseInt(viewersSizeSlider.value, 10);
+  saveViewersSize(viewersSize);
+  $('#instances-grid').style.setProperty('--ventanita-size', `${viewersSize}px`);
+  // Live, while dragging -- every card's own session gets the new capture size right away
+  // (next tick, see screenshotCapture.js's own comment), not just on the next full reload.
+  if (instanceViewMode === 'viewers') Viewer.setSizeAll(viewersSize);
+});
+
 async function loadDirectoryCache() {
   try {
     directoryCache = await api('/auth/directory');
@@ -1534,20 +1602,146 @@ function buildAdbAccessEditRow(inst) {
 // Row 2 (smaller) is everything else -- info chips AND every button, including the ones that
 // used to sit in their own always-visible column (device profile, register/mark-registered).
 async function loadInstances({ silent = false } = {}) {
+  const table = $('#instances-table');
   const tbody = $('#instances-table tbody');
-  if (!silent) tbody.innerHTML = `<tr><td>${t('common.loading')}</td></tr>`;
+  const grid = $('#instances-grid');
+  const isViewers = instanceViewMode === 'viewers';
+  table.hidden = isViewers;
+  grid.hidden = !isViewers;
+  $('#viewers-size-control').hidden = !isViewers;
+  const target = isViewers ? grid : tbody;
+  if (!silent) target.innerHTML = isViewers ? `<p>${t('common.loading')}</p>` : `<tr><td>${t('common.loading')}</td></tr>`;
   try {
     const instances = await api('/instances');
     if (instances.length === 0) {
-      tbody.innerHTML = `<tr><td>${t('instances.none')}</td></tr>`;
+      target.innerHTML = isViewers ? `<p>${t('instances.none')}</p>` : `<tr><td>${t('instances.none')}</td></tr>`;
       return;
     }
-    // Built off-screen and swapped in one go, so a refresh never leaves the table half drawn.
+    // Built off-screen and swapped in one go, so a refresh never leaves the table/grid half drawn.
     const rows = document.createDocumentFragment();
+    const cards = document.createDocumentFragment();
     for (const inst of instances) {
       const state = InstanceState.describe(inst.status);
 
-      // --- Row 1: name, status, address (host:adbPort -- click to copy, same as the Android
+      // Shared across all three view modes -- "mínimo" and "visores" need exactly the same
+      // start/stop/restart/delete buttons "completo" already builds, just inside a smaller
+      // container with nothing else around them. Defined once per instance so the three modes
+      // below never hand-roll their own copy of the recreate/confirm/alert/reload logic.
+      const mk = (label, action) => {
+        const b = document.createElement('button');
+        b.textContent = label;
+        b.className = 'secondary';
+        b.addEventListener('click', async () => {
+          b.disabled = true;
+          try {
+            await api(`/instances/${inst.id}/${action}`, { method: 'POST' });
+          } catch (e) {
+            alert(e.message);
+          } finally {
+            b.disabled = false;
+            await loadInstances({ silent: true });
+          }
+        });
+        return b;
+      };
+      const buildDeleteBtn = () => {
+        const del = document.createElement('button');
+        del.textContent = t('instances.delete');
+        del.className = 'secondary';
+        del.addEventListener('click', async () => {
+          if (!confirm(t('instances.confirmDelete', { name: inst.name }))) return;
+          try {
+            await api(`/instances/${inst.id}`, { method: 'DELETE' });
+            await loadInstances({ silent: true });
+          } catch (e) {
+            alert(e.message);
+          }
+        });
+        return del;
+      };
+      // Only the actions that make sense for the current state (see instanceState.js).
+      const appendActionButtons = (container) => {
+        for (const action of state.actions) {
+          if (action === 'delete') {
+            if (AuthUi.can('delete')) container.appendChild(buildDeleteBtn());
+          } else if (AuthUi.can('start-stop')) {
+            container.appendChild(mk(t(`instances.${action}`), action));
+          }
+        }
+      };
+      const buildAddressSpan = (className) => {
+        const address = `${location.hostname}:${inst.adbPort}`;
+        const addrSpan = document.createElement('span');
+        addrSpan.className = className;
+        addrSpan.textContent = address;
+        addrSpan.title = t('instances.addressCopyHint');
+        addrSpan.addEventListener('click', async () => {
+          const ok = await copyText(address);
+          addrSpan.textContent = ok ? t('instances.copied') : t('instances.copyFailed');
+          setTimeout(() => { addrSpan.textContent = address; }, 1500);
+        });
+        return addrSpan;
+      };
+
+      if (instanceViewMode === 'minimal') {
+        // "Mínimo" (15/11/2026) -- name, address, start/stop/restart/delete, nothing else: no
+        // chips, no viewer, no edit panels, no rename -- explicitly, "para el que no quiere
+        // saber nada de nada". One compact row per instance instead of "completo"'s row-pair.
+        const trMin = document.createElement('tr');
+        trMin.className = 'instance-row-minimal';
+        const tdMin = document.createElement('td');
+        const minWrap = document.createElement('div');
+        minWrap.className = 'instance-minimal';
+
+        const nameSpan = document.createElement('span');
+        nameSpan.className = 'instance-name';
+        nameSpan.textContent = inst.name;
+        minWrap.appendChild(nameSpan);
+        minWrap.appendChild(buildAddressSpan('instance-minimal-address'));
+
+        const minButtons = document.createElement('div');
+        minButtons.className = 'instance-minimal-buttons';
+        appendActionButtons(minButtons);
+        minWrap.appendChild(minButtons);
+
+        tdMin.appendChild(minWrap);
+        trMin.appendChild(tdMin);
+        rows.appendChild(trMin);
+        continue;
+      }
+
+      if (instanceViewMode === 'viewers') {
+        // "Visores" (15/11/2026) -- a grid card per instance: name, address, its own live
+        // ventanita (always mounted here, independent of the "completo" tab's per-row 👁
+        // toggle -- showing the preview IS this view's whole point), and the same action
+        // buttons as every other mode.
+        const card = document.createElement('div');
+        card.className = 'instance-card';
+
+        const nameDiv = document.createElement('div');
+        nameDiv.className = 'instance-card-name';
+        nameDiv.textContent = inst.name;
+        card.appendChild(nameDiv);
+        card.appendChild(buildAddressSpan('instance-card-address'));
+
+        if (AuthUi.can('view')) {
+          const viewerWrap = document.createElement('div');
+          viewerWrap.className = 'instance-card-viewer';
+          Viewer.mountVentanita(viewerWrap, inst.id, viewersSize);
+          card.appendChild(viewerWrap);
+        }
+
+        const cardButtons = document.createElement('div');
+        cardButtons.className = 'instance-card-buttons';
+        appendActionButtons(cardButtons);
+        card.appendChild(cardButtons);
+
+        cards.appendChild(card);
+        continue;
+      }
+
+      // --- "Completo" (default, unchanged) ---
+      // Row 1: name, status, address (host:adbPort -- click to copy, same as the Android
       // ID copy-on-click pattern) ---
       const trPrimary = document.createElement('tr');
       trPrimary.className = 'instance-row-primary';
@@ -1625,17 +1819,7 @@ async function loadInstances({ silent = false } = {}) {
       statusSpan.innerHTML = `<span class="status-dot ${state.tone}"></span>${t('instances.status.' + state.key)}`;
       primary.appendChild(statusSpan);
 
-      const address = `${location.hostname}:${inst.adbPort}`;
-      const addrSpan = document.createElement('span');
-      addrSpan.className = 'instance-address';
-      addrSpan.textContent = address;
-      addrSpan.title = t('instances.addressCopyHint');
-      addrSpan.addEventListener('click', async () => {
-        const ok = await copyText(address);
-        addrSpan.textContent = ok ? t('instances.copied') : t('instances.copyFailed');
-        setTimeout(() => { addrSpan.textContent = address; }, 1500);
-      });
-      primary.appendChild(addrSpan);
+      primary.appendChild(buildAddressSpan('instance-address'));
 
       tdPrimary.appendChild(primary);
       trPrimary.appendChild(tdPrimary);
@@ -1664,6 +1848,29 @@ async function loadInstances({ silent = false } = {}) {
       androidIdSpan.className = 'android-id-cell';
       androidIdSpan.innerHTML = androidIdCellHtml(inst);
       secondary.appendChild(androidIdSpan);
+
+      // Ventanita toggle (Hito 2 of the web viewer work) -- explicit, per-instance, default off,
+      // independent of the "expandida"/fullscreen viewer (Hito 4): turning this on does not
+      // turn that on, and vice versa, per the plan's own decided "native capability, opt-in
+      // behavior" split.
+      if (AuthUi.can('view')) {
+        const ventanitaWrap = document.createElement('span');
+        ventanitaWrap.className = 'viewer-ventanita-wrap';
+        const ventanitaBtn = document.createElement('button');
+        ventanitaBtn.type = 'button';
+        ventanitaBtn.className = 'icon-button';
+        const isOn = ventanitaIds.has(inst.id);
+        ventanitaBtn.textContent = isOn ? '\u{1F441}\u{FE0F}' : '\u{1F441}'; // 👁️ on / 👁 off
+        ventanitaBtn.title = t(isOn ? 'instances.viewer.ventanitaHideHint' : 'instances.viewer.ventanitaShowHint');
+        ventanitaBtn.addEventListener('click', () => {
+          if (ventanitaIds.has(inst.id)) { ventanitaIds.delete(inst.id); Viewer.unmountVentanita(inst.id); } else { ventanitaIds.add(inst.id); }
+          saveVentanitaIds(ventanitaIds);
+          loadInstances({ silent: true });
+        });
+        ventanitaWrap.appendChild(ventanitaBtn);
+        if (isOn) Viewer.mountVentanita(ventanitaWrap, inst.id);
+        secondary.appendChild(ventanitaWrap);
+      }
 
       const buttons = document.createElement('div');
       buttons.className = 'instance-secondary-buttons';
@@ -1780,44 +1987,7 @@ async function loadInstances({ silent = false } = {}) {
         buttons.appendChild(adbAccessBtn);
       }
 
-      // Only the actions that make sense for the current state (see instanceState.js).
-      const mk = (label, action) => {
-        const b = document.createElement('button');
-        b.textContent = label;
-        b.className = 'secondary';
-        b.addEventListener('click', async () => {
-          b.disabled = true;
-          try {
-            await api(`/instances/${inst.id}/${action}`, { method: 'POST' });
-          } catch (e) {
-            alert(e.message);
-          } finally {
-            b.disabled = false;
-            await loadInstances({ silent: true });
-          }
-        });
-        return b;
-      };
-      for (const action of state.actions) {
-        if (action === 'delete') {
-          if (!AuthUi.can('delete')) continue;
-          const del = document.createElement('button');
-          del.textContent = t('instances.delete');
-          del.className = 'secondary';
-          del.addEventListener('click', async () => {
-            if (!confirm(t('instances.confirmDelete', { name: inst.name }))) return;
-            try {
-              await api(`/instances/${inst.id}`, { method: 'DELETE' });
-              await loadInstances({ silent: true });
-            } catch (e) {
-              alert(e.message);
-            }
-          });
-          buttons.appendChild(del);
-        } else if (AuthUi.can('start-stop')) {
-          buttons.appendChild(mk(t(`instances.${action}`), action));
-        }
-      }
+      appendActionButtons(buttons);
 
       secondary.appendChild(buttons);
       tdSecondary.appendChild(secondary);
@@ -1831,9 +2001,21 @@ async function loadInstances({ silent = false } = {}) {
       if (openStorageId === inst.id) rows.appendChild(buildStorageEditRow(inst));
       if (openAdbAccessId === inst.id) rows.appendChild(buildAdbAccessEditRow(inst));
     }
-    tbody.replaceChildren(rows);
+    if (isViewers) grid.replaceChildren(cards); else tbody.replaceChildren(rows);
+    // Sweep sessions nobody asked to keep any more. Which instances SHOULD have a mounted
+    // viewer right now depends on the active mode: "completo" only the ones whose own 👁 toggle
+    // is on, "visores" every instance (that is the whole point of that mode), "mínimo" none at
+    // all. An instance that got deleted (so its row/card never ran a mount call above this
+    // poll) is the normal way this also fires, not just a mode switch or an explicit toggle-off
+    // (that already unmounts inline, see the click handler above).
+    const instanceIds = new Set(instances.map((i) => i.id));
+    const shouldBeMounted = (id) => instanceIds.has(id)
+      && (instanceViewMode === 'viewers' || (instanceViewMode === 'full' && ventanitaIds.has(id)));
+    for (const id of Viewer.mountedIds()) {
+      if (!shouldBeMounted(id)) Viewer.unmountVentanita(id);
+    }
   } catch (e) {
-    tbody.innerHTML = `<tr><td>${t('common.error', { msg: e.message })}</td></tr>`;
+    target.innerHTML = isViewers ? `<p>${t('common.error', { msg: e.message })}</p>` : `<tr><td>${t('common.error', { msg: e.message })}</td></tr>`;
   }
 }
 
