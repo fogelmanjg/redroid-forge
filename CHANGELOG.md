@@ -27,6 +27,22 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
 
 ## [Unreleased]
 
+## [0.9.1] - 2026-11-15
+
+### Fixed
+
+- Instances: the live preview ("ventanita"/"visores", added in 0.9.0) could fail to start with
+  "Upstream capture failing" on a host where its instance had never been `adb connect`-ed under
+  the exact `127.0.0.1:<port>` string before -- `adb -s host:port` matches an already-connected
+  serial literally, with no IP normalization, so a device already reachable only as
+  `localhost:<port>` (e.g. via `scripts/connect.sh`'s own default host string) was invisible to
+  it. Found live updating prod to 0.9.0: its one instance had only ever been connected as
+  `localhost`, never `127.0.0.1`, so the preview never worked there even though scrcpy/adb
+  against the same instance worked fine directly. The capture loop now calls the same
+  `ensureConnected()` the real scrcpy pipeline already used for this (`scrcpy/forward.js`)
+  before every capture, which is also self-healing if the device ever drops off adb's list
+  mid-session.
+
 ## [0.9.0] - 2026-11-15
 
 ### Added

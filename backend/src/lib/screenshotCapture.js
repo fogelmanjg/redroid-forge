@@ -15,11 +15,27 @@
 
 const { spawn } = require('child_process');
 const sharp = require('sharp');
+const { ensureConnected } = require('./scrcpy/forward');
 
 // `exec-out`, not `adb shell` -- `adb shell` multiplexes stdout through a text-oriented protocol
 // that mangles arbitrary binary bytes (CRLF translation, among other things); `exec-out` is ADB's
 // own binary-safe raw-passthrough mode, built for exactly this (PNG/image data).
-function captureScreenshot(host, adbPort) {
+//
+// `ensureConnected` first (reused from scrcpy/forward.js, not duplicated -- same project
+// convention as dockerRuntime.writeFile mirroring readFile) -- `adb -s host:port` does NOT
+// auto-dial an address it has never seen; it only matches an EXACT serial already in its device
+// list. Found the hard way updating prod to this feature (15/11/2026): prod's instance had only
+// ever been `adb connect`-ed as `localhost:<port>` (scripts/connect.sh's own default host
+// string), so `-s 127.0.0.1:<port>` failed with "device not found" even though the exact same
+// TCP endpoint was already reachable under that other alias -- adb treats "localhost" and
+// "127.0.0.1" as two different devices, string-for-string, no IP normalization. Desa only ever
+// worked by accident: some earlier manual testing this session happened to `adb connect` it
+// under "127.0.0.1" first. Idempotent against an already-connected target (adb's own behavior,
+// confirmed in forward.js's own comment), so calling it every tick is cheap and self-healing
+// (e.g. the device transiently drops off the adb server's list) rather than a one-time setup
+// step that can't recover from that.
+async function captureScreenshot(host, adbPort) {
+  await ensureConnected(host, adbPort);
   return new Promise((resolve, reject) => {
     const child = spawn('adb', ['-s', `${host}:${adbPort}`, 'exec-out', 'screencap', '-p']);
     const chunks = [];
