@@ -27,6 +27,45 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-11-15
+
+### Added
+
+- Instances: a new "expandida" viewer mode -- full-screen, real-time video (H.264 via
+  `VideoDecoder`), audio (Opus via `AudioDecoder`), and input (pointer → touch, a hidden text
+  field, a nav bar for back/home/recent-apps/volume/fullscreen), reachable from a new ⛶ button
+  next to the existing ventanita toggle. Drives the real `scrcpy-server.jar` this project already
+  pushes and launches itself through a new WS route (`/api/instances/:id/viewer/full`,
+  `backend/src/routes/viewerExpanded.js`) and a new frontend module (`frontend/viewerExpanded.js`)
+  -- not screencap polling like the ventanita, the actual streaming-quality experience that mode
+  explicitly isn't. Reuses the existing `permissions.js` model as-is (`view` to watch, `start-stop`
+  to send input). See `docs/ROADMAP.md`'s Phase 11 for the full design.
+
+### Fixed
+
+- Audio encode: no Android image/host combination tried across this project ships a working Opus
+  audio ENCODER (the vendor's own `media_codecs_google_audio.xml` declares the decoder, never the
+  encoder -- confirmed down to that file, and matching an already-documented identical gap on
+  `redroid11_x86_64` and on the `nvenc`+`venus3d` combination). AAC does encode on-device, but an
+  earlier attempt at decoding it in the browser had already failed. Worked around by requesting
+  raw/uncompressed PCM from scrcpy-server instead (no on-device MediaCodec involved at all) and
+  encoding it to Opus ourselves, in process, before relaying to the browser
+  (`backend/src/lib/scrcpy/opusTranscoder.js`, one `opusscript` instance per viewer session).
+- Doctor: findings are now sorted worst-first (fail, then warn, then ok) instead of the backend's
+  raw order, so anything needing attention is never buried below a page of green checks.
+- Instance creation: the image dropdown now defaults to the "oficial"-tier image instead of
+  whichever image happens to be first in `images.json`'s own order (previously
+  `android-11-official` by list-order accident, not by design).
+
+### Changed
+
+- `backend/src/routes/viewer.js`'s WS upgrade handler no longer answers 404 for a path under
+  `/api/instances/` that isn't its own `/viewer` -- found live building the route above: every
+  `onUpgrade` handler this project registers sees every upgrade request regardless of path, so a
+  broad "looks like mine" prefix check was enough to let this handler steal and kill a sibling
+  route's socket before that other handler ever got a turn. A non-match now falls through
+  silently, same posture already taken for a path outside `/api/instances/` entirely.
+
 ## [0.9.1] - 2026-11-15
 
 ### Fixed

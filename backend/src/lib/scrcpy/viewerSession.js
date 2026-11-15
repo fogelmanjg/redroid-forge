@@ -28,7 +28,7 @@ const { socketName } = require('./protocol');
 const HOST = '127.0.0.1'; // docker-compose.yml: network_mode: host -- this reaches the
 // instance's published adbPort directly, no host.docker.internal needed (confirmed in Hito 1).
 
-async function start(instance, { maxSize, maxFps, bitRate, audio = false, onVideoPacket, onAudioPacket, onError } = {}) {
+async function start(instance, { maxSize, maxFps, bitRate, audio = false, audioCodec, onVideoPacket, onAudioPacket, onError } = {}) {
   let localPort;
   let scid;
   let videoConn;
@@ -62,7 +62,7 @@ async function start(instance, { maxSize, maxFps, bitRate, audio = false, onVide
 
   try {
     await forward.ensureConnected(HOST, instance.adbPort);
-    const launched = await launchServer.launch(instance.containerId, HOST, instance.adbPort, { maxSize, maxFps, bitRate, audio });
+    const launched = await launchServer.launch(instance.containerId, HOST, instance.adbPort, { maxSize, maxFps, bitRate, audio, audioCodec });
     scid = launched.scid;
 
     localPort = await forward.allocateLocalPort();

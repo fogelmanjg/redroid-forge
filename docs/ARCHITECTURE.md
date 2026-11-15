@@ -119,6 +119,18 @@ WiFi reconnection (`ensureWifiConnected`, and its persistent version, the period
 repeated on every boot of every instance — it is not "saved" anywhere no matter how many times it
 runs.
 
+Another real example (Phase 11, the embedded scrcpy web viewer): pushing `scrcpy-server.jar`
+into the container and launching it with `app_process` happens on every single viewer
+connection, not once at create time — the jar is never committed to the container's filesystem,
+and the process is killed again when that connection closes (`backend/src/lib/scrcpy/
+launchServer.js`/`pushServer.js`). **Native, not a module**, per `docs/MODULE-AUTHORING.md`'s own
+test: any instance, with any combination of modules, can open a viewer session — it does
+not depend on the instance having been created with a particular module. That is a separate
+question from whether a viewer *runs by default*: like auth's own "no login configured" flag,
+each viewer (the ventanita, and the expandida full-screen mode) is its own explicit,
+independently-toggled, default-off switch — nobody pays for a real scrcpy-server encode session
+without asking for one.
+
 ## The distinction that matters most: stage 4 vs. stage 6
 
 - **Stage 4** = once, before the first boot, and it persists as long as that instance exists (it is

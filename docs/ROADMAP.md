@@ -1120,6 +1120,47 @@ unaffected.
 **Gate:** the project is in a condition to be called **beta 0.9** — from here the donations/support
 mechanism is picked up again (section 8 of `REQUIREMENTS.md`), not before.
 
+## Phase 11 — Embedded web viewer, own scrcpy-server protocol client
+
+**Difficulty: Medium-High** — a real-time protocol client (H.264/Opus over raw TCP) plus a
+WebCodecs-based browser player, built from scratch rather than embedding anything third-party.
+Full design history and decisions in
+`/home/jgustavo/.claude/plans/recursive-dreaming-honey.md`.
+
+Two independent, opt-in modes per instance, both reusing the existing `permissions.js` model
+(`view` to watch, `start-stop` to send input) and the real `scrcpy-server.jar` this project pushes
+and launches itself (no `adb shell input`, no third-party viewer):
+
+- **"Ventanita"** (15/11/2026): a persistent small preview per instance, on the Instances tab.
+  Shipped via a much simpler `adb exec-out screencap` polling loop instead of real video —
+  the shared VA-API hwenc daemon this host's scrcpy-server encode path depends on was found to
+  fail intermittently under host-wide concurrent load (killing the whole scrcpy-server process,
+  not just that connection), and the ventanita never needed real smoothness to begin with
+  ("no necesito fluidez", explicit decision). `backend/src/lib/screenshotCapture.js`,
+  `backend/src/routes/viewer.js`, `frontend/viewer.js`.
+- **"Expandida"** (15/11/2026): full-screen, real video (H.264, `VideoDecoder`) + audio (Opus,
+  `AudioDecoder`) + input (pointer → touch, a hidden `<input>` for plain committed text, a nav
+  bar for back/home/recent-apps/volume), driving the real scrcpy-server pipeline built and
+  validated for this project's own protocol client (`backend/src/lib/scrcpy/*`,
+  `viewerSession.js`) — no screencap polling here, this is the actual streaming-quality
+  experience the ventanita explicitly is not. `backend/src/routes/viewerExpanded.js`,
+  `frontend/viewerExpanded.js`.
+  - **Audio, real device content (15/11/2026):** no Android image/host combination tried so far
+    across this project ships a working Opus audio ENCODER (confirmed down to the vendor's own
+    `media_codecs_google_audio.xml` — the decoder is declared, the encoder plain isn't, neither
+    as an OMX name nor as a Codec2 component; the same gap was already independently found on
+    `redroid11_x86_64` and on the `nvenc`+`venus3d` combination). AAC does encode on-device, but
+    decoding it in the browser via `AudioDecoder` had already failed in an earlier attempt, so
+    that path was ruled out too. The fix: request `audio_codec=raw` from scrcpy-server instead
+    (uncompressed PCM, no on-device MediaCodec involved at all) and encode it to Opus ourselves,
+    in process, one `opusscript` (pure WASM, no native build) instance per viewer session —
+    `backend/src/lib/scrcpy/opusTranscoder.js`. Confirmed live with real audio content (not just
+    silence) playing on the device.
+
+**Gate:** both modes usable end to end on this host's own instances; no further milestone planned
+beyond polish (a liveness heartbeat beyond the plain WS close/error already in place, if an
+unclean-disconnect orphan session is ever actually observed in practice).
+
 ## Outside the phases (on demand, they block nothing above)
 
 - Other "large" projects to read that could add something (pending in `REQUIREMENTS.md` section 10) — they
@@ -1195,6 +1236,11 @@ mechanism is picked up again (section 8 of `REQUIREMENTS.md`), not before.
   launches it by hand today. Not implemented yet -- recorded as a pending idea only, not
   scheduled; revisit once the decoder-bug writeup above is resolved, since it is what surfaced
   this idea.
+  **Distinct from, and compatible with, Phase 11 below (added 15/11/2026):** this is a LOCAL
+  desktop GUI, for someone sitting at this host driving the real desktop `scrcpy` binary. Phase
+  11 is a remote, browser-embedded viewer with its own protocol client, reachable from any
+  device on the network, not this host's own desktop session. Building one does not replace the
+  other, and nothing here blocks or is blocked by Phase 11.
 - **Configurable ad blocker (idea, 04/10/2026).** At system level and per application. It fits as a Phase 5
   user module (manifest + script), not as part of the core. Design to be decided; options seen:
   - *Local VPN client* (NetGuard tested by hand, it needs no root): it allows per-app (uid) rules. Platform

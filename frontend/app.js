@@ -1870,6 +1870,16 @@ async function loadInstances({ silent = false } = {}) {
         ventanitaWrap.appendChild(ventanitaBtn);
         if (isOn) Viewer.mountVentanita(ventanitaWrap, inst.id);
         secondary.appendChild(ventanitaWrap);
+
+        // "Expandida" (Hitos 3+4) -- a one-shot action, not a toggle: opening it does not turn
+        // the ventanita above on or off, and vice versa (independent, per the plan).
+        const expandBtn = document.createElement('button');
+        expandBtn.type = 'button';
+        expandBtn.className = 'icon-button';
+        expandBtn.textContent = '⛶'; // ⛶
+        expandBtn.title = t('instances.viewer.expandHint');
+        expandBtn.addEventListener('click', () => ViewerExpanded.open(inst.id));
+        secondary.appendChild(expandBtn);
       }
 
       const buttons = document.createElement('div');
@@ -2892,13 +2902,20 @@ $('#new-user-form').addEventListener('submit', async (ev) => {
   }
 });
 
+const DOCTOR_STATUS_ORDER = { fail: 0, warn: 1, ok: 2 };
+
 async function loadDoctor() {
   const list = $('#doctor-list');
   list.innerHTML = `<li>${t('doctor.running')}</li>`;
   try {
     const checks = await api('/doctor');
+    // Worst first (15/11/2026, explicit ask): what needs attention should never be buried below
+    // a page of green checks. A stable sort, so checks that tie on status keep the backend's own
+    // order among themselves (whatever sequence doctor.js runs them in) rather than reshuffling
+    // for no reason -- Array.prototype.sort is spec-guaranteed stable since ES2019.
+    const sorted = checks.slice().sort((a, b) => (DOCTOR_STATUS_ORDER[a.status] ?? 1) - (DOCTOR_STATUS_ORDER[b.status] ?? 1));
     list.innerHTML = '';
-    for (const c of checks) {
+    for (const c of sorted) {
       const li = document.createElement('li');
       li.className = 'doctor-item';
       li.innerHTML = `
@@ -3167,6 +3184,15 @@ $('#btn-new-instance').addEventListener('click', async () => {
         return `<option value="${img.id}" ${img.present ? '' : 'disabled'} title="${loc(img, 'notaSoporte') || ''}">${loc(img, 'label')} — ${tier}${notPresent}</option>`;
       })
       .join('');
+    // Found live (15/11/2026): with no explicit selection the browser just lands on whichever
+    // <option> is FIRST in images.json's own order (android-11-official, there only for HIDL
+    // hwenc evaluation, community support, no Opus audio) -- not a deliberate default, just an
+    // accident of list order. Default to the "oficial" tier instead (android-15-official today),
+    // by that flag rather than a hardcoded id, so this keeps pointing at whichever image earns
+    // that tier if it ever changes. Falls back to the first present image if somehow none is
+    // "oficial" yet (e.g. a fresh host that hasn't pulled it).
+    const preferred = images.find((img) => img.soporte === 'oficial' && img.present) || images.find((img) => img.present);
+    if (preferred) select.value = preferred.id;
   } catch (e) {
     select.innerHTML = `<option>${t('common.error', { msg: e.message })}</option>`;
   }

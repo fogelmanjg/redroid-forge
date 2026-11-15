@@ -240,6 +240,34 @@ tr.instance-row-secondary > td { padding-top: 0.2rem; }
 .viewer-ventanita-wrap { display: inline-flex; align-items: center; gap: 0.4rem; }
 .viewer-ventanita-img { max-width: 160px; max-height: 160px; border: 1px solid var(--border); border-radius: 4px; background: #000; }
 
+/* "Expandida" full-screen overlay (Hitos 3+4, frontend/viewerExpanded.js) -- a fixed full-
+   viewport layer, not an actual Fullscreen-API element until the bar's own button asks for one
+   (requestFullscreen needs a user gesture, this overlay opens from a button click already, but
+   staying a plain fixed div by default means it still fully covers the page even if the browser
+   is itself not in fullscreen mode -- a real OS fullscreen is a nice-to-have on top, not load-
+   bearing). */
+.viewer-expanded-overlay {
+  position: fixed; inset: 0; z-index: 1000; background: #000;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+}
+.viewer-expanded-overlay:focus { outline: none; }
+.viewer-expanded-canvas { max-width: 100%; max-height: calc(100% - 3rem); object-fit: contain; cursor: crosshair; }
+/* Off-screen, not display:none -- an invisible-but-present input keeps IME/composition and
+   focus() working on it (display:none elements can't be focused in any browser). */
+.viewer-expanded-text-input {
+  position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; border: none;
+}
+.viewer-expanded-navbar {
+  display: flex; gap: 0.4rem; padding: 0.5rem; background: rgba(0,0,0,0.6);
+  position: absolute; bottom: 0.5rem; border-radius: 8px;
+}
+.viewer-expanded-navbtn {
+  min-width: 2.4rem; padding: 0.4rem 0.6rem; font-size: 1.1rem; line-height: 1;
+  background: rgba(255,255,255,0.1); color: #fff; border: 1px solid rgba(255,255,255,0.25);
+  border-radius: 6px; cursor: pointer;
+}
+.viewer-expanded-navbtn:hover { background: rgba(255,255,255,0.2); }
+
 /* Instances view-mode switch (15/11/2026) -- "completo" (unchanged table above), "mínimo"
    (name+address+actions only) and "visores" (a grid of live previews) are three renderings of
    the same instance list, picked here and remembered per browser via localStorage. */

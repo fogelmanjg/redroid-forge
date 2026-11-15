@@ -72,6 +72,9 @@ require('./lib/httpListeners').listen(app, PORT);
 // starts creating the real http.Server(s), but httpListeners.onUpgrade's own comment is what
 // actually makes the order not matter here.
 require('./routes/viewer').registerUpgrade();
+// WS upgrade for the "expandida" viewer (real scrcpy video+audio+input, Hitos 3+4) -- a separate
+// onUpgrade handler/path (/viewer/full, not /viewer), see routes/viewerExpanded.js's own comment.
+require('./routes/viewerExpanded').registerUpgrade();
 // Checks (never applies) whether a newer combinations database exists: on
 // open and once a day. Can be turned off with REDROID_FORGE_DB_CHECK=0.
 require('./lib/knownDbUpdate').startScheduler();

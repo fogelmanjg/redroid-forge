@@ -27,7 +27,7 @@ const SCRCPY_VERSION = '5.0.1';
 // carries all 3 channels, per the "one session, both directions" decision) -- so they are never
 // passed as `false` here; only the options that differ from scrcpy's own defaults are added,
 // same "only non-default" discipline the real desktop client itself follows (server.c:272-457).
-function buildArgs({ scid, maxSize, maxFps, bitRate, logLevel = 'info', audio }) {
+function buildArgs({ scid, maxSize, maxFps, bitRate, logLevel = 'info', audio, audioCodec }) {
   // cleanup=false (default is true): the server deletes its own jar from /data/local/tmp on
   // exit -- fine for a single desktop-client session, but a real correctness risk for this
   // project's actual use case, where more than one session can run against the SAME instance at
@@ -46,10 +46,16 @@ function buildArgs({ scid, maxSize, maxFps, bitRate, logLevel = 'info', audio })
   // decision) -- `audio=false` here is ONLY a diagnostic escape hatch (see scrcpy-probe.js),
   // not a product option: found live, Hito 1 validation, that this test image's Android build
   // (redroid11_x86_64) has no Opus encoder at all (only AAC/FLAC listed), and the server process
-  // dies entirely (not just "no audio") when the opus encoder thread throws. That directly
-  // contradicts the "Opus only, no negotiation" decision for at least this image -- a real open
-  // question for the user, not something to silently work around by switching codecs.
+  // dies entirely (not just "no audio") when the opus encoder thread throws.
   if (audio === false) args.push('audio=false');
+  // "Opus only, no negotiation" (the plan's original decision) turned out not to hold on ANY
+  // image tested so far -- confirmed 15/11/2026 on this exact host (vendor's own
+  // media_codecs_google_audio.xml ships zero Opus encoder entries, Codec2 or OMX, just a
+  // decoder), matching an already-documented identical finding on redroid11 and on the
+  // nvenc+venus3d combination (c2.android.opus.encoder refuses to register either way). AAC is
+  // what actually works everywhere tried -- made the explicit default rather than relying on
+  // scrcpy-server's own default (Opus), which is exactly the thing that doesn't exist here.
+  if (audioCodec) args.push(`audio_codec=${audioCodec}`);
   return args;
 }
 
@@ -78,10 +84,10 @@ function shellLaunch(host, adbPort, remoteCmd, { onOutput } = {}) {
 // killServer below). Does not wait for it to be ready to accept connections; forward.js's own
 // connect-with-retry loop is what actually waits (same reasoning as the real desktop client,
 // server.c:489-539's up-to-100-retries-at-100ms).
-async function launch(containerId, host, adbPort, { maxSize, maxFps, bitRate, logLevel, audio, onOutput } = {}) {
+async function launch(containerId, host, adbPort, { maxSize, maxFps, bitRate, logLevel, audio, audioCodec, onOutput } = {}) {
   const scid = generateScid();
   await pushServer.pushToContainer(containerId);
-  const args = buildArgs({ scid, maxSize, maxFps, bitRate, logLevel, audio });
+  const args = buildArgs({ scid, maxSize, maxFps, bitRate, logLevel, audio, audioCodec });
   const remoteCmd = `CLASSPATH=${pushServer.DEST_PATH} app_process / com.genymobile.scrcpy.Server ${SCRCPY_VERSION} ${args.join(' ')}`;
   shellLaunch(host, adbPort, remoteCmd, { onOutput });
   return { scid };

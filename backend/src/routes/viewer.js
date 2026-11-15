@@ -46,11 +46,17 @@ function rejectUpgrade(socket, status, message) {
 }
 
 async function handleUpgrade(req, socket, head) {
-  if (!req.url.startsWith('/api/instances/')) return; // not ours -- leave it for Node's default
-  // (hang/eventually-timeout) behavior, same as before this handler existed, rather than
-  // guessing at some other future upgrade handler's path.
+  // Every upgrade handler this project registers (httpListeners.onUpgrade -- each one its own
+  // independent 'upgrade' listener on the same http.Server, ALL of which fire for every upgrade
+  // request, not just the first match) gets a look at every path. The `startsWith` check alone is
+  // not a real "is this mine" test -- found live (routes/viewerExpanded.js's own Paso A
+  // validation, 15/11/2026): it let this handler 404-and-destroy a sibling route's socket
+  // (/viewer/full) just for sharing the /api/instances/ prefix, before that other handler ever
+  // got a turn. A non-match now just falls through silently (Node's default hang/eventual
+  // timeout), same posture already taken for a path outside /api/instances/ entirely -- fixing
+  // "almost looks like mine" to behave the same as "not mine at all", not a new behavior.
   const match = PATH_RE.exec(req.url);
-  if (!match) { rejectUpgrade(socket, 404, 'Not Found'); return; }
+  if (!match) return;
   const instanceId = match[1];
 
   const user = auth.resolveUser(req);
