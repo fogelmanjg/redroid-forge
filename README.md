@@ -25,6 +25,13 @@ without depending on any other infrastructure.
 > roadmap — everything in the Features table below — with Phase 8 (federation with
 > `jg-dashboard`/Plenum) next. See [`CHANGELOG.md`](CHANGELOG.md) for the detail, tag `v0.3.0`.
 
+## Screenshots
+
+<img src="docs/screenshots/complete-view.png" width="270" alt="Instances tab, Completo view"> <img src="docs/screenshots/viewers.png" width="270" alt="Instances tab, Visores view"> <img src="docs/screenshots/new-instance.png" width="270" alt="New instance dialog">
+
+More in [`docs/SCREENSHOTS.md`](docs/SCREENSHOTS.md) — all three Instances-tab view modes, Doctor,
+Settings, Identities, port-knocking, and module management.
+
 ## Features
 
 What it does today, and what's still ahead. "Official" vs "community" below is this project's own

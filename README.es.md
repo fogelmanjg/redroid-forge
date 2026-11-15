@@ -27,6 +27,13 @@ sin depender de ninguna otra infraestructura.
 > más abajo — con la Fase 8 (federación con `jg-dashboard`/Plenum) como próximo paso. Ver
 > [`CHANGELOG.md`](CHANGELOG.md) para el detalle, tag `v0.3.0`.
 
+## Capturas de pantalla
+
+<img src="docs/screenshots/complete-view.png" width="270" alt="Pestaña Instancias, vista Completo"> <img src="docs/screenshots/viewers.png" width="270" alt="Pestaña Instancias, vista Visores"> <img src="docs/screenshots/new-instance.png" width="270" alt="Diálogo de nueva instancia">
+
+Más en [`docs/SCREENSHOTS.es.md`](docs/SCREENSHOTS.es.md) — los tres modos de vista de la pestaña
+Instancias, Doctor, Configuración, Identidades, port-knocking y manejo de módulos.
+
 ## Features
 
 Qué hace hoy, y qué sigue pendiente. "Oficial" vs. "comunidad" abajo es la distinción de tier de
