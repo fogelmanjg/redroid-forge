@@ -1104,13 +1104,16 @@ unaffected.
 **Difficulty: Low** — it is cleanup and documentation, not new technical work.
 
 **Steps:**
-1. **Secure the old code on GitHub before deleting anything.** ✅ Done on 05/10/2026: `jg-dashboard` was
+1. **Secure the old code on GitHub before deleting anything.** ✅ Done. 05/10/2026: `jg-dashboard` was
    pushed (the 2 pending commits, including `27bd149`, the last redroid work) and `plenum-redroid` — which
    was not a git repo nor existed on GitHub — was uploaded, frozen, to `fogelmanjg-plenum/plenum-redroid`
    (private, with a README marking it as archived and replaced by `redroid-forge`; without `.env` or
-   runtime data). **Still missing**, right before deleting: commit/push again any new redroid change in
-   `jg-dashboard` (it currently has uncommitted files unrelated to this decision) and leave a tag on the
-   last commit (e.g. `redroid-legacy-<date>`) to find it easily.
+   runtime data). 16/11/2026: the 3 pending `jg-dashboard` files (unrelated to this decision — a
+   `redroid-forge-prod` dashboard tab, a shared `HWSIM_RADIO_COUNT` bump, and unrelated CPU/APU gauges)
+   were committed and pushed (`6be7a05`), and a `redroid-legacy-2026-11-16` tag was pushed on top of it.
+   `plenum-redroid` turned out to already be archived at the GitHub level (read-only, not just a README
+   note) — a tag cannot be pushed there and none was needed; its own last commit (`25aa48a`) already says
+   so in its message.
 2. Remove **all** the redroid code from `jg-dashboard` and `plenum-redroid` (only here, never before the
    Phase 7 gate), including the dead code of the `ws-scrcpy`/oauth2-proxy viewer. Decision (05/10/2026):
    that code stays on GitHub as an old project, dead and replaced by `redroid-forge`; nothing is ported as
