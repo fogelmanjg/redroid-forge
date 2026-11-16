@@ -1,0 +1,71 @@
+name: Bug report
+description: Something doesn't work the way it should.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time. Behavior in this project genuinely varies by GPU
+        vendor/driver and by which modules an instance has enabled (see
+        `docs/KNOWN-COMBINATIONS.md`) — the fields below exist because that combination is
+        usually the first thing needed to make a report actionable.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you did, what you expected, what actually happened.
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: redroid-forge version
+      description: The version shown in the app footer, or `git describe --tags`.
+      placeholder: "v0.10.0"
+    validations:
+      required: true
+
+  - type: input
+    id: gpu
+    attributes:
+      label: Host GPU vendor and driver
+      description: 'Or "software/none" if you are not using `gpuMode: host`.'
+      placeholder: "AMD Polaris, amdgpu, Mesa 24.x"
+    validations:
+      required: true
+
+  - type: input
+    id: image
+    attributes:
+      label: Redroid image id
+      description: From the catalog, e.g. the id shown in the New Instance dialog.
+      placeholder: "android-15-official"
+    validations:
+      required: true
+
+  - type: textarea
+    id: modules
+    attributes:
+      label: Modules enabled on the affected instance
+      placeholder: "hwenc, hwdec, gapps, arm-translation"
+    validations:
+      required: false
+
+  - type: textarea
+    id: doctor
+    attributes:
+      label: Anything flagged on the Doctor tab?
+      description: Copy/paste what it shows, even if it looks unrelated.
+    validations:
+      required: false
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: Backend console output, browser devtools console, `docker logs`, etc. — whatever is relevant.
+      render: shell
+    validations:
+      required: false

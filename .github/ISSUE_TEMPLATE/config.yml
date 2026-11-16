@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Documentation
+    url: https://github.com/fogelmanjg/redroid-forge/tree/main/docs
+    about: REQUIREMENTS.md (what/why), ARCHITECTURE.md (how), MODULE-AUTHORING.md (writing a module), ROADMAP.md (what's decided vs. still an idea), KNOWN-COMBINATIONS.md (hardware/image support).
+  - name: Known hardware/image combinations
+    url: https://github.com/fogelmanjg/redroid-forge/blob/main/docs/KNOWN-COMBINATIONS.md
+    about: Check here before reporting something as broken — your combination may already be documented as unsupported, with a reason.

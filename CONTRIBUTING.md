@@ -1,0 +1,79 @@
+# Contributing to redroid-forge
+
+This project's official language is English (see `README.md`). Keep that in mind for issues, PRs
+and commit messages — Spanish is fine for an informal report, but a PR's own description/commit
+message should be in English, same as the rest of the codebase and docs.
+
+## Current status: feature freeze (since 16/11/2026)
+
+**Only bug fixes, performance fixes, and documentation are being merged right now.** The project
+is closing in on its `1.0.0` release — see `docs/ROADMAP.md`'s Phase 10 for exactly what that
+means (it is a cleanup/documentation gate, not a feature-completeness one) and `CHANGELOG.md`'s
+versioning policy for how `1.0.0` is decided. A new module, a new API route, a new frontend
+capability — anything that would be a MINOR bump under that policy — will not be merged until the
+freeze lifts, no matter how good the idea is. Feel free to open an issue describing it anyway
+(see "Proposing a feature" below) so it is not lost — it will just wait.
+
+This also means: if you are looking for a first contribution, a bug fix or a docs fix is the best
+way in right now.
+
+## Before opening a PR
+
+1. **Open an issue first for anything non-trivial** (more than a one-line fix) — this project has
+   a lot of hardware-specific, host-specific context (GPU vendor quirks, Android version
+   combinations, module interactions) documented across `docs/*.md` that is easy to miss; an issue
+   lets that context surface before you spend time on an approach that already has a documented
+   reason it does not work.
+2. **Read the doc for the area you're touching before changing it**, not just the code:
+   - `docs/REQUIREMENTS.md` — what and why (scope, license policy, module consent model).
+   - `docs/ARCHITECTURE.md` — how the pieces fit together (base image, the 6/7-stage module
+     lifecycle, the known-combinations database).
+   - `docs/MODULE-AUTHORING.md` — writing a module (native vs. own vs. user module, the manifest
+     schema, the stage-7 watchdog convention).
+   - `docs/ROADMAP.md` — what is already decided, what is still an open idea, and why things are
+     sequenced the way they are. A lot of "why isn't X done the obvious way" is answered here,
+     often with the exact investigation that ruled the obvious way out.
+3. **Run the tests**: `npm test` from `backend/` (`node --test test/` under the hood — no test
+   framework dependency beyond Node's own built-in runner, by design). A PR that only adds
+   behavior without a test for it will be asked to add one, same bar the existing code is held to.
+4. **Match the existing style**: no code comments explaining *what* code does (names should
+   already say that) — only *why*, when it is genuinely non-obvious (a hidden constraint, a
+   workaround for a specific bug, something that would surprise a reader). The codebase leans
+   heavily on this already; read a neighboring file before adding a block comment.
+
+## Proposing a feature
+
+Open an issue (there is a template for it). Explain the use case, not just the mechanism — a lot
+of this project's own design decisions came from a concrete real case (a specific game, a specific
+GPU, a specific failure) rather than a hypothetical one, and that is the kind of detail that
+actually moves a design discussion forward. During the freeze this will not be merged immediately,
+but a well-described feature request is useful groundwork — several phases in `docs/ROADMAP.md`
+started exactly as an issue-shaped idea.
+
+## Reporting a bug
+
+Open an issue (there is a template for it). The single most useful thing you can include: your
+**host's GPU vendor and driver**, the **redroid image id** (`android-15-official` or whichever),
+and which **modules** the instance has enabled — this project's own `docs/KNOWN-COMBINATIONS.md`
+exists because behavior genuinely varies across that combination, and "it doesn't work" without
+it usually means a few back-and-forth messages before the report is actionable.
+
+If it is a crash or hang on the Android side specifically, check whether the Doctor tab already
+flags something relevant first — a surprising number of real issues are a missing host
+prerequisite (kernel `binder`, `mac80211_hwsim`, a GPU driver) that Doctor already detects with
+the exact fix command.
+
+## Adding a module
+
+Third-party/non-free content (GApps, Magisk, anything like them) is **never packaged** inside this
+repo or its images — see `docs/REQUIREMENTS.md` section 6. A module that integrates one of those
+downloads it from its real official source at the moment a user actually requests it, under an
+explicit consent contract (`backend/src/modules/manifests/*.json` + the module's own
+`integrate.js`) — never silently. Read `docs/MODULE-AUTHORING.md` before writing one; it covers
+the full manifest schema and the 7-stage lifecycle hook contract with real examples from the
+modules already shipped.
+
+## License
+
+By contributing, you agree your contribution is licensed under this project's own license, Apache
+License 2.0 (`LICENSE`).

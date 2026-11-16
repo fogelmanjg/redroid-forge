@@ -1,0 +1,39 @@
+name: Feature request
+description: Propose a new capability, module, or API.
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **The project is currently in a feature freeze** (see `CONTRIBUTING.md`) while it closes
+        in on its `1.0.0` release — only bug fixes and documentation are being merged right now.
+        This is still worth opening: it won't be picked up immediately, but a well-described
+        request is real groundwork (several phases in `docs/ROADMAP.md` started exactly this way),
+        and it won't be lost.
+
+  - type: textarea
+    id: use-case
+    attributes:
+      label: Use case
+      description: >
+        What are you actually trying to do? A concrete case (a specific game, a specific piece of
+        hardware, a specific workflow) is far more useful here than an abstract one — most of this
+        project's own design decisions trace back to a real case rather than a hypothetical.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed approach (optional)
+      description: If you already have an idea of the mechanism, share it — but the use case above matters more.
+    validations:
+      required: false
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: What you're doing today instead, if anything
+      description: Workarounds, other tools, manual steps — helps gauge how much this would actually save.
+    validations:
+      required: false

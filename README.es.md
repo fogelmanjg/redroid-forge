@@ -13,8 +13,8 @@ App standalone (frontend + backend en un solo contenedor) para manejar instancia
 [redroid](https://github.com/remote-android/redroid-doc) en cualquier PC que solo tenga Docker,
 sin depender de ninguna otra infraestructura.
 
-> Proyecto en construcción — consolida en un solo lugar varios proyectos separados
-> (`redroid-manager`, `redroid-hwenc`, `redroid-nvidia`, y lo que hoy vive repartido en
+> Proyecto en construcción, cerca de su hito 1.0 — consolida en un solo lugar varios proyectos
+> separados (`redroid-manager`, `redroid-hwenc`, `redroid-nvidia`, y lo que hoy vive repartido en
 > `jg-dashboard`/`plenum-redroid`). Ver [`docs/REQUIREMENTS.es.md`](docs/REQUIREMENTS.es.md) (qué y por
 > qué), [`docs/ARCHITECTURE.es.md`](docs/ARCHITECTURE.es.md) (cómo encajan las piezas — imagen base,
 > módulos, y en qué momento del ciclo de vida de una instancia se toca cada uno),
@@ -22,10 +22,13 @@ sin depender de ninguna otra infraestructura.
 > módulo propio vs. módulo de usuario, el schema del manifiesto, el contrato de las 7 etapas) y
 > [`docs/ROADMAP.md`](docs/ROADMAP.md) (en qué orden; solo en inglés) y
 > [`CHANGELOG.md`](CHANGELOG.md) (releases etiquetados, política de versionado; solo en inglés) para
-> el panorama completo. Lo que hay hoy corresponde a las **Fases 0 a 7, más la Fase 9** (port-knocking,
-> hecha fuera de orden porque no depende de la Fase 8) del roadmap — todo lo de la tabla de Features
-> más abajo — con la Fase 8 (federación con `jg-dashboard`/Plenum) como próximo paso. Ver
-> [`CHANGELOG.md`](CHANGELOG.md) para el detalle, tag `v0.3.0`.
+> el panorama completo. Lo que hay hoy corresponde a las **Fases 0 a 7, 9 y 11** del roadmap — todo
+> lo de la tabla de Features más abajo. **La `1.0.0` queda reservada para el gate de la propia Fase
+> 10** (asegurar y borrar el código legacy que este proyecto reemplaza, más escribir documentación
+> definitiva como esta) — en curso, no una condición de features; la Fase 8 (federación:
+> `jg-dashboard`/Plenum como clientes `oidc` de esta app) es independiente y puede llegar antes o
+> después de la 1.0. **El proyecto está en feature freeze desde el 16/11/2026: solo entran fixes y
+> documentación hasta que salga la 1.0** — ver [`CONTRIBUTING.md`](CONTRIBUTING.md) (solo en inglés).
 
 ## Capturas de pantalla
 
@@ -54,7 +57,7 @@ oficial significa validado con evidencia en hardware real, no una garantía.
 | **Control de acceso** | ✅ | Tres roles (admin/operator/viewer) con ownership por instancia. Pluggable: `none` (default, sin fricción), `local` (cuentas propias), `oidc` (cualquier cantidad de identity providers a la vez — Keycloak, Google, Plenum, otra federación, ... — roles asignados acá, nunca leídos del proveedor), `both` (local y OIDC en la misma pantalla de login). Una cuenta local también puede entrarse por una identidad OIDC vinculada (opt-in, probado logueándose de ambos lados a la vez — nunca por matchear un email declarado). Un asistente crea el primer admin en caliente desde modo `none`, y un guard de auto-bloqueo evita que `local`/`both` se conviertan en una puerta cerrada para siempre. Cambiar de modo y agregar/editar/borrar proveedores OIDC se puede hacer en caliente desde el panel de Identidades — sin editar `.env` — aunque sigue haciendo falta reiniciar para que tome efecto, misma regla que cualquier otra configuración de esta app. |
 | **Control de exposición de red** | ✅ | La app y cada instancia bindean a `127.0.0.1` solamente, por defecto — redroid en sí no tiene ningún control de acceso propio. Se puede optar por cualquier interfaz específica (o todas) por instancia y para la app en sí, desde la UI; las interfaces internas de Docker/contenedores (`docker0`, `br-*`, `veth*`, ...) quedan filtradas de ese selector por defecto, con override de admin. |
 | **Doctor** | ✅ | Diagnóstico del host con el comando exacto para arreglar lo que falta — solo diagnostica, nunca ejecuta nada solo. |
-| **Visualización de pantalla** | ✅ | Scripts de conexión scrcpy (`connect.sh`/`connect.ps1`), un puerto para ver desde un dispositivo Android mismo, sin visor web embebido por diseño (ver abajo). |
+| **Visualización de pantalla** | ✅ | Visor web embebido, en la propia pestaña Instancias — cliente propio del protocolo scrcpy-server, sin visor de terceros embebido. Una vista previa chica y persistente por instancia ("ventanita"), y un modo opcional a pantalla completa con video (H.264)/audio (Opus)/input reales ("expandida"). Además: scripts de conexión scrcpy (`connect.sh`/`connect.ps1`) para un cliente scrcpy de escritorio, y un puerto para ver desde un dispositivo Android mismo. |
 | **Federación** | 📝 planeado | `jg-dashboard` y Plenum pasando a consumir esta app vía `oidc`, reusando el identity provider que cada host ya tiene en vez de un login aparte. |
 | **Port knocking** | ✅ hecho | Gate SPA (`fwknop`) por instancia y por interfaz para el puerto ADB/scrcpy, encima de los controles de red de arriba -- se abre desde la UI por una sesión ya autenticada, nunca por el dispositivo que se conecta. |
 
@@ -178,7 +181,29 @@ solo falta setear `CONTAINER_NAME` en el `.env` del segundo (por ejemplo
 `CONTAINER_NAME=redroid-forge-prod`), ya que el nombre del contenedor por defecto es el mismo
 `redroid-forge` en cualquier checkout y dos contenedores no pueden compartir un nombre.
 
+## Visualización de pantalla: el visor web embebido
+
+No hace falta instalar nada del lado de quien mira — se abre la pestaña Instancias en un
+navegador. Dos modos, reusando el mismo modelo de permisos del resto de la app (`view` para
+mirar, `start-stop` para mandar input):
+
+- **"Ventanita"**: una vista previa chica y persistente por instancia, siempre visible en la
+  pestaña Instancias (capturas periódicas, no video real — está pensada para estar siempre
+  encendida, no para ser fluida).
+- **"Expandida"**: un modo opcional a pantalla completa con video real tipo streaming (H.264,
+  decodificado con `VideoDecoder`) y audio (Opus, `AudioDecoder`), más input (click/tap, un campo
+  de texto oculto para tipear, y una barra de navegación para back/home/recientes/volumen).
+  Se abre con el botón ⛶ al lado del toggle de la ventanita, en cada fila de instancia.
+
+Los dos manejan el `scrcpy-server` real que este proyecto empuja y lanza en la propia instancia —
+cliente propio del protocolo (`backend/src/lib/scrcpy/`), no un visor de terceros embebido. Ver
+la Fase 11 de [`docs/ROADMAP.md`](docs/ROADMAP.md) (solo en inglés) para el diseño completo y
+[`CHANGELOG.md`](CHANGELOG.md) (`0.9.0`/`0.9.1`/`0.10.0`) para qué salió en cada versión.
+
 ## Ver la pantalla desde otra PC (scrcpy) — ej. una TV con una notebook vieja
+
+Para un cliente de escritorio en vez del navegador (más liviano en una notebook vieja usada solo
+como pantalla, o para scriptear), o desde otro dispositivo Android:
 
 Repo de scrcpy: https://github.com/Genymobile/scrcpy
 
@@ -223,8 +248,10 @@ REDROID_FORGE_URL=http://<ip-del-server>:8080 scripts/connect.sh  # redroid-forg
 powershell -File scripts\connect.ps1
 ```
 
-Deliberadamente **no hay ningún visor web embebido** (sin Caddy, sin reverse proxy, sin stack de
-auth que armar) — el script de conexión más un cliente de scrcpy es toda la dependencia. Si
+El script de conexión más un cliente de scrcpy no agrega ninguna dependencia propia del lado de
+redroid-forge (sin Caddy, sin reverse proxy, sin stack de auth además del que ya tiene la app) —
+eso no quiere decir que sean incompatibles, poner un reverse proxy o una capa de auth delante de
+redroid-forge es decisión tuya, redroid-forge simplemente no te lo configura ni gestiona. Si
 preferís un cliente interactivo más prolijo (además de, o en vez de, estos scripts), mirá
 [**scrcpy-manager**](https://git.liaima.dev/liaima/scrcpy-manager) (una interfaz de terminal con
 mouse, perfiles de conexión guardados, y varias sesiones de scrcpy en vivo a la vez) — un proyecto
@@ -243,7 +270,13 @@ backend/src/lib/          dockerRuntime, binder, hwsimWifi, androidIdentity, doc
                            portAllocator, moduleManifests, moduleAcceptance, moduleGate, hwAccel,
                            knownDb*, permissions, userStore, session, oidc, auth, accountLinks,
                            roleAssignments, quotas, networkInterfaceFilter, settings
-backend/src/routes/       instances, doctor, images, modules, db, settings, backups, network, auth
+backend/src/routes/       instances, doctor, images, modules, db, settings, backups, network, auth,
+                           viewer (ventanita), viewerExpanded (expandida, Fase 11)
+backend/src/lib/scrcpy/   cliente propio del protocolo scrcpy-server (Fase 11): protocol.js (formato
+                           del protocolo), pushServer.js/launchServer.js (empuja y lanza el jar real),
+                           forward.js, los sockets de video/audio/control, viewerSession.js (une
+                           todo), opusTranscoder.js (PCM→Opus, ningún build trae encoder Opus real —
+                           ver docs/ROADMAP.md Fase 11)
 backend/src/modules/      manifests/*.json (contrato de cada módulo, sección 5 de REQUIREMENTS.md)
                            + una carpeta por módulo real (hwenc/, hwdec/, gapps/,
                            arm-translation/, wifi-interno/, redroid-gralloc-fix/, cifi/):
@@ -255,7 +288,8 @@ backend/data/             estado persistente (instances.json, settings.json, use
 backend/test/             tests (node --test, sin dependencias nuevas)
 android/                  componentes Codec2 (encoder y decoders por hardware) y sus herramientas de prueba
 frontend/                 frontend vanilla (sin build step); contracts.js = modal de contrato genérico,
-                           authUi.js = gate de login + oculta/deshabilita UI por capacidad (Fase 7)
+                           authUi.js = gate de login + oculta/deshabilita UI por capacidad (Fase 7),
+                           viewer.js/viewerExpanded.js = los dos modos de visor embebido (Fase 11)
 scripts/                 connect.sh / connect.ps1 -- scripts de conexión scrcpy para el usuario final
                           (no confundir con backend/scripts/, que es tooling dev/admin)
 docs/                     REQUIREMENTS (qué y por qué), ARCHITECTURE (cómo encajan las
@@ -263,6 +297,8 @@ docs/                     REQUIREMENTS (qué y por qué), ARCHITECTURE (cómo en
                           KNOWN-COMBINATIONS, ROADMAP (en qué orden) y SCRCPY-TIPS
                           (troubleshooting del lado cliente)
 CHANGELOG.md              releases etiquetados, política de versionado (solo en inglés, igual que ROADMAP)
+CONTRIBUTING.md           cómo proponer un cambio, estado del feature freeze, checklist de bugs/módulos (solo en inglés)
+.github/ISSUE_TEMPLATE/   formularios de bug report / feature request
 ```
 
 ## Créditos y atribución
@@ -273,6 +309,12 @@ reemplazo ni una competencia. Reconocimiento explícito:
 - **[redroid](https://github.com/remote-android/redroid-doc)** (remote-android) — el propio
   Android-en-Docker sobre el que corre todo esto. Licencia Apache License 2.0 (módulos de
   kernel bajo GPL v2).
+- **[scrcpy](https://github.com/Genymobile/scrcpy)** (Genymobile) — Apache License 2.0. El modo
+  "expandida" del visor web embebido empuja y lanza el binario real de `scrcpy-server` de ese
+  proyecto en cada instancia — descargado y verificado por `sha256` desde su release oficial de
+  GitHub en el momento de armar la imagen (ver `Dockerfile`, versión fijada), no forkeado ni
+  copiado. `backend/src/lib/scrcpy/protocol.js` es un cliente propio del protocolo real de ese
+  servidor, escrito contra su fuente pública.
 - La lógica de `binder.js` y `hwsimWifi.js` está portada de `plenum-redroid`
   (`host-resource-allocator.service.ts` y `fake-wifi-networking.service.ts`), simplificada: sin
   los supuestos de convivencia con `jg-dashboard v1` (offset de puertos fijo, fallback de hwsim
