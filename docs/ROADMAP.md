@@ -1161,6 +1161,78 @@ and launches itself (no `adb shell input`, no third-party viewer):
 beyond polish (a liveness heartbeat beyond the plain WS close/error already in place, if an
 unclean-disconnect orphan session is ever actually observed in practice).
 
+## Phase 12 — Node federation: peering between redroid-forge deployments (target 0.11.0)
+
+**Difficulty: Medium** — a new data model, a small pairing protocol, and an HMAC-signed identity
+assertion, but none of it touches the hardest existing code: the scrcpy protocol, the hardware
+codec layer, and `permissions.js` itself all stay unmodified. Design closed 16/11/2026, full
+detail in memory ([[project_redroid_forge_federacion_nodos_diseno_cerrado]]); not started.
+
+**Context:** replaces `/usr/local/bin/scrcpy-fetch-config.sh` — a hand-maintained, SSH-based,
+out-of-band script that lists every known redroid-forge deployment's instances by host
+alias/port (found to have a real bug 15/11/2026: two deployments sharing a port number made it
+silently return the wrong host's data under a different host's label) — with a native feature.
+Not the same thing as Phase 8's "federation mode": that is `jg-dashboard`/Plenum consuming
+redroid-forge as a client against *their own* identity provider. This phase is two or more
+redroid-forge *deployments* ("nodes") talking to each other directly as peers.
+
+Terminology, fixed to avoid colliding with the existing one: **node/peer** = a whole redroid-forge
+deployment (desa, prod, the one on `jgustavo46` are three different nodes); **instance** keeps its
+existing meaning (an Android container inside one node).
+
+**Steps:**
+1. Node-to-node pairing, mutual consent, symmetric (Syncthing-style): an admin adds a peer by URL
+   (Tailscale-reachable, never public); the peer sees a pending request, its admin accepts or
+   rejects; on acceptance both sides store a shared secret for each other (durable, revocable by
+   either side at any time, not a one-time code). A node running `REDROID_FORGE_AUTH=none` cannot
+   join — with no real accounts there is no "who" to ever authorize.
+2. Once paired: each side can see the other's running instances (name/status only) — no operating
+   them yet.
+3. User visibility, admin-only: a node's admin can list the users of a paired node, only to pick
+   who to grant a role to. No other user on either side sees this listing.
+4. Manual, per-node role grants (no self-service in v1): the admin creates a
+   `{peerId, remoteUserId, remoteUsername, role}` record — not a shadow local account. From there
+   the remote user gets exactly what that role already grants locally: `permissions.js`'s
+   `can(user, capability, instance)` needs zero changes, it already only cares about the shape
+   `{id, role}`, regardless of where that came from.
+5. Trust mechanism: an HMAC signature over a small claim ("this request is `remoteUserId`,
+   capability X"), signed with the peering secret from step 1 — deliberately not a real OIDC
+   exchange (no discovery, no visible redirect/login flow for the end user), and symmetric in a
+   way classic OIDC isn't: each node is "IdP" for the other at the same time.
+6. Operating a remote instance reuses the viewer wholesale: the local node relays bytes between
+   the browser's WS and the *existing* viewer WS already running on the peer
+   (`routes/viewerExpanded.js`, `viewerSession.js`, `wsServer.js`, Phase 11) — zero changes to
+   `protocol.js` or the frontend decoders. Chosen over a direct browser-to-peer connection so the
+   viewing browser never needs to reach the peer's own network, only the local node does.
+
+**Gate:** two real nodes (desa + `jgustavo46`, or desa + prod) paired, with an instance on one
+visible and operable from the other by an explicitly role-granted remote user, with zero changes
+required to the scrcpy protocol/codec layer.
+
+## Phase 13 — Cross-node `/data` migration (target 0.12.0)
+
+**Difficulty: Medium-High**, and genuinely depends on Phase 12 (you need to already see a peer's
+instances before you can migrate one). Unlike Phase 12 (pure networking/auth), this one touches
+real instance state and host-specific hardware assumptions — the actual open risk is hardware: a
+migrated instance's required modules (hwenc/hwdec/gapps/arm-translation/etc, Phase 4/5) were built
+against the *source* host's specific GPU/driver combination, which the *destination* host may not
+share. Expected to work cleanly between two Android 15 nodes with similar modules; genuinely
+unproven otherwise. Not started.
+
+**Steps (sketch, to refine once Phase 12 ships):**
+1. A "migrate" action on a peer-visible instance — moves (or copies) its `/data` volume from the
+   source node to the destination node over the peer connection already established in Phase 12.
+2. Re-validate required modules on the destination before/after the move (reuse Phase 4's
+   module-contract checks and Doctor) instead of assuming parity — flag, don't silently proceed,
+   when the destination's hardware-dependent modules differ from the source's.
+3. Decide copy-vs-move semantics, and what happens to the instance's `ownerId`/role grants across
+   the move (whether local roles on the destination need to exist before or after the data
+   lands).
+
+**Gate:** one real instance migrated end to end between two nodes both running Android 15 with
+matching modules, with no silent data loss or corruption on the (expected, not edge-case) day a
+module turns out to be incompatible.
+
 ## Outside the phases (on demand, they block nothing above)
 
 - Other "large" projects to read that could add something (pending in `REQUIREMENTS.md` section 10) — they
