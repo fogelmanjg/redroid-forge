@@ -1118,7 +1118,11 @@ unaffected.
    Phase 7 gate), including the dead code of the `ws-scrcpy`/oauth2-proxy viewer. Decision (05/10/2026):
    that code stays on GitHub as an old project, dead and replaced by `redroid-forge`; nothing is ported as
    compatibility.
-3. Write the definitive README/CONTRIBUTING/attribution, issue templates.
+3. Write the definitive README/CONTRIBUTING/attribution, issue templates. ✅ Done 16/11/2026:
+   `CONTRIBUTING.md` and `.github/ISSUE_TEMPLATE/` (bug report, feature request) are new; `README.md`
+   (and `README.es.md`) no longer claim "no bundled web viewer yet" or cite the stale Phase 0-7/9 +
+   `v0.3.0` status from before Phase 11 shipped, and both now credit `scrcpy` (Genymobile) alongside
+   the existing `redroid` credit.
 
 **Gate:** the project is in a condition to be called **beta 0.9** — from here the donations/support
 mechanism is picked up again (section 8 of `REQUIREMENTS.md`), not before.

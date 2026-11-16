@@ -27,6 +27,18 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
 
 ## [Unreleased]
 
+### Added
+
+- `CONTRIBUTING.md` and `.github/ISSUE_TEMPLATE/` (bug report, feature request) -- Phase 10 step 3
+  of `docs/ROADMAP.md`, the project's own 1.0 gate. States the current feature freeze up front.
+
+### Fixed
+
+- `README.md`/`README.es.md` no longer claim "no bundled web viewer yet" or describe the project
+  as covering only Phases 0-7/9 at tag `v0.3.0` -- both stale since Phase 11 (the built-in
+  ventanita/expandida viewer) shipped in 0.9.0/0.9.1/0.10.0. Added a credit for `scrcpy`
+  (Genymobile) alongside the existing `redroid` credit.
+
 ## [0.10.0] - 2026-11-15
 
 ### Added
