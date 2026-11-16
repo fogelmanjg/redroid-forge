@@ -1161,12 +1161,16 @@ and launches itself (no `adb shell input`, no third-party viewer):
 beyond polish (a liveness heartbeat beyond the plain WS close/error already in place, if an
 unclean-disconnect orphan session is ever actually observed in practice).
 
-## Phase 12 — Node federation: peering between redroid-forge deployments (target 0.11.0)
+## Phase 12 — Node federation: peering between redroid-forge deployments
 
 **Difficulty: Medium** — a new data model, a small pairing protocol, and an HMAC-signed identity
 assertion, but none of it touches the hardest existing code: the scrcpy protocol, the hardware
 codec layer, and `permissions.js` itself all stay unmodified. Design closed 16/11/2026, full
 detail in memory ([[project_redroid_forge_federacion_nodos_diseno_cerrado]]); not started.
+Deliberately sequenced after Phase 10's 1.0 gate (16/11/2026) — nothing here is required for 1.0,
+and 1.0 itself is a cleanup/documentation milestone, not a feature-completeness one (see this
+doc's own Phase 10 and `CHANGELOG.md`'s versioning policy). No version number pinned to this
+phase yet; it starts once 1.0 actually ships.
 
 **Context:** replaces `/usr/local/bin/scrcpy-fetch-config.sh` — a hand-maintained, SSH-based,
 out-of-band script that lists every known redroid-forge deployment's instances by host
@@ -1209,7 +1213,7 @@ existing meaning (an Android container inside one node).
 visible and operable from the other by an explicitly role-granted remote user, with zero changes
 required to the scrcpy protocol/codec layer.
 
-## Phase 13 — Cross-node `/data` migration (target 0.12.0)
+## Phase 13 — Cross-node `/data` migration
 
 **Difficulty: Medium-High**, and genuinely depends on Phase 12 (you need to already see a peer's
 instances before you can migrate one). Unlike Phase 12 (pure networking/auth), this one touches
