@@ -2035,12 +2035,27 @@ function moduleStatusBadge(m) {
   return `<span class="status-dot warn"></span> ${t('modules.pending')}`;
 }
 
+// Same 3 states moduleStatusBadge renders, ranked worst-first -- never accepted (nothing decided
+// yet) ranks above accepted-but-outdated (something to re-review), which ranks above accepted
+// (nothing to do). Same idea as DOCTOR_STATUS_ORDER below, just derived from two booleans
+// instead of read off an explicit backend `status` field.
+function moduleStatusRank(m) {
+  if (m.accepted) return 2;
+  if (m.acceptedVersion) return 1;
+  return 0;
+}
+
 // Shared renderer for both the Modules tab and the User modules tab -- same card shape (status
 // badge, description, what it touches, accept/revoke), the only difference between the two tabs
 // is WHICH modules get fetched/filtered before calling this (see loadModules/loadUserModulesTab).
 function renderModuleCards(list, modules, { onChange }) {
   list.innerHTML = '';
-  for (const m of modules) {
+  // Worst first (16/11/2026, same ask and the same pattern as loadDoctor's own sort) -- modules
+  // needing a decision should never be buried below a page of already-accepted ones. Stable sort
+  // (spec-guaranteed since ES2019), so modules tied on status keep the backend's own order among
+  // themselves instead of reshuffling for no reason.
+  const sorted = modules.slice().sort((a, b) => moduleStatusRank(a) - moduleStatusRank(b));
+  for (const m of sorted) {
     const li = document.createElement('li');
     li.className = 'doctor-item';
     const tipo = m.esTerceroNoLibre ? t('modules.thirdParty') : t('modules.own');

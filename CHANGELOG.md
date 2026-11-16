@@ -34,6 +34,9 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
 
 ### Fixed
 
+- Modules tab and User modules tab: sort modules worst-first (never accepted, then
+  accepted-but-outdated, then accepted) -- same "don't bury what needs attention" pattern as the
+  Doctor tab's own sort (0.9.1), which this one was meant to have had from the start.
 - `README.md`/`README.es.md` no longer claim "no bundled web viewer yet" or describe the project
   as covering only Phases 0-7/9 at tag `v0.3.0` -- both stale since Phase 11 (the built-in
   ventanita/expandida viewer) shipped in 0.9.0/0.9.1/0.10.0. Added a credit for `scrcpy`
