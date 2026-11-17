@@ -499,8 +499,17 @@ function buildResourcesEditRow(inst, allInstances) {
     }
   }
 
+  // SMT pairing: on this host's convention (confirmed by the user on a 5700G, but it's the
+  // standard Linux x86 SMT enumeration in general, Intel included) logical core N and N+half
+  // are two threads of the SAME physical core, sharing part of its circuitry -- core 0 shares
+  // with 8, 1 with 9, and so on up to half-1 with hostCoreCount-1. Laid out flat (flex-wrap)
+  // this pairing was invisible; placed on an explicit CSS grid with one column per physical
+  // core and one row per thread, core N sits directly above N+half so the shared pair is
+  // visually obvious instead of having to do the arithmetic by eye.
+  const half = Math.ceil((hostCoreCount || 16) / 2);
   const grid = document.createElement('div');
   grid.className = 'resources-cpu-grid';
+  grid.style.gridTemplateColumns = `repeat(${half}, auto)`;
   const warnBox = document.createElement('div');
   function renderWarnings() {
     warnBox.innerHTML = '';
@@ -527,6 +536,8 @@ function buildResourcesEditRow(inst, allInstances) {
   for (let i = 0; i < (hostCoreCount || 16); i++) {
     const label = document.createElement('label');
     label.className = 'resources-core-check';
+    label.style.gridColumn = String((i % half) + 1);
+    label.style.gridRow = String(Math.floor(i / half) + 1);
     const chk = document.createElement('input');
     chk.type = 'checkbox';
     chk.checked = selected.has(i);
