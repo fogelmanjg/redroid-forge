@@ -273,7 +273,9 @@ reflected in these scripts.
 
 First time hitting a scrcpy problem (no audio, choppy video, wrong bitrate)? See
 [`docs/SCRCPY-TIPS.md`](docs/SCRCPY-TIPS.md) — the handful of gotchas that actually come up, plus
-the shortcuts worth knowing, without the full manual.
+the shortcuts worth knowing, without the full manual. For problems with the app itself (instances,
+the built-in viewer, resources) see [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md); for
+step-by-step recipes for common tasks see [`docs/HOWTO.md`](docs/HOWTO.md).
 
 ## Layout
 
@@ -307,7 +309,8 @@ scripts/                 connect.sh / connect.ps1 -- scrcpy connector scripts fo
                           backend/scripts/, which is dev/admin-time tooling)
 docs/                     REQUIREMENTS.md (what and why), ARCHITECTURE.md (how the pieces fit
                           together), MODULE-AUTHORING.md (writing a module), KNOWN-COMBINATIONS.md,
-                          ROADMAP.md (in what order) and SCRCPY-TIPS.md (client-side troubleshooting)
+                          ROADMAP.md (in what order), SCRCPY-TIPS.md (client-side troubleshooting),
+                          TROUBLESHOOTING.md (app-side problems) and HOWTO.md (common task recipes)
 CHANGELOG.md              tagged releases, SemVer policy (English only, same reasoning as ROADMAP.md)
 CONTRIBUTING.md           how to propose a change, current feature-freeze status, bug report/module checklist
 .github/ISSUE_TEMPLATE/   bug report / feature request forms

@@ -33,6 +33,9 @@ way in right now.
    - `docs/ROADMAP.md` — what is already decided, what is still an open idea, and why things are
      sequenced the way they are. A lot of "why isn't X done the obvious way" is answered here,
      often with the exact investigation that ruled the obvious way out.
+   - `docs/TROUBLESHOOTING.md` / `docs/HOWTO.md` — real problems people hit and the recipes for
+     common tasks, grown from actual questions rather than written speculatively. If you fix a bug
+     or clarify a confusing step, consider whether it belongs here too.
 3. **Run the tests**: `npm test` from `backend/` (`node --test test/` under the hood — no test
    framework dependency beyond Node's own built-in runner, by design). A PR that only adds
    behavior without a test for it will be asked to add one, same bar the existing code is held to.
