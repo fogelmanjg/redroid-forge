@@ -259,7 +259,11 @@ const ViewerExpanded = (() => {
     addBtn('□', I18n.t('instances.viewer.expandedRecents'), () => tapKey(st, KEYCODE.APP_SWITCH));
     addBtn('−', I18n.t('instances.viewer.expandedVolumeDown'), () => tapKey(st, KEYCODE.VOLUME_DOWN));
     addBtn('+', I18n.t('instances.viewer.expandedVolumeUp'), () => tapKey(st, KEYCODE.VOLUME_UP));
-    addBtn('⌨', I18n.t('instances.viewer.expandedKeyboard'), () => st.textInput.focus());
+    const kbdBtn = addBtn('⌨', I18n.t('instances.viewer.expandedKeyboard'), () => st.textInput.focus());
+    const kbdHint = document.createElement('div');
+    kbdHint.className = 'viewer-expanded-kbd-hint';
+    kbdHint.textContent = I18n.t('instances.viewer.expandedKeyboardHint');
+    kbdBtn.appendChild(kbdHint);
     addBtn('⛶', I18n.t('instances.viewer.expandedFullscreen'), () => {
       if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
       else overlay.requestFullscreen().catch(() => {});

@@ -262,11 +262,30 @@ tr.instance-row-secondary > td { padding-top: 0.2rem; }
   position: absolute; bottom: 0.5rem; border-radius: 8px;
 }
 .viewer-expanded-navbtn {
+  position: relative;
   min-width: 2.4rem; padding: 0.4rem 0.6rem; font-size: 1.1rem; line-height: 1;
   background: rgba(255,255,255,0.1); color: #fff; border: 1px solid rgba(255,255,255,0.25);
   border-radius: 6px; cursor: pointer;
 }
 .viewer-expanded-navbtn:hover { background: rgba(255,255,255,0.2); }
+
+/* Floating hint anchored above a navbtn (currently only the keyboard button) -- a plain
+   title="" tooltip is too easy to miss on a button whose own purpose (focus a hidden input
+   before typing) is not obvious from its icon alone. Shown on hover/focus of the BUTTON, not
+   the hint itself, since the hint has pointer-events: none (it must never steal the click). */
+.viewer-expanded-kbd-hint {
+  position: absolute; bottom: calc(100% + 0.6rem); left: 50%; transform: translateX(-50%);
+  width: 14rem; max-width: 70vw; padding: 0.55rem 0.7rem; border-radius: 6px;
+  background: rgba(20,20,20,0.95); color: #fff; font-size: 0.78rem; line-height: 1.35;
+  text-align: left; white-space: normal; pointer-events: none;
+  opacity: 0; transition: opacity 0.15s ease; z-index: 1001;
+}
+.viewer-expanded-kbd-hint::after {
+  content: ''; position: absolute; top: 100%; left: 50%; transform: translateX(-50%);
+  border: 5px solid transparent; border-top-color: rgba(20,20,20,0.95);
+}
+.viewer-expanded-navbtn:hover .viewer-expanded-kbd-hint,
+.viewer-expanded-navbtn:focus .viewer-expanded-kbd-hint { opacity: 1; }
 
 /* Instances view-mode switch (15/11/2026) -- "completo" (unchanged table above), "mínimo"
    (name+address+actions only) and "visores" (a grid of live previews) are three renderings of
