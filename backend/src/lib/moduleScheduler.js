@@ -119,10 +119,19 @@ function resume(instanceId, moduleId) { return setPaused(instanceId, moduleId, f
 // pause/resume API already existed for this). A module the instance already had keeps whatever
 // pause state it already had (its own key already exists in `existingPaused`) -- this only seeds
 // a default for one it never had before, it never re-pauses one already running.
+//
+// A module's own manifest can opt out with `schedule.startPaused: false` (found needed for real,
+// 17/11/2026, cifi: the human running the module's own first-run-by-hand step every time before
+// activating it was friction the module's manifest can just document instead -- see its own
+// `queToca` warning). This is a per-module, explicit choice by that module's author, not a
+// blanket change to the convention above: any OTHER watchdog module written without thinking
+// through the first-run risk still gets the safe default.
 function defaultPauseForNewModules(existingPaused, requiredModuleIds) {
   const watchdogPaused = { ...(existingPaused || {}) };
   for (const manifest of moduleRunner.watchdogModules(requiredModuleIds)) {
-    if (!(manifest.id in watchdogPaused)) watchdogPaused[manifest.id] = true;
+    if (!(manifest.id in watchdogPaused)) {
+      watchdogPaused[manifest.id] = manifest.schedule?.startPaused !== false;
+    }
   }
   return watchdogPaused;
 }

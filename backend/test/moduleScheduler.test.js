@@ -15,7 +15,7 @@ const moduleRunner = require('../src/lib/moduleRunner');
 const scheduler = require('../src/lib/moduleScheduler');
 const store = require('../src/lib/store');
 
-function watchdogManifestFields(id, intervalMs) {
+function watchdogManifestFields(id, intervalMs, startPaused) {
   return {
     id,
     nombre: `Fixture ${id}`,
@@ -26,18 +26,18 @@ function watchdogManifestFields(id, intervalMs) {
     version: 1,
     etapa: [7],
     entry: './entry.js',
-    schedule: { intervalMs },
+    schedule: startPaused === undefined ? { intervalMs } : { intervalMs, startPaused },
   };
 }
 
 // Same shape as moduleRunner.test.js's withFixtureModules, narrowed to
 // stage-7 fixtures and with the in-memory store mocked for the duration.
-function withWatchdogFixture({ id = 'fx-wd', intervalMs = 60_000, entryBody }, fn) {
+function withWatchdogFixture({ id = 'fx-wd', intervalMs = 60_000, startPaused, entryBody }, fn) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'rf-modulescheduler-'));
   fs.mkdirSync(path.join(root, 'manifests'));
   const dir = path.join(root, id);
   fs.mkdirSync(dir);
-  fs.writeFileSync(path.join(dir, 'manifest.json'), JSON.stringify(watchdogManifestFields(id, intervalMs), null, 2));
+  fs.writeFileSync(path.join(dir, 'manifest.json'), JSON.stringify(watchdogManifestFields(id, intervalMs, startPaused), null, 2));
   fs.writeFileSync(path.join(dir, 'entry.js'), entryBody);
   manifests._setModulesRootForTests(root);
   moduleRunner._resetForTests();
@@ -199,6 +199,21 @@ test('defaultPauseForNewModules: a watchdog module the instance never had before
 }, ({ id }) => {
   assert.deepEqual(scheduler.defaultPauseForNewModules(null, [id]), { [id]: true });
   assert.deepEqual(scheduler.defaultPauseForNewModules({}, [id]), { [id]: true });
+}));
+
+test('defaultPauseForNewModules: a module with schedule.startPaused=false opts out of the safe default and starts active', (t) => withWatchdogFixture({
+  startPaused: false,
+  entryBody: 'module.exports.runTick = async () => {};',
+}, ({ id }) => {
+  assert.deepEqual(scheduler.defaultPauseForNewModules(null, [id]), { [id]: false });
+  assert.deepEqual(scheduler.defaultPauseForNewModules({}, [id]), { [id]: false });
+}));
+
+test('defaultPauseForNewModules: schedule.startPaused=false still yields to an existing explicit state (does not force it back active)', (t) => withWatchdogFixture({
+  startPaused: false,
+  entryBody: 'module.exports.runTick = async () => {};',
+}, ({ id }) => {
+  assert.deepEqual(scheduler.defaultPauseForNewModules({ [id]: true }, [id]), { [id]: true });
 }));
 
 test('defaultPauseForNewModules: a module already in existingPaused keeps its own state, paused or not', (t) => withWatchdogFixture({
