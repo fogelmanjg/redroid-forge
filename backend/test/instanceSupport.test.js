@@ -7,7 +7,9 @@ const runtime = require('../src/lib/dockerRuntime');
 const hwAccel = require('../src/lib/hwAccel');
 const knownDbStore = require('../src/lib/knownDbStore');
 const moduleManifests = require('../src/lib/moduleManifests');
-const { resolveForInstance, attachSupport, localGappsId, localMagiskId } = require('../src/lib/instanceSupport');
+const {
+  resolveForInstance, attachSupport, localGappsId, localMagiskId, modulesWithVersions,
+} = require('../src/lib/instanceSupport');
 
 const DIGEST = `sha256:${'a'.repeat(64)}`;
 
@@ -135,4 +137,29 @@ test('localGappsId: missing folder/file -> null, does not throw', () => {
 
 test('localMagiskId: always null (no Magisk module exists yet)', () => {
   assert.strictEqual(localMagiskId(), null);
+});
+
+test('modulesWithVersions: excludes esModuloDeUsuario modules from the signature (cifi, the real pilot case)', () => {
+  const wifiVersion = moduleManifests.get('wifi-interno').version;
+  assert.deepStrictEqual(
+    modulesWithVersions(['wifi-interno', 'cifi']),
+    { 'wifi-interno': wifiVersion },
+  );
+});
+
+test('resolveForInstance: a user module (cifi) added on top of a known combination does not demote it to comunidad', async (t) => {
+  const version = moduleManifests.get('wifi-interno').version;
+  t.mock.method(knownDbStore, 'loadCurrent', () => (
+    { db: fakeDb({ 'wifi-interno': version }), source: 'snapshot', warnings: [] }));
+  t.mock.method(runtime, 'getImageDigest', async () => DIGEST);
+  t.mock.method(hwAccel, 'detectGpuVendor', async () => 'amd');
+
+  const instance = {
+    dockerImage: 'redroid/redroid:15.0.0-latest', hasGapps: false,
+    requiredModuleIds: ['wifi-interno', 'cifi'],
+  };
+  const r = await resolveForInstance(instance);
+  assert.deepStrictEqual({ nivel: r.nivel, combinacion: r.combinacion }, { nivel: 'oficial', combinacion: 'combo' });
+  // cifi never shows up in the signature sent to the resolver
+  assert.deepStrictEqual(r.input.modulos, { 'wifi-interno': version });
 });

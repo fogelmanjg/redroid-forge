@@ -43,6 +43,14 @@ writing something for your own instance only, it is a user module — same
 format, drop it in `backend/src/modules/<id>/` (or point `MANIFESTS_DIR`-style
 loading at it, see `moduleManifests.loadAll()`) and it works the same way.
 
+Set `"esModuloDeUsuario": true` in its manifest (optional, default false/own). This is the one
+place the runner/gate DO distinguish them, added 17/11/2026 for `docs/KNOWN-COMBINATIONS.md`'s own
+sake: `instanceSupport.js` leaves a user module out of the signature it hands to the
+known-combinations resolver entirely, so bolting one onto an instance never fragments its match
+against the catalog (an instance with `cifi` added resolves exactly as if it were not there) —
+a user module has no business needing its own validated combination entry, that would defeat the
+point of it being something anyone can drop in without review.
+
 ## 2. The manifest
 
 One manifest per module, `backend/src/modules/<id>/manifest.json` if it has an

@@ -2,6 +2,7 @@
   "id": "cifi",
   "nombre": "CIFI auto-reopen watchdog",
   "esTerceroNoLibre": false,
+  "esModuloDeUsuario": true,
   "descripcion": "Reopens the CIFI game if its process is gone (a known, unfixed native Unity crash) and taps through its post-launch screens so the instance keeps earning idle progress unattended. The pilot case for the periodic-watchdog convention (stage 7).",
   "queToca": [
     "runs `pidof` against the instance every `schedule.intervalMs` (15 min by default) to check the game is alive",

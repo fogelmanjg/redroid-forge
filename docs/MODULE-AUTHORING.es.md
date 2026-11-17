@@ -45,6 +45,14 @@ es un módulo de usuario — mismo formato, lo dejás en `backend/src/modules/<i
 (o apuntás la carga estilo `MANIFESTS_DIR` ahí, ver `moduleManifests.loadAll()`)
 y funciona igual.
 
+Poné `"esModuloDeUsuario": true` en su manifiesto (opcional, por defecto false/propio). Este es el
+único lugar donde el runner/gate SÍ los distingue, agregado el 17/11/2026 por el propio
+`docs/KNOWN-COMBINATIONS.md`: `instanceSupport.js` deja afuera a un módulo de usuario de la firma
+que le pasa al resolver de combinaciones conocidas por completo, así que agregarle uno a una
+instancia nunca rompe su match contra el catálogo (una instancia con `cifi` agregado resuelve
+exactamente igual que si no lo tuviera) — un módulo de usuario no tiene por qué necesitar su propia
+entrada validada, eso arruinaría el sentido de que cualquiera lo pueda agregar sin revisión.
+
 ## 2. El manifiesto
 
 Un manifiesto por módulo, `backend/src/modules/<id>/manifest.json` si tiene

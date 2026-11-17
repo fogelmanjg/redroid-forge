@@ -33,10 +33,16 @@ function localMagiskId() {
   return null;
 }
 
+// User modules (manifest's `esModuloDeUsuario: true` -- see moduleManifests.js's own comment)
+// are left out of the known-combinations signature entirely: they are written for one
+// person's own instance, not reviewed or cataloged by the project, so they have no business
+// fragmenting the match -- an instance should be able to land on the exact same validated
+// combination as another regardless of which user module someone bolted onto it afterwards.
 function modulesWithVersions(moduleIds) {
   const out = {};
   for (const id of moduleIds) {
     const manifest = moduleManifests.get(id);
+    if (manifest && manifest.esModuloDeUsuario) continue;
     out[id] = manifest ? manifest.version : null;
   }
   return out;

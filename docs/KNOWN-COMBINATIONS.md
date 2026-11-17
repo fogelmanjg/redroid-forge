@@ -186,6 +186,11 @@ Android 15 image boots, signs in, and Play updates itself to GMS 26 without erro
   validations carry hardware, and the resolver crosses it with the host's vendor (see 3).
 - `comunidad` combinations document "known to boot/partially work" (e.g. Redroid 13 only with
   `gpuMode: guest`), with no promise.
+- `modulos` never includes a **user module** (manifest's `esModuloDeUsuario: true`, see
+  `MODULE-AUTHORING.md` §1) -- `instanceSupport.js` strips those out of an instance's signature
+  before it ever reaches the resolver (added 17/11/2026). A module nobody but its own author
+  reviewed has no business needing its own validated entry here, or fragmenting the match of every
+  instance that happens to have it bolted on.
 
 ## 3. Resolution: is this instance "known"?
 

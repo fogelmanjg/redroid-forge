@@ -86,6 +86,27 @@ test('moduleManifests: accepts an own manifest (non-free=false) without license/
   }, 'fixture'));
 });
 
+test('moduleManifests: esModuloDeUsuario must be a boolean when present', () => {
+  assert.throws(
+    () => manifests.validateManifest({
+      id: 'x', nombre: 'X', descripcion: 'd', esTerceroNoLibre: false, esModuloDeUsuario: 'yes',
+      queToca: ['a'], compatibleCon: { androidVersion: [15], gpuMode: ['host'] }, version: 1,
+    }, 'fixture'),
+    /"esModuloDeUsuario" must be a boolean/,
+  );
+});
+
+test('moduleManifests: esModuloDeUsuario is optional -- a manifest without it is still valid', () => {
+  assert.doesNotThrow(() => manifests.validateManifest({
+    id: 'x', nombre: 'X', descripcion: 'd', esTerceroNoLibre: false,
+    queToca: ['a'], compatibleCon: { androidVersion: [15], gpuMode: ['host'] }, version: 1,
+  }, 'fixture'));
+});
+
+test('moduleManifests: cifi (the user-module pilot case, see MODULE-AUTHORING.md §1) is flagged esModuloDeUsuario', () => {
+  assert.equal(manifests.get('cifi').esModuloDeUsuario, true);
+});
+
 test('moduleManifests.isCompatible: compares androidVersion and gpuMode against compatibleCon', () => {
   const manifest = manifests.get('gapps');
   assert.equal(manifests.isCompatible(manifest, imgOfficialWithGappsAndMagisk), true);

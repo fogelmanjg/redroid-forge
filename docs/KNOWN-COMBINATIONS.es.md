@@ -167,6 +167,11 @@ de la imagen de Android 15 bootea, permite el login, y Play se actualiza solo a 
   el vendor del host (ver 3).
 - Las combinaciones `comunidad` documentan "se sabe que arranca/anda
   parcialmente" (ej. Redroid 13 solo `gpuMode: guest`), sin promesa.
+- `modulos` nunca incluye un **módulo de usuario** (`esModuloDeUsuario: true` en el manifiesto, ver
+  `MODULE-AUTHORING.md` §1) -- `instanceSupport.js` los saca de la firma de la instancia antes de
+  que lleguen al resolutor (agregado 17/11/2026). Un módulo que nadie más que su propio autor
+  revisó no tiene por qué necesitar su propia entrada validada acá, ni romper el match de cada
+  instancia que lo tenga agregado.
 
 ## 3. Resolución: ¿esta instancia es "conocida"?
 

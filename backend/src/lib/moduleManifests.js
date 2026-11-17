@@ -16,6 +16,17 @@ function validateManifest(m, sourceLabel) {
   if (!isNonEmptyString(m.descripcion)) errors.push('missing "descripcion"');
   if (typeof m.esTerceroNoLibre !== 'boolean') errors.push('"esTerceroNoLibre" must be a boolean');
 
+  // Optional, default false (own/catalog module). Own vs. user is authorship/trust
+  // (MODULE-AUTHORING.md §1), not mechanism -- nothing else in the schema or the runner
+  // distinguishes them. This field exists for the one place that DOES need to tell them apart:
+  // instanceSupport.js excludes `esModuloDeUsuario` modules from the known-combinations
+  // signature (found needed for real, 17/11/2026, cifi: a module written for one person's own
+  // instance has no business fragmenting the catalog's combination matching -- every instance
+  // that happens to use it would otherwise need its own separate validated entry).
+  if ('esModuloDeUsuario' in m && typeof m.esModuloDeUsuario !== 'boolean') {
+    errors.push('"esModuloDeUsuario" must be a boolean when present');
+  }
+
   // Section 6: a non-free third-party module always declares where it comes
   // from and under which license, for the contract's mandatory disclaimer.
   if (m.esTerceroNoLibre) {

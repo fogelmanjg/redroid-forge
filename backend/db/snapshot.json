@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "serial": 7,
-  "generatedAt": "2026-10-22T13:30:56Z",
+  "serial": 10,
+  "generatedAt": "2026-11-17T12:51:01Z",
   "minForgeVersion": "0.1.0",
   "bases": [
     {
@@ -17,98 +17,10 @@
   ],
   "paquetes": [
     {
-      "id": "gapps-sdk35-r09-x86_64",
-      "tipo": "gapps",
-      "nombre": "Google Mobile Services (Google Play x86_64 system image of the Android SDK, Android 15 r09)",
-      "version": "Android 15 (API 35) Google Play x86_64, r09",
-      "androidVersion": [
-        15
-      ],
-      "arch": "x86_64",
-      "origen": "https://dl.google.com/android/repository/sys-img/google_apis_playstore/x86_64-35_r09.zip",
-      "origenSha1": "2f0054868e6aab3c098acd3decba17a82aed4176",
-      "tamano": 1762061559,
-      "licencia": "Proprietary (Google)",
-      "integracion": "sdk-system-image",
-      "sha256": "78eeb14c516f4acd5995fa4afa122913e9d22f298818728be48de07a257dc1ae",
-      "archivos": [
-        {
-          "path": "product/priv-app/PrebuiltGmsCore/PrebuiltGmsCore.apk",
-          "sha256": "1dfb9dd903cc34b62294f2887871f96c8490ac88eb5d063d7a5dff71365e7752",
-          "tamano": 239885506
-        },
-        {
-          "path": "product/priv-app/Phonesky/Phonesky.apk",
-          "sha256": "4d26dfb70aa712a474e9160c3fb11d01461d3b6cb30a4a9519201ba6696313dc",
-          "tamano": 78457112
-        },
-        {
-          "path": "product/priv-app/PartnerSetupPrebuilt/PartnerSetupPrebuilt.apk",
-          "sha256": "d0c767b858a3f5f9bb1b08f5df9d4f3ccc3268ab2faf34d41bbd56e4be954ff0",
-          "tamano": 1444170
-        },
-        {
-          "path": "system_ext/priv-app/GoogleServicesFramework/GoogleServicesFramework.apk",
-          "sha256": "238f306eb78193605bd5a72d4845a8ce635cda3fceebc4df077d5491481cc07b",
-          "tamano": 5290526
-        },
-        {
-          "path": "product/etc/default-permissions/default-permissions-sdk-google.xml",
-          "sha256": "297da40b3ee14858911217e1dd03c392e0e2bf207c40ebf3a562ad72aa671eb2",
-          "tamano": 4400
-        },
-        {
-          "path": "product/etc/permissions/privapp-permissions-google-p.xml",
-          "sha256": "5c770368d987a31b71d1f98bf3c605207d238c6dca7a9199d597b5ab42189d91",
-          "tamano": 54396
-        },
-        {
-          "path": "product/etc/permissions/privapp-permissions-sdk-google.xml",
-          "sha256": "194365ba6d1d35b4232aa491ef735b9d1198aaaf58243235d37bb53cc3803c31",
-          "tamano": 1592
-        },
-        {
-          "path": "product/etc/permissions/split-permissions-google.xml",
-          "sha256": "73a160b4ec5ee9fd7ebb3ad8947d37c699302732584a90cc6a03956005cada12",
-          "tamano": 919
-        },
-        {
-          "path": "product/etc/sysconfig/google_build.xml",
-          "sha256": "724875dc95f7fb7eb950714f9a474a9a304e081626d9364647e02409e4bdae9c",
-          "tamano": 1106
-        },
-        {
-          "path": "product/etc/sysconfig/google-hiddenapi-package-whitelist.xml",
-          "sha256": "bcd8a5af2cfcb56aea1d891f4eedd5dff6037043b440e772192a7422f39373b6",
-          "tamano": 7490
-        },
-        {
-          "path": "product/etc/sysconfig/google-staged-installer-whitelist.xml",
-          "sha256": "c5c27d407dc5f3219de77f94fc2b439195ab8f2d017feb68d4ec595aeb09203c",
-          "tamano": 393
-        },
-        {
-          "path": "product/etc/sysconfig/google.xml",
-          "sha256": "7129e123bcc1390bc0dc7f9237916a4d565366ea5373c241c5ee0ed41dfa5059",
-          "tamano": 9098
-        },
-        {
-          "path": "system_ext/etc/permissions/com.google.android.googlesdksetup.xml",
-          "sha256": "385a8281ebc7835f3ed623990c363f1886c4e6c3673693d1ee5213797d6e63ba",
-          "tamano": 1557
-        },
-        {
-          "path": "system_ext/etc/permissions/privapp-permissions-google-se.xml",
-          "sha256": "39568f70e2db94359b45f2269e973f17c1fe16f986b8355de758bf46e8359b8b",
-          "tamano": 14362
-        }
-      ]
-    },
-    {
       "id": "arm-translation-sdk35-ext15-r01-x86_64",
       "tipo": "arm-translation",
-      "nombre": "ARM64 translation, ndk_translation (from the Android SDK system image)",
-      "version": "Android 15 ext15 (API 35) Google Play x86_64, r01",
+      "nombre": "ARM64 translation (ndk_translation/Berberis), from the Android SDK system image, Android 15 ext15 r01",
+      "version": "Android 15 ext15 (API 35) r01",
       "androidVersion": [
         15
       ],
@@ -613,9 +525,171 @@
           "modo": 420
         }
       ]
+    },
+    {
+      "id": "gapps-sdk35-r09-x86_64",
+      "tipo": "gapps",
+      "nombre": "Google Mobile Services (Google Play x86_64 system image of the Android SDK, Android 15 r09)",
+      "version": "Android 15 (API 35) Google Play x86_64, r09",
+      "androidVersion": [
+        15
+      ],
+      "arch": "x86_64",
+      "origen": "https://dl.google.com/android/repository/sys-img/google_apis_playstore/x86_64-35_r09.zip",
+      "origenSha1": "2f0054868e6aab3c098acd3decba17a82aed4176",
+      "tamano": 1762061559,
+      "licencia": "Proprietary (Google)",
+      "integracion": "sdk-system-image",
+      "sha256": "78eeb14c516f4acd5995fa4afa122913e9d22f298818728be48de07a257dc1ae",
+      "archivos": [
+        {
+          "path": "product/priv-app/PrebuiltGmsCore/PrebuiltGmsCore.apk",
+          "sha256": "1dfb9dd903cc34b62294f2887871f96c8490ac88eb5d063d7a5dff71365e7752",
+          "tamano": 239885506
+        },
+        {
+          "path": "product/priv-app/Phonesky/Phonesky.apk",
+          "sha256": "4d26dfb70aa712a474e9160c3fb11d01461d3b6cb30a4a9519201ba6696313dc",
+          "tamano": 78457112
+        },
+        {
+          "path": "product/priv-app/PartnerSetupPrebuilt/PartnerSetupPrebuilt.apk",
+          "sha256": "d0c767b858a3f5f9bb1b08f5df9d4f3ccc3268ab2faf34d41bbd56e4be954ff0",
+          "tamano": 1444170
+        },
+        {
+          "path": "system_ext/priv-app/GoogleServicesFramework/GoogleServicesFramework.apk",
+          "sha256": "238f306eb78193605bd5a72d4845a8ce635cda3fceebc4df077d5491481cc07b",
+          "tamano": 5290526
+        },
+        {
+          "path": "product/etc/default-permissions/default-permissions-sdk-google.xml",
+          "sha256": "297da40b3ee14858911217e1dd03c392e0e2bf207c40ebf3a562ad72aa671eb2",
+          "tamano": 4400
+        },
+        {
+          "path": "product/etc/permissions/privapp-permissions-google-p.xml",
+          "sha256": "5c770368d987a31b71d1f98bf3c605207d238c6dca7a9199d597b5ab42189d91",
+          "tamano": 54396
+        },
+        {
+          "path": "product/etc/permissions/privapp-permissions-sdk-google.xml",
+          "sha256": "194365ba6d1d35b4232aa491ef735b9d1198aaaf58243235d37bb53cc3803c31",
+          "tamano": 1592
+        },
+        {
+          "path": "product/etc/permissions/split-permissions-google.xml",
+          "sha256": "73a160b4ec5ee9fd7ebb3ad8947d37c699302732584a90cc6a03956005cada12",
+          "tamano": 919
+        },
+        {
+          "path": "product/etc/sysconfig/google_build.xml",
+          "sha256": "724875dc95f7fb7eb950714f9a474a9a304e081626d9364647e02409e4bdae9c",
+          "tamano": 1106
+        },
+        {
+          "path": "product/etc/sysconfig/google-hiddenapi-package-whitelist.xml",
+          "sha256": "bcd8a5af2cfcb56aea1d891f4eedd5dff6037043b440e772192a7422f39373b6",
+          "tamano": 7490
+        },
+        {
+          "path": "product/etc/sysconfig/google-staged-installer-whitelist.xml",
+          "sha256": "c5c27d407dc5f3219de77f94fc2b439195ab8f2d017feb68d4ec595aeb09203c",
+          "tamano": 393
+        },
+        {
+          "path": "product/etc/sysconfig/google.xml",
+          "sha256": "7129e123bcc1390bc0dc7f9237916a4d565366ea5373c241c5ee0ed41dfa5059",
+          "tamano": 9098
+        },
+        {
+          "path": "system_ext/etc/permissions/com.google.android.googlesdksetup.xml",
+          "sha256": "385a8281ebc7835f3ed623990c363f1886c4e6c3673693d1ee5213797d6e63ba",
+          "tamano": 1557
+        },
+        {
+          "path": "system_ext/etc/permissions/privapp-permissions-google-se.xml",
+          "sha256": "39568f70e2db94359b45f2269e973f17c1fe16f986b8355de758bf46e8359b8b",
+          "tamano": 14362
+        }
+      ]
     }
   ],
   "combinaciones": [
+    {
+      "id": "redroid15-arm-translation",
+      "base": "redroid-15-2025-06-27",
+      "gapps": null,
+      "magisk": null,
+      "modulos": {
+        "arm-translation": 2
+      },
+      "soporte": "oficial",
+      "validaciones": [
+        {
+          "hardware": {
+            "vendor": "amd",
+            "gpu": "Radeon RX 480 (Polaris10)",
+            "driver": "radeonsi"
+          },
+          "fecha": "2026-10-22",
+          "forgeVersion": "0.1.0",
+          "resultado": "ok",
+          "chequeos": [
+            {
+              "id": "arm-translation.hashes-verificados",
+              "resultado": "ok",
+              "detalle": "the 82 files of the package (lib64/libndk_translation.so + 20 arm64 proxy libs + the ARM-side lib64/arm64 tree + bin/arm64/{app_process64,linker64} + cpuinfo/ld.config .txt) are verified against their sha256 before injecting"
+            },
+            {
+              "id": "arm-translation.build-correcto",
+              "resultado": "ok",
+              "detalle": "taken from x86_64-35-ext15_r01.zip (md5 of libndk_translation.so: fa52951394226cbcc52e666f1d8c0d19); the earlier builds served by r06-r09/ext14 (md5 3f1d2639...) crash deterministically inside the translator on Unity IL2CPP games -- see docs/COMPATIBILITY.md of redroid-ndk-translation for how this was traced by source-line fingerprint"
+            },
+            {
+              "id": "arm-translation.loopsort",
+              "resultado": "ok",
+              "detalle": "Loop Sort (com.Garawell.LoopSort, arm64-only, Unity IL2CPP) installs, boots and is playable past level 4 with the full official 82-file set, hardware encoder active at 20 Mbps -- no crash in libndk_translation.so, unlike the r09/ext14 build"
+            }
+          ],
+          "notas": "pvz2 against this exact ext15 package tested later, through redroid-forge's actual creation API -- see the next validation entry.",
+          "evidencia": "https://github.com/fogelmanjg/redroid-ndk-translation/blob/main/docs/COMPATIBILITY.md"
+        },
+        {
+          "hardware": {
+            "vendor": "amd",
+            "gpu": "Ryzen 5700G (Renoir, iGPU)",
+            "driver": "radeonsi"
+          },
+          "fecha": "2026-10-23",
+          "forgeVersion": "0.1.0",
+          "resultado": "ok",
+          "chequeos": [
+            {
+              "id": "arm-translation.pvz2",
+              "resultado": "ok",
+              "detalle": "Plants vs Zombies 2 (com.ea.game.pvz2_row, arm64, versionName 13.5.1) installs and boots through this exact ext15 package, renders real UI (notification permission dialog, OBB download attempt), no crash inside libndk_translation.so -- the only screen it could not get past is the expected \"requires Google Play services\" dialog, because that test instance has no gapps module, not an arm-translation or WiFi issue"
+            }
+          ],
+          "notas": "Created and tested through redroid-forge's actual API (POST /api/instances with modules [\"arm-translation\", \"wifi-interno-virtwifi\"]), gpuMode=guest (software rendering) -- not a manual/ad-hoc test. Same session also validated wifi-interno-virtwifi end to end for the first time through the real module system (see project_redroid_wifi_interno in the project's memory for that module's own history).",
+          "evidencia": "https://github.com/fogelmanjg/redroid-forge (commit b1424f0)"
+        }
+      ],
+      "problemasConocidos": [
+        {
+          "id": "solo-64-bit",
+          "descripcion": "The Android SDK system images carry no 32-bit translator: apps that are armeabi-v7a-only (no arm64-v8a variant) are not covered by this module."
+        },
+        {
+          "id": "rendimiento",
+          "descripcion": "Translated native code runs slower than native x86_64: expect roughly 2x-5x more CPU time in the app's native part."
+        },
+        {
+          "id": "software-de-google-no-redistribuido",
+          "descripcion": "The translator is Google's, under the Android SDK license, and is never hosted or redistributed by redroid-forge or this database -- the user downloads the system image themselves and the module verifies it by hash before injecting."
+        }
+      ]
+    },
     {
       "id": "redroid15-gapps",
       "base": "redroid-15-2025-06-27",
@@ -833,6 +907,107 @@
           "descripcion": "10-bit video (HDR) is decoded in hardware but comes out as 8-bit: redroid's gralloc restarts Android when allocating P010 buffers. There is no real HDR, not even through scrcpy."
         }
       ]
+    },
+    {
+      "id": "redroid15-wifi-interno",
+      "base": "redroid-15-2025-06-27",
+      "gapps": null,
+      "magisk": null,
+      "modulos": {
+        "wifi-interno": 2
+      },
+      "soporte": "oficial",
+      "validaciones": [
+        {
+          "hardware": {
+            "vendor": "amd",
+            "gpu": "Ryzen 5700G (Renoir, iGPU)",
+            "driver": "radeonsi"
+          },
+          "fecha": "2026-10-24",
+          "forgeVersion": "0.1.0",
+          "resultado": "ok",
+          "chequeos": [
+            {
+              "id": "wifi-interno.hal-overlay-inyectado",
+              "resultado": "ok",
+              "detalle": "the fake-WiFi-HAL overlay (com.android.wifi.apex + com.android.tethering.apex + framework-res.apk, built from the project's own AOSP tree against the production Wifi.patch, mac80211_hwsim-backed) and the native jg_netfix.sh daemon are injected/launched on an UNMODIFIED official redroid/redroid:15.0.0-latest image through the module's own stage 4 (integrate) / stage 6 (ensureRuntimeReady), with no custom image build required by the user"
+            },
+            {
+              "id": "wifi-interno.conectado",
+              "resultado": "ok",
+              "detalle": "through the real module system (POST /api/modules/wifi-interno/accept + recreate), cmd wifi status reports \"Wifi is connected to 'jg-wifi'\" with a real IP (/172.17.0.6) on wlan0 (eth0 renamed by jg_netfix.sh)"
+            },
+            {
+              "id": "wifi-interno.dns-real",
+              "resultado": "ok",
+              "detalle": "dumpsys connectivity shows DnsAddresses: [/8.8.8.8,/8.8.4.4], a full default route, and `ping www.google.com` resolves and replies for real (not just a raw-IP ping)"
+            },
+            {
+              "id": "wifi-interno.app-real-ads",
+              "resultado": "ok",
+              "detalle": "Plants vs Zombies 2 (EA/PopCap, installed via Aurora Store, see project's own notes on that path) shows real ads over this connection, after the ad SDK's normal first-fill delay -- confirms the fake connectivity is good enough for a real third-party network dependency, not just Android's own superficial internet-check"
+            }
+          ],
+          "notas": "This validates the hwsim-backed wifi-interno module as an addable module on the stock official image (no custom AOSP build needed by the user). It is NOT the virt_wifi-backed alternative (wifi-interno-virtwifi module): that one remains experimental, is not part of redroid-forge's first functional release, and has a known unresolved kernel hang on real scan/connect -- intentionally left out of this database until it is validated end to end.",
+          "evidencia": "https://github.com/fogelmanjg/redroid-forge/commit/88fe304"
+        }
+      ],
+      "problemasConocidos": [
+        {
+          "id": "dns-race-ipclient",
+          "descripcion": "IpClient tracks its interface by kernel ifindex, not by name. A manual `svc wifi disable`/`enable` toggle mid-session can race jg_netfix.sh's eth0->wlan0 rename against IpClient's own provisioning start for that connect attempt, leaving DNS/default-route unpopulated (observed once even stuck on \"Wifi is disabled\"). A clean container restart does not hit this. Pre-existing bug shared with the project's own jg-dashboard/pvz2-tv production use of the same HAL; not introduced or newly fixed by this module."
+        },
+        {
+          "id": "pool-hwsim-compartido-sin-coordinar-entre-proyectos",
+          "descripcion": "hwsim radios are claimed from a host-wide shared pool. Concurrent instances are coordinated within redroid-forge, but not against other, separate projects on the same host also using hwsim (e.g. jg-dashboard) -- that cross-project race is a known, deferred issue."
+        }
+      ]
+    },
+    {
+      "id": "redroid15-gapps-hwenc-armtranslation-aurorastore",
+      "base": "redroid-15-2025-06-27",
+      "gapps": "gapps-sdk35-r09-x86_64",
+      "magisk": null,
+      "modulos": {
+        "redroid-gralloc-fix": 3,
+        "hwenc": 10,
+        "gapps": 3,
+        "arm-translation": 3,
+        "aurora-store": 2
+      },
+      "soporte": "oficial",
+      "validaciones": [
+        {
+          "hardware": {
+            "vendor": "amd",
+            "gpu": "AMD Radeon Graphics (Cezanne, integrated -- Ryzen 7 5700G)",
+            "driver": "radeonsi"
+          },
+          "fecha": "2026-11-17",
+          "forgeVersion": "0.10.0",
+          "resultado": "ok",
+          "chequeos": [
+            {
+              "id": "produccion.estabilidad",
+              "resultado": "ok",
+              "detalle": "two real instances (cifi, cifi-nuevo) running this exact combination in redroid-forge-prod, both pinned to the same 2 physical cores; 4+ days of uptime with no crash or restart before the full jg-dashboard migration started"
+            },
+            {
+              "id": "produccion.fluidez-bajo-carga",
+              "resultado": "ok",
+              "detalle": "live scrcpy (real video) plus the built-in preview watched simultaneously on the typical heaviest in-game scene, both instances concurrently: no visible stutter, despite the pair of cores measuring 96-97% busy (mpstat) at the time"
+            },
+            {
+              "id": "hwenc.ahorro-cpu",
+              "resultado": "ok",
+              "detalle": "switching from software to hardware encode (this combination's hwenc module) measured as freeing ~40% of one core per instance -- the actual bottleneck for this specific game is its own CPU-bound logic (Unity's engine), not the encode"
+            }
+          ],
+          "notas": "Not a dedicated test campaign like the hwenc/gapps entries above -- real production use of the exact combination behind the jg-dashboard -> redroid-forge-prod migration (see project memory, 17/11/2026). The user module `cifi` (the per-instance watchdog) is deliberately left out of `modulos`: user modules are excluded from the known-combinations signature by design (see MODULE-AUTHORING.md's esModuloDeUsuario), not because it was absent on the real instances -- both cifi and cifi-nuevo actually run it."
+        }
+      ],
+      "problemasConocidos": []
     }
   ]
 }
