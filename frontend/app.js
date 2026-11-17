@@ -1835,6 +1835,63 @@ async function loadInstances({ silent = false } = {}) {
       tdPrimary.appendChild(primary);
       trPrimary.appendChild(tdPrimary);
 
+      // Viewer column (eye toggle, inline preview, expand button) -- a column of its own
+      // instead of mixed into the chips flow (found for real 17/11/2026: a 160px preview sitting
+      // inline among text chips forced "completo" rows to wrap tall). rowspan=2 so this one cell
+      // sits beside BOTH row 1 (name/status) and row 2 (chips) as a single block, same visual
+      // height as the two rows combined, no matter whether the preview is on or off.
+      if (AuthUi.can('view')) {
+        const tdViewer = document.createElement('td');
+        tdViewer.className = 'instance-viewer-cell';
+        tdViewer.rowSpan = 2;
+        const viewerCol = document.createElement('div');
+        viewerCol.className = 'instance-viewer-col';
+
+        const viewerBtns = document.createElement('div');
+        viewerBtns.className = 'instance-viewer-col-btns';
+
+        // Ventanita toggle (Hito 2 of the web viewer work) -- explicit, per-instance, default
+        // off, independent of the "expandida"/fullscreen viewer (Hito 4): turning this on does
+        // not turn that on, and vice versa, per the plan's own decided "native capability,
+        // opt-in behavior" split.
+        const ventanitaBtn = document.createElement('button');
+        ventanitaBtn.type = 'button';
+        ventanitaBtn.className = 'icon-button';
+        const isOn = ventanitaIds.has(inst.id);
+        ventanitaBtn.textContent = isOn ? '\u{1F441}\u{FE0F}' : '\u{1F441}'; // 👁️ on / 👁 off
+        ventanitaBtn.title = t(isOn ? 'instances.viewer.ventanitaHideHint' : 'instances.viewer.ventanitaShowHint');
+        ventanitaBtn.addEventListener('click', () => {
+          if (ventanitaIds.has(inst.id)) { ventanitaIds.delete(inst.id); Viewer.unmountVentanita(inst.id); } else { ventanitaIds.add(inst.id); }
+          saveVentanitaIds(ventanitaIds);
+          loadInstances({ silent: true });
+        });
+        viewerBtns.appendChild(ventanitaBtn);
+
+        // "Expandida" (Hitos 3+4) -- a one-shot action, not a toggle: opening it does not turn
+        // the ventanita above on or off, and vice versa (independent, per the plan).
+        const expandBtn = document.createElement('button');
+        expandBtn.type = 'button';
+        expandBtn.className = 'icon-button';
+        expandBtn.textContent = '⛶'; // ⛶
+        expandBtn.title = t('instances.viewer.expandHint');
+        expandBtn.addEventListener('click', () => ViewerExpanded.open(inst.id));
+        viewerBtns.appendChild(expandBtn);
+
+        viewerCol.appendChild(viewerBtns);
+
+        // The preview image itself, in its OWN wrap below the buttons rather than next to the
+        // eye button (Viewer.mountVentanita just appends an <img> into whatever container it's
+        // given) -- that's what lets the column stay narrow while the preview below it is free
+        // to be full-size.
+        const ventanitaWrap = document.createElement('div');
+        ventanitaWrap.className = 'viewer-ventanita-wrap';
+        if (isOn) Viewer.mountVentanita(ventanitaWrap, inst.id);
+        viewerCol.appendChild(ventanitaWrap);
+
+        tdViewer.appendChild(viewerCol);
+        trPrimary.appendChild(tdViewer);
+      }
+
       // --- Row 2: every other info chip, then every button ---
       const trSecondary = document.createElement('tr');
       trSecondary.className = 'instance-row-secondary';
@@ -1859,39 +1916,6 @@ async function loadInstances({ silent = false } = {}) {
       androidIdSpan.className = 'android-id-cell';
       androidIdSpan.innerHTML = androidIdCellHtml(inst);
       secondary.appendChild(androidIdSpan);
-
-      // Ventanita toggle (Hito 2 of the web viewer work) -- explicit, per-instance, default off,
-      // independent of the "expandida"/fullscreen viewer (Hito 4): turning this on does not
-      // turn that on, and vice versa, per the plan's own decided "native capability, opt-in
-      // behavior" split.
-      if (AuthUi.can('view')) {
-        const ventanitaWrap = document.createElement('span');
-        ventanitaWrap.className = 'viewer-ventanita-wrap';
-        const ventanitaBtn = document.createElement('button');
-        ventanitaBtn.type = 'button';
-        ventanitaBtn.className = 'icon-button';
-        const isOn = ventanitaIds.has(inst.id);
-        ventanitaBtn.textContent = isOn ? '\u{1F441}\u{FE0F}' : '\u{1F441}'; // 👁️ on / 👁 off
-        ventanitaBtn.title = t(isOn ? 'instances.viewer.ventanitaHideHint' : 'instances.viewer.ventanitaShowHint');
-        ventanitaBtn.addEventListener('click', () => {
-          if (ventanitaIds.has(inst.id)) { ventanitaIds.delete(inst.id); Viewer.unmountVentanita(inst.id); } else { ventanitaIds.add(inst.id); }
-          saveVentanitaIds(ventanitaIds);
-          loadInstances({ silent: true });
-        });
-        ventanitaWrap.appendChild(ventanitaBtn);
-        if (isOn) Viewer.mountVentanita(ventanitaWrap, inst.id);
-        secondary.appendChild(ventanitaWrap);
-
-        // "Expandida" (Hitos 3+4) -- a one-shot action, not a toggle: opening it does not turn
-        // the ventanita above on or off, and vice versa (independent, per the plan).
-        const expandBtn = document.createElement('button');
-        expandBtn.type = 'button';
-        expandBtn.className = 'icon-button';
-        expandBtn.textContent = '⛶'; // ⛶
-        expandBtn.title = t('instances.viewer.expandHint');
-        expandBtn.addEventListener('click', () => ViewerExpanded.open(inst.id));
-        secondary.appendChild(expandBtn);
-      }
 
       const buttons = document.createElement('div');
       buttons.className = 'instance-secondary-buttons';
