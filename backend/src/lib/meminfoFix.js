@@ -46,6 +46,7 @@
 // the Memory/MemorySwap pairing in dockerRuntime.create() is unconditional rather than opt-in.
 
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const { execFile } = require('child_process');
 const { promisify } = require('util');
@@ -185,9 +186,31 @@ const RC_TARGET = '/vendor/etc/init/redroid-forge-meminfo.rc';
 // same timing as redroid-gralloc-fix's own RC injection). No-op for an instance with no memory
 // cap, same guard as prepareBinds -- there would be nothing at IN_CONTAINER_SRC for the .rc to
 // bind from.
+// Found for real (17/11/2026): `docker cp` preserves the SOURCE file's permissions, and
+// RC_SOURCE on disk had drifted to 664 (group-writable) on this host's checkout -- harmless by
+// itself, but every instance created since silently copied in a `.rc` Android's init then
+// rejected as "insecure" ("Skipping insecure file", found in that gotcha's own history, see the
+// file comment above) WITHOUT installRcTrigger or anything else here ever finding out: the copy
+// itself still succeeds, only Android's init silently never processes the file afterwards.
+// Comments alone ("RC_SOURCE is kept at 644 on disk for exactly this reason") are not something
+// that enforces itself -- same "chmod always, not conditionally on the source's own mode"
+// reasoning as nvencService.js/codec2Service.js's own copyIntoContainer, copied here instead of
+// trusting this file's mode on disk to never drift again.
+async function defaultCopyIn(src, dest, containerId) {
+  const tmpPath = path.join(os.tmpdir(), `meminfo-rc-${containerId.slice(0, 12)}-${path.basename(dest)}`);
+  fs.copyFileSync(src, tmpPath);
+  await execFileAsync('chown', ['root:root', tmpPath]);
+  await execFileAsync('chmod', ['0644', tmpPath]);
+  try {
+    await execFileAsync('docker', ['cp', tmpPath, `${containerId}:${dest}`]);
+  } finally {
+    fs.unlinkSync(tmpPath);
+  }
+}
+
 async function installRcTrigger(containerId, memoryMb, { copyIn } = {}) {
   if (!memoryMb) return;
-  const put = copyIn || ((src, dest) => execFileAsync('docker', ['cp', src, `${containerId}:${dest}`]));
+  const put = copyIn || ((src, dest) => defaultCopyIn(src, dest, containerId));
   await put(RC_SOURCE, RC_TARGET);
   log(`installed ${RC_TARGET} in ${containerId} (Android's own init will bind /proc/meminfo after post-fs-data)`);
 }
