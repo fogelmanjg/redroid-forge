@@ -89,16 +89,43 @@ async function launch(containerId, host, adbPort, { maxSize, maxFps, bitRate, lo
   await pushServer.pushToContainer(containerId);
   const args = buildArgs({ scid, maxSize, maxFps, bitRate, logLevel, audio, audioCodec });
   const remoteCmd = `CLASSPATH=${pushServer.DEST_PATH} app_process / com.genymobile.scrcpy.Server ${SCRCPY_VERSION} ${args.join(' ')}`;
-  shellLaunch(host, adbPort, remoteCmd, { onOutput });
-  return { scid };
+  // The host-side `adb shell` child is kept now (21/11/2026) -- before, it was dropped on the
+  // floor, so nothing ever ended it: killServer() below kills it first, so a session teardown
+  // never leaves an `adb shell` process behind on the host either, whatever happens device-side.
+  const child = shellLaunch(host, adbPort, remoteCmd, { onOutput });
+  child.on('error', () => {}); // a spawn failure surfaces as forward.js's connect retries failing
+  return { scid, child };
 }
 
-// No PID is tracked from launch() (a backend restart would lose an in-memory handle anyway, see
-// dockerRuntime.execDetached's own comment) -- scid is unique per session and appears verbatim
-// in the process's argv, so finding-and-killing by it is as reliable as tracking a PID would be,
-// and survives our own process restarting.
-async function killServer(containerId, scid) {
-  await dockerRuntime.exec(containerId, ['sh', '-c', `pkill -f ${scid} || true`]);
+// Device-side, the process is still found by scid (unique per session, verbatim in argv), which
+// survives our own process restarting. 21/11/2026: this used to be one `pkill -f` whose result
+// nobody looked at (and whose errors the caller swallowed) -- a scrcpy-server left running keeps
+// feeding the host's shared VA-API encode daemon at full frame rate with nobody watching (the
+// suspected source of the daemon's memory growth on prod, see CHANGELOG). Now: SIGTERM, check,
+// SIGKILL if it is still there, and report whether it is really gone, so the caller can say so.
+const KILL_GRACE_MS = 1000;
+
+// `[s]cid=<id>`, not the bare id: as a regex it still matches the server's own "scid=<id>" argv,
+// but the literal text "[s]cid=" in the `sh -c` command line running pgrep/pkill does not match
+// it -- without this, pgrep always found its own shell and reported the server "alive" forever.
+function scidPattern(scid) {
+  return `'[s]cid=${scid}'`;
+}
+
+async function serverAlive(containerId, scid) {
+  const out = await dockerRuntime.exec(containerId, ['sh', '-c', `pgrep -f ${scidPattern(scid)} >/dev/null && echo alive || echo gone`]);
+  return String(out || '').includes('alive');
+}
+
+async function killServer(containerId, scid, child) {
+  if (child && child.exitCode === null && !child.killed) {
+    try { child.kill('SIGKILL'); } catch (e) { /* already gone */ }
+  }
+  await dockerRuntime.exec(containerId, ['sh', '-c', `pkill -f ${scidPattern(scid)} || true`]);
+  await new Promise((r) => setTimeout(r, KILL_GRACE_MS));
+  if (!(await serverAlive(containerId, scid))) return true;
+  await dockerRuntime.exec(containerId, ['sh', '-c', `pkill -9 -f ${scidPattern(scid)} || true`]);
+  return !(await serverAlive(containerId, scid));
 }
 
 module.exports = { SCRCPY_VERSION, buildArgs, launch, killServer };

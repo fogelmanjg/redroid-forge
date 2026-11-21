@@ -34,6 +34,7 @@ async function start(instance, { maxSize, maxFps, bitRate, audio = false, audioC
   let videoConn;
   let audioConn;
   let control;
+  let launchedChild;
   let stopped = false;
 
   async function stop() {
@@ -44,7 +45,16 @@ async function start(instance, { maxSize, maxFps, bitRate, audio = false, audioC
     try { audioConn?.socket.destroy(); } catch (e) { /* tearing down regardless */ }
     try { control?.socket.destroy(); } catch (e) { /* tearing down regardless */ }
     if (localPort) await forward.removeForward(HOST, instance.adbPort, localPort).catch(() => {});
-    if (scid) await launchServer.killServer(instance.containerId, scid).catch(() => {});
+    // Not swallowed silently any more (21/11/2026): a scrcpy-server that survives its session
+    // keeps encoding through the shared VA-API daemon with nobody watching -- worth a log line.
+    if (scid) {
+      try {
+        const gone = await launchServer.killServer(instance.containerId, scid, launchedChild);
+        if (!gone) console.warn(`[viewer] scrcpy-server ${scid} on instance ${instance.id} is still running after SIGKILL`);
+      } catch (e) {
+        console.warn(`[viewer] could not kill scrcpy-server ${scid} on instance ${instance.id}: ${e.message}`);
+      }
+    }
   }
 
   async function readLoop(conn, handshake, onPacket) {
@@ -64,6 +74,7 @@ async function start(instance, { maxSize, maxFps, bitRate, audio = false, audioC
     await forward.ensureConnected(HOST, instance.adbPort);
     const launched = await launchServer.launch(instance.containerId, HOST, instance.adbPort, { maxSize, maxFps, bitRate, audio, audioCodec });
     scid = launched.scid;
+    launchedChild = launched.child;
 
     localPort = await forward.allocateLocalPort();
     await forward.addForward(HOST, instance.adbPort, localPort, socketName(scid));

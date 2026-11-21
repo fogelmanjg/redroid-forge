@@ -43,6 +43,7 @@ class OpusTranscoder {
   // encodeMediaFrame already expects from a real scrcpy media packet, so the route does not need
   // to know PCM was ever involved.
   push(pcmChunk) {
+    if (this.closed) return []; // an audio packet still in flight after the viewer left
     this.buffer = this.buffer.length ? Buffer.concat([this.buffer, pcmChunk]) : pcmChunk;
     const packets = [];
     while (this.buffer.length >= FRAME_BYTES) {
@@ -59,7 +60,11 @@ class OpusTranscoder {
     return packets;
   }
 
+  // Idempotent (21/11/2026): routes/viewerExpanded.js's 'close' handler can now run for a
+  // connection whose start failed too, and deleting the same WASM encoder twice is not safe.
   close() {
+    if (this.closed) return;
+    this.closed = true;
     this.encoder.delete();
   }
 }

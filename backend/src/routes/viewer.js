@@ -28,7 +28,7 @@ const permissions = require('../lib/permissions');
 const auth = require('../lib/auth');
 const httpListeners = require('../lib/httpListeners');
 const wsServer = require('../lib/wsServer');
-const screenshotCapture = require('../lib/screenshotCapture');
+const captureHub = require('../lib/captureHub');
 
 const HOST = '127.0.0.1'; // docker-compose.yml: network_mode: host -- reaches the instance's
 // published adbPort directly, same as viewerSession.js's own HOST constant.
@@ -79,18 +79,17 @@ async function handleUpgrade(req, socket, head) {
   // still just "path?query", same shape a normal request would have.
   const initialSize = new URL(req.url, 'http://internal').searchParams.get('size');
 
-  let consecutiveErrors = 0;
-  const session = screenshotCapture.startLoop(HOST, instance.adbPort, CAPTURE_INTERVAL_MS, initialSize,
-    (png) => { consecutiveErrors = 0; ws.send(png); },
-    (err) => {
-      consecutiveErrors += 1;
-      console.error(`ventanita capture error for instance ${instanceId}:`, err.message);
-      // 3, not 1 -- a single failed capture is routine (adb momentarily busy, instance mid-boot)
-      // and the loop already keeps going on its own; only give up on the WS once it's clearly
-      // not transient, same "don't overreact to one blip" reasoning as viewerSession.js's own
-      // readLoop never treating isolated errors as fatal.
-      if (consecutiveErrors >= 3) ws.close(1011, 'Upstream capture failing');
-    });
+  // One shared capture loop per instance (lib/captureHub.js, 21/11/2026), not one per WS: this
+  // connection just subscribes to it at its own size. The "3 failures in a row -> give up" rule
+  // that used to live here now lives in the hub, which tells every subscriber at once.
+  const session = captureHub.subscribe(instanceId, {
+    host: HOST,
+    adbPort: instance.adbPort,
+    intervalMs: CAPTURE_INTERVAL_MS,
+    size: initialSize,
+    onFrame: (jpeg) => ws.send(jpeg),
+    onGiveUp: () => ws.close(1011, 'Upstream capture failing'),
+  });
 
   // Live resize (15/11/2026, "la proxima actualizacion viene el tamaño nuevo") -- a lone TEXT
   // control message, `{"size": <number>}`, from frontend/viewer.js's Viewer.setSize(). Anything
@@ -105,7 +104,7 @@ async function handleUpgrade(req, socket, head) {
     } catch (e) { /* ignore -- see comment above */ }
   });
 
-  ws.on('close', () => session.stop());
+  ws.on('close', () => session.unsubscribe());
   // WsConnection is an EventEmitter -- 'error' with no listener at all is one of the handful of
   // events Node itself special-cases to THROW instead of silently dropping, which an abrupt
   // client disconnect (no clean WS close handshake, just the TCP connection dying -- confirmed

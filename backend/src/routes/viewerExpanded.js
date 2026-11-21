@@ -98,6 +98,22 @@ async function handleUpgrade(req, socket, head) {
   // does the PCM -> Opus step ourselves, in process, before this packet ever reaches the WS.
   const opus = new OpusTranscoder();
   let session;
+  // 'close' is registered BEFORE awaiting the start (21/11/2026). It used to be registered only
+  // after viewerSession.start() resolved -- a client gone during those seconds (tab closed while
+  // "connecting", page reloaded) fired its one 'close' with nobody listening, so session.stop()
+  // never ran and the scrcpy-server it had just launched kept encoding through the shared VA-API
+  // daemon indefinitely. Now a close at any point is remembered, and a session that finishes
+  // starting for a connection already gone is stopped right away (just below the try/catch).
+  let clientGone = false;
+  ws.on('close', () => {
+    clientGone = true;
+    if (session) session.stop();
+    opus.close();
+  });
+  // See routes/viewer.js's own comment on this exact pattern: an abrupt client disconnect surfaces
+  // as the underlying socket's 'error' before 'close', and WsConnection is an EventEmitter that
+  // throws on an unhandled 'error' -- 'close' is what actually tears the session down.
+  ws.on('error', () => {});
   try {
     session = await viewerSession.start(instance, {
       maxSize: MAX_SIZE,
@@ -117,8 +133,14 @@ async function handleUpgrade(req, socket, head) {
     });
   } catch (e) {
     console.error(`expandida viewer failed to start for instance ${instanceId}:`, e.message);
-    opus.close();
-    rejectUpgrade(socket, 500, 'Failed to start viewer session');
+    // A WS close, not rejectUpgrade(): the 101 already went out in acceptUpgrade, so an HTTP 500
+    // written now would just be garbage bytes inside the WS stream. The 'close' handler above
+    // does the opus cleanup.
+    ws.close(1011, 'Failed to start viewer session');
+    return;
+  }
+  if (clientGone) {
+    session.stop();
     return;
   }
 
@@ -145,11 +167,6 @@ async function handleUpgrade(req, socket, head) {
       reasoning as the JSON.parse catch above: this is a best-effort input channel. */ }
   });
 
-  ws.on('close', () => { session.stop(); opus.close(); });
-  // See routes/viewer.js's own comment on this exact pattern: an abrupt client disconnect surfaces
-  // as the underlying socket's 'error' before 'close', and WsConnection is an EventEmitter that
-  // throws on an unhandled 'error' -- 'close' is what actually tears the session down.
-  ws.on('error', () => {});
 }
 
 function registerUpgrade() {

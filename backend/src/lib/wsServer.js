@@ -16,6 +16,10 @@ const GUID = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11'; // fixed by the RFC, not a 
 
 const OPCODE = { CONTINUATION: 0x0, TEXT: 0x1, BINARY: 0x2, CLOSE: 0x8, PING: 0x9, PONG: 0xa };
 
+// See WsConnection._startHeartbeat. Overridable by env only so tests can run it in milliseconds.
+const HEARTBEAT_INTERVAL_MS = Number(process.env.REDROID_FORGE_WS_HEARTBEAT_MS) || 10000;
+const HEARTBEAT_TIMEOUT_MS = HEARTBEAT_INTERVAL_MS * 3;
+
 function computeAcceptKey(clientKey) {
   return crypto.createHash('sha1').update(clientKey + GUID).digest('base64');
 }
@@ -72,15 +76,39 @@ class WsConnection extends EventEmitter {
     socket.on('end', () => socket.end());
     socket.on('close', () => this._emitCloseOnce());
     socket.on('error', (err) => this.emit('error', err));
+    this._startHeartbeat();
+  }
+
+  // Heartbeat (21/11/2026). The 'end' handler above covers a client that hangs up cleanly (TCP
+  // FIN); it does NOT cover one that just vanishes -- a tablet going to sleep, Wi-Fi dropping, a
+  // client PC freezing outright (seen live on jgustavo46 the day before). No FIN ever arrives,
+  // and without traffic in our direction the kernel only notices via TCP keepalive, ~2 h by
+  // default: all that time the expandida's scrcpy-server kept encoding at 60 fps through the
+  // shared VA-API daemon for nobody. Now this side pings every HEARTBEAT_INTERVAL_MS; every
+  // browser answers a ping with a pong on its own (RFC 6455 5.5.2, no page code involved), and
+  // ANY inbound byte counts as "still there". Nothing for HEARTBEAT_TIMEOUT_MS -> destroy(), whose
+  // 'close' runs the caller's normal teardown, exactly as if the client had hung up.
+  _startHeartbeat() {
+    this._lastSeen = Date.now();
+    this._heartbeat = setInterval(() => {
+      if (Date.now() - this._lastSeen > HEARTBEAT_TIMEOUT_MS) {
+        this.socket.destroy();
+        return;
+      }
+      this._sendFrame(OPCODE.PING, Buffer.alloc(0));
+    }, HEARTBEAT_INTERVAL_MS);
+    if (this._heartbeat.unref) this._heartbeat.unref();
   }
 
   _emitCloseOnce() {
     if (this._emittedClose) return;
     this._emittedClose = true;
+    clearInterval(this._heartbeat);
     this.emit('close');
   }
 
   _onData(chunk) {
+    this._lastSeen = Date.now();
     this._buf = this._buf.length ? Buffer.concat([this._buf, chunk]) : chunk;
     // A single TCP read can carry several WS frames back to back (e.g. a run of small control
     // messages) -- keep parsing until a full frame is no longer buffered, not just once per
@@ -148,7 +176,9 @@ class WsConnection extends EventEmitter {
   // Server-to-client frames are never masked (RFC 6455 5.1: only client-to-server frames are) --
   // no mask key to generate or apply here, unlike parsing above.
   _sendFrame(opcode, payload) {
-    if (this.socket.destroyed) return;
+    // writableEnded too (21/11/2026): after our own close() -> socket.end() the socket is not
+    // destroyed yet, and a write there raises "write after end" as an 'error' event.
+    if (this.socket.destroyed || this.socket.writableEnded) return;
     const len = payload.length;
     let header;
     if (len < 126) {
@@ -177,6 +207,7 @@ class WsConnection extends EventEmitter {
   close(code = 1000, reason = '') {
     if (this._closing) return;
     this._closing = true;
+    clearInterval(this._heartbeat);
     try {
       const reasonBuf = Buffer.from(reason, 'utf-8');
       // Sent BEFORE end()-ing the socket below, not after -- _sendFrame only checks

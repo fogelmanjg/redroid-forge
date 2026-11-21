@@ -27,6 +27,27 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
 
 ## [Unreleased]
 
+### Fixed
+
+- **Expandida viewer: the scrcpy-server it starts is now always torn down when the viewer goes
+  away** (21/11/2026). Three ways it could outlive its viewer and keep encoding at 60 fps through
+  the host's shared VA-API daemon with nobody watching (the suspected source of that daemon's
+  memory growth on prod, which only happens while encode sessions are active): (1) the WS 'close'
+  handler was registered only after `viewerSession.start()` resolved, so a viewer gone during
+  startup was never noticed; (2) `wsServer.js` never pinged, so a client that vanished without a
+  FIN (sleeping tablet, dropped Wi-Fi, a frozen PC) was only noticed by TCP keepalive, ~2 h --
+  it now pings every 10 s and drops the connection after 30 s of silence; (3) the kill was one
+  unchecked `pkill -f` with its errors swallowed, and the host-side `adb shell` child was never
+  ended -- now SIGTERM, verify, SIGKILL, and a log line if it still survives. Also: a failed start
+  now closes the WS instead of writing an HTTP 500 into an already-upgraded socket, and
+  `OpusTranscoder.close()` is idempotent.
+- **Ventanita: one shared capture per instance instead of one per viewer** (21/11/2026,
+  `lib/captureHub.js`). Every open frontend ran its own `screencap` loop per instance; now the
+  backend runs at most one per instance, only while someone is watching, shrinks it once per
+  distinct size requested, and hands every viewer the latest frame (a late joiner gets it right
+  away). After 3 failures in a row every viewer of that instance is told to give up at once,
+  instead of each one hammering adb against an instance that is gone.
+
 ### Added
 
 - `CONTRIBUTING.md` and `.github/ISSUE_TEMPLATE/` (bug report, feature request) -- Phase 10 step 3
