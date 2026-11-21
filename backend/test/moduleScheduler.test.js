@@ -107,6 +107,26 @@ test('moduleScheduler.start: calling it again for the same instance+module does 
   assert.equal(requireFixtureEntry(root, id).calls.length, 1);
 }));
 
+// 21/11/2026: a recreate (POST /:id/display) used to leave the timer on the deleted container.
+test('moduleScheduler.start: a new containerId for an already-scheduled module replaces the stale timer', (t) => withWatchdogFixture({
+  intervalMs: 1000,
+  entryBody: `
+    module.exports.calls = [];
+    module.exports.runTick = async (instanceId, containerId) => { module.exports.calls.push(containerId); };
+  `,
+}, async ({ root, id, fakeStore }) => {
+  fakeStore.set('inst-1', { id: 'inst-1' });
+  t.mock.timers.enable({ apis: ['setInterval'] });
+
+  scheduler.start('inst-1', 'old-container', [id]);
+  scheduler.start('inst-1', 'new-container', [id]); // the instance was recreated, no stop() in between
+
+  t.mock.timers.tick(1000);
+  await new Promise((r) => setTimeout(r, 0));
+  // Only the new container is ticked, and only once (the old timer is gone, not running alongside).
+  assert.deepEqual(requireFixtureEntry(root, id).calls, ['new-container']);
+}));
+
 test('moduleScheduler.pause: the timer keeps firing but the module is not actually invoked while paused', (t) => withWatchdogFixture({
   intervalMs: 1000,
   entryBody: `

@@ -51,7 +51,15 @@ function start(instanceId, containerId, requiredModuleIds) {
     scheduled.set(instanceId, perInstance);
   }
   for (const manifest of modules) {
-    if (perInstance.has(manifest.id)) continue; // already scheduled, leave its timer running
+    const existing = perInstance.get(manifest.id);
+    if (existing && existing.containerId === containerId) continue; // already scheduled, leave its timer running
+    // Scheduled against a container that is not this one any more (the instance was recreated
+    // without a stop() first): that timer would tick against a deleted container forever. Replace
+    // it. Defense in depth -- routes/instances.js's recreate path now calls stop() itself.
+    if (existing) {
+      clearInterval(existing.timer);
+      log(`"${manifest.id}" for ${instanceId} was scheduled against container ${String(existing.containerId).slice(0, 12)}; rescheduling against ${String(containerId).slice(0, 12)}`);
+    }
     const entry = {
       containerId, intervalMs: manifest.schedule.intervalMs, lastRunAt: null, lastOk: null, lastError: null,
     };

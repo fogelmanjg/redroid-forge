@@ -822,6 +822,13 @@ router.post('/:id/display', async (req, res) => {
       // this has to run before remove() below, not be skipped just because the instance keeps
       // the same knockRequiredHosts setting across the recreate.
       await releaseKnockGuards(instance);
+      // 21/11/2026 (found on prod right after updating to 1.0.0-beta.1): the watchdog timers
+      // captured THIS container's id, and moduleScheduler.start() at the end of this route
+      // skips a module that is "already scheduled" -- so after a recreate the cifi watchdog
+      // kept ticking against the deleted container ("No such container") and never reopened
+      // the game. Cleared here, like the delete and restart routes already do; start() below
+      // schedules it again against the new container.
+      moduleScheduler.stop(instance.id);
       await runtime.remove(instance.containerId, { force: true });
       // Persisted right away, before create() is even attempted: if create() itself fails
       // below (a real possibility -- missing image, no free binder slot, ...), the stored
