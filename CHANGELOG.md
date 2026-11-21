@@ -27,6 +27,26 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
 
 ## [Unreleased]
 
+### Added
+
+- **Expandida: rotate the device** -- a ⟳ button sends scrcpy's own `ROTATE_DEVICE` control message
+  (portrait <-> landscape, same start-stop permission as every other input); the browser decoder
+  is reconfigured when the stream restarts at the swapped size.
+- **Expandida: move the button bar** between the bottom (default) and the right edge, so in
+  portrait the bar does not eat into the picture; remembered per browser.
+- **Visores: "Per row"** -- `Auto (size)` keeps the original layout (as many cards as fit at the
+  slider's size); 1/2/3/4/6 lays the cards out in that many equal columns over the full width,
+  each preview filling its column and captured by the backend at that real width.
+
+### Fixed
+
+- **A recreated instance's watchdog ticked against the deleted container.** The recreate path
+  (`POST /:id/display`: display, resources, gpuMode, bind hosts) never stopped the instance's
+  module scheduler, and `start()` skipped a module already scheduled -- after recreating both
+  cifi instances on prod, the cifi watchdog failed every 5 min with "No such container" and never
+  reopened the game. The route stops it first now, and `start()` replaces a timer bound to another
+  container.
+
 ## [1.0.0-beta.1] - 2026-11-21
 
 First pre-release of 1.0, decided by the user on 21/11/2026 after the hwenc work below. Still

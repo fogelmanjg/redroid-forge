@@ -41,6 +41,15 @@
         <span id="viewers-size-control" class="viewers-size-control" hidden>
           <label for="viewers-size-slider" data-i18n="instances.viewMode.size">Preview size</label>
           <input type="range" id="viewers-size-slider" min="60" max="400" step="20" />
+          <label for="viewers-columns" data-i18n="instances.viewMode.columns">Per row</label>
+          <select id="viewers-columns">
+            <option value="auto" data-i18n="instances.viewMode.columnsAuto">Auto (size)</option>
+            <option value="1">1</option>
+            <option value="2">2</option>
+            <option value="3">3</option>
+            <option value="4">4</option>
+            <option value="6">6</option>
+          </select>
         </span>
       </div>
       <table id="instances-table">

@@ -87,7 +87,7 @@ function parseDeviceName(buf) {
 // own type-specific layout.
 const CONTROL_MSG_TYPE = {
   INJECT_KEYCODE: 0, INJECT_TEXT: 1, INJECT_TOUCH_EVENT: 2, INJECT_SCROLL_EVENT: 3,
-  BACK_OR_SCREEN_ON: 4, SET_CLIPBOARD: 9,
+  BACK_OR_SCREEN_ON: 4, SET_CLIPBOARD: 9, ROTATE_DEVICE: 11,
 };
 
 // AMOTION_EVENT_ACTION_* (app/src/android/input.h:211-278) -- only the ones this project's
@@ -145,9 +145,16 @@ function encodeTextEvent(text) {
   return buf;
 }
 
+// ROTATE_DEVICE (app/src/control_msg.h's enum position 11 at scrcpy v5.0.1, checked against that
+// tag's source): no payload, the type byte alone. The server toggles the device between portrait
+// and landscape; the video then restarts at the new size with a fresh config packet.
+function encodeRotateDevice() {
+  return Buffer.from([CONTROL_MSG_TYPE.ROTATE_DEVICE]);
+}
+
 module.exports = {
   generateScid, socketName,
   parseFrameHeader, parseCodecId, parseDeviceName, DEVICE_NAME_FIELD_LENGTH,
   CONTROL_MSG_TYPE, MOTION_ACTION, KEY_ACTION, POINTER_ID_GENERIC_FINGER,
-  encodeTouchEvent, encodeKeyEvent, encodeTextEvent,
+  encodeTouchEvent, encodeKeyEvent, encodeTextEvent, encodeRotateDevice,
 };

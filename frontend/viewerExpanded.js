@@ -93,6 +93,15 @@ const ViewerExpanded = (() => {
     const isKeyFrame = !!(flags & 0x01);
     const isConfig = !!(flags & 0x02);
     if (isConfig) {
+      // A config packet AFTER the decoder exists means the stream restarted with new parameters --
+      // a rotation (1.0.0-beta.2's rotate button) restarts it at the swapped size. The decoder
+      // was configured with the old SPS's codec string; rather than trust every browser to follow
+      // an in-band resolution change, close it and configure a fresh one from this config.
+      if (st.videoDecoderConfigured) {
+        try { st.videoDecoder.close(); } catch (e) { /* already closed/errored */ }
+        st.videoDecoder = null;
+        st.videoDecoderConfigured = false;
+      }
       st.pendingConfigPayload = st.pendingConfigPayload
         ? new Uint8Array([...st.pendingConfigPayload, ...payload]) : payload;
       return;
@@ -225,6 +234,11 @@ const ViewerExpanded = (() => {
     st.overlay.addEventListener('keydown', (e) => { if (e.key === 'Escape') close(); });
   }
 
+  function setNavbarRight(overlay, btn, right) {
+    overlay.classList.toggle('navbar-right', right);
+    btn.textContent = right ? '⤓' : '⇥'; // the arrow points to where the bar would go next
+  }
+
   function buildOverlay(instanceId) {
     const overlay = document.createElement('div');
     overlay.className = 'viewer-expanded-overlay';
@@ -259,6 +273,9 @@ const ViewerExpanded = (() => {
     addBtn('□', I18n.t('instances.viewer.expandedRecents'), () => tapKey(st, KEYCODE.APP_SWITCH));
     addBtn('−', I18n.t('instances.viewer.expandedVolumeDown'), () => tapKey(st, KEYCODE.VOLUME_DOWN));
     addBtn('+', I18n.t('instances.viewer.expandedVolumeUp'), () => tapKey(st, KEYCODE.VOLUME_UP));
+    // 1.0.0-beta.2: rotate the device (portrait <-> landscape) -- scrcpy's own ROTATE_DEVICE
+    // control message; the video restarts at the swapped size (see handleVideoPacket).
+    addBtn('⟳', I18n.t('instances.viewer.expandedRotate'), () => sendControl(st, { type: 'rotate' }));
     const kbdBtn = addBtn('⌨', I18n.t('instances.viewer.expandedKeyboard'), () => st.textInput.focus());
     const kbdHint = document.createElement('div');
     kbdHint.className = 'viewer-expanded-kbd-hint';
@@ -268,6 +285,17 @@ const ViewerExpanded = (() => {
       if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
       else overlay.requestFullscreen().catch(() => {});
     });
+    // 1.0.0-beta.2: move this bar between the bottom (default) and the right edge -- in portrait
+    // a bottom bar eats into the already-narrow picture. Remembered per browser (a per-viewer
+    // convenience; private windows/blocked storage just fall back to the bottom).
+    const sideBtn = addBtn('⇥', I18n.t('instances.viewer.expandedBarSide'), () => {
+      const right = !overlay.classList.contains('navbar-right');
+      setNavbarRight(overlay, sideBtn, right);
+      try { localStorage.setItem('viewerExpandedNavbar', right ? 'right' : 'bottom'); } catch (e) { /* no storage */ }
+    });
+    let savedSide = null;
+    try { savedSide = localStorage.getItem('viewerExpandedNavbar'); } catch (e) { /* no storage */ }
+    setNavbarRight(overlay, sideBtn, savedSide === 'right');
     addBtn('✕', I18n.t('instances.viewer.expandedClose'), () => close());
     overlay.appendChild(bar);
 

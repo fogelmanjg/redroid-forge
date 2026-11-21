@@ -278,8 +278,62 @@ viewersSizeSlider.addEventListener('input', () => {
   $('#instances-grid').style.setProperty('--ventanita-size', `${viewersSize}px`);
   // Live, while dragging -- every card's own session gets the new capture size right away
   // (next tick, see screenshotCapture.js's own comment), not just on the next full reload.
-  if (instanceViewMode === 'viewers') Viewer.setSizeAll(viewersSize);
+  if (instanceViewMode === 'viewers') Viewer.setSizeAll(effectiveViewersSize());
 });
+
+// Per-row layout of the "viewers" grid (21/11/2026, 1.0.0-beta.2 -- the beta1 pending item "how
+// many per row, or use the whole width"; both, as a choice): 'auto' keeps the original
+// behaviour (as many cards per row as fit at the slider's size), a number lays the cards out in
+// that many equal columns sharing the full width. In column mode the slider does not apply: each
+// preview fills its column, and the backend is asked to capture at that real width (same reason
+// the slider drives the capture size -- a small capture stretched by CSS just looks blurry).
+// Persisted per browser like the view mode and the slider.
+const VIEWERS_COLUMN_CHOICES = ['auto', '1', '2', '3', '4', '6'];
+function loadViewersColumns() {
+  let v = null;
+  try { v = localStorage.getItem('viewersColumns'); } catch (e) { /* no storage */ }
+  return VIEWERS_COLUMN_CHOICES.includes(v) ? v : 'auto';
+}
+let viewersColumns = loadViewersColumns();
+
+// The capture size (short side, px) every ventanita in the grid should ask the backend for.
+function effectiveViewersSize() {
+  if (viewersColumns === 'auto') return viewersSize;
+  const grid = $('#instances-grid');
+  const n = Number(viewersColumns);
+  const gapPx = 16;   // .instances-grid gap: 1rem
+  const cardPadPx = 24; // .instance-card padding 0.7rem on both sides + its 1px borders
+  const colPx = (grid.clientWidth - gapPx * (n - 1)) / n - cardPadPx;
+  // Same [60,480] range the backend clamps to anyway (screenshotCapture.js's clampSize).
+  return Math.max(60, Math.min(480, Math.round(colPx)));
+}
+
+function applyViewersLayout() {
+  const grid = $('#instances-grid');
+  const fixed = viewersColumns !== 'auto';
+  grid.classList.toggle('instances-grid-columns', fixed);
+  grid.style.setProperty('--viewer-columns', fixed ? viewersColumns : '1');
+  viewersSizeSlider.disabled = fixed;
+}
+const viewersColumnsSelect = $('#viewers-columns');
+viewersColumnsSelect.value = viewersColumns;
+applyViewersLayout();
+viewersColumnsSelect.addEventListener('change', () => {
+  viewersColumns = VIEWERS_COLUMN_CHOICES.includes(viewersColumnsSelect.value) ? viewersColumnsSelect.value : 'auto';
+  try { localStorage.setItem('viewersColumns', viewersColumns); } catch (e) { /* no storage */ }
+  applyViewersLayout();
+  if (instanceViewMode === 'viewers') Viewer.setSizeAll(effectiveViewersSize());
+});
+// In column mode a window/panel resize changes every column's width: ask for the new capture
+// size, debounced so dragging the window edge does not send a resize per pixel.
+let viewersResizeTimer = null;
+if (window.ResizeObserver) {
+  new ResizeObserver(() => {
+    if (viewersColumns === 'auto' || instanceViewMode !== 'viewers') return;
+    clearTimeout(viewersResizeTimer);
+    viewersResizeTimer = setTimeout(() => Viewer.setSizeAll(effectiveViewersSize()), 300);
+  }).observe($('#instances-grid'));
+}
 
 async function loadDirectoryCache() {
   try {
@@ -1738,7 +1792,7 @@ async function loadInstances({ silent = false } = {}) {
         if (AuthUi.can('view')) {
           const viewerWrap = document.createElement('div');
           viewerWrap.className = 'instance-card-viewer';
-          Viewer.mountVentanita(viewerWrap, inst.id, viewersSize);
+          Viewer.mountVentanita(viewerWrap, inst.id, effectiveViewersSize());
           card.appendChild(viewerWrap);
         }
 

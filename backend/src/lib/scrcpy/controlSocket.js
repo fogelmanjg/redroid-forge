@@ -17,6 +17,7 @@ async function connectControl(localPort) {
     sendTouch(opts) { socket.write(protocol.encodeTouchEvent(opts)); },
     sendKey(opts) { socket.write(protocol.encodeKeyEvent(opts)); },
     sendText(text) { socket.write(protocol.encodeTextEvent(text)); },
+    sendRotate() { socket.write(protocol.encodeRotateDevice()); },
   };
 }
 

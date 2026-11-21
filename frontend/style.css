@@ -296,6 +296,21 @@ tr.instance-row-secondary > td { padding-top: 0.2rem; }
 .viewer-expanded-navbtn:hover .viewer-expanded-kbd-hint,
 .viewer-expanded-navbtn:focus .viewer-expanded-kbd-hint { opacity: 1; }
 
+/* Navbar on the right edge (1.0.0-beta.2's bar-side button): vertical, centered, and the picture
+   gets the height back instead (it only loses ~4rem of width). The keyboard hint opens to the
+   left of its button here instead of above it, so it is not clipped at the top. */
+.viewer-expanded-overlay.navbar-right .viewer-expanded-canvas { max-width: calc(100% - 4.5rem); max-height: 100%; }
+.viewer-expanded-overlay.navbar-right .viewer-expanded-navbar {
+  flex-direction: column; bottom: auto; top: 50%; right: 0.5rem; transform: translateY(-50%);
+}
+.viewer-expanded-overlay.navbar-right .viewer-expanded-kbd-hint {
+  bottom: auto; top: 50%; left: auto; right: calc(100% + 0.6rem); transform: translateY(-50%);
+}
+.viewer-expanded-overlay.navbar-right .viewer-expanded-kbd-hint::after {
+  top: 50%; left: 100%; transform: translateY(-50%);
+  border-top-color: transparent; border-left-color: rgba(20,20,20,0.95);
+}
+
 /* Instances view-mode switch (15/11/2026) -- "completo" (unchanged table above), "mínimo"
    (name+address+actions only) and "visores" (a grid of live previews) are three renderings of
    the same instance list, picked here and remembered per browser via localStorage. */
@@ -327,6 +342,14 @@ tr.instance-row-secondary > td { padding-top: 0.2rem; }
 .instance-card-address:hover { border-color: var(--accent); }
 .instance-card-buttons { display: flex; gap: 0.3rem; flex-wrap: wrap; justify-content: center; }
 .instances-grid .viewer-ventanita-img { max-width: none; max-height: none; width: var(--ventanita-size, 200px); height: auto; }
+/* "Per row" = a fixed number of columns (1.0.0-beta.2): equal columns sharing the whole width,
+   each preview filling its card instead of using the slider's size. `minmax(0, 1fr)`, not `1fr`,
+   so a long instance name cannot force its column wider than the others. */
+.instances-grid.instances-grid-columns { display: grid; grid-template-columns: repeat(var(--viewer-columns, 3), minmax(0, 1fr)); }
+.instances-grid.instances-grid-columns[hidden] { display: none; }
+.instances-grid-columns .instance-card-viewer { width: 100%; }
+.instances-grid-columns .viewer-ventanita-img { width: 100%; }
+#viewers-size-slider:disabled { opacity: 0.4; }
 
 /* "Mínimo" -- a single compact row per instance (vs. the full view's row-pair), no chips, no
    viewer, no edit panels: just name, address, and whichever of start/stop/restart/delete apply. */

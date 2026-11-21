@@ -162,6 +162,9 @@ async function handleUpgrade(req, socket, head) {
         session.control.sendKey({ action: protocol.KEY_ACTION[msg.action?.toUpperCase()], keycode: msg.keycode });
       } else if (msg.type === 'text') {
         session.control.sendText(String(msg.text));
+      } else if (msg.type === 'rotate') {
+        // 1.0.0-beta.2: portrait <-> landscape. Same start-stop gate as every other input above.
+        session.control.sendRotate();
       }
     } catch (e) { /* malformed/out-of-range field in an otherwise-valid message -- ignore, same
       reasoning as the JSON.parse catch above: this is a best-effort input channel. */ }
