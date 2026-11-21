@@ -62,3 +62,16 @@ test('checkForUpdate: newer=false when already on the latest', async () => {
   const r = await vc.checkForUpdate({ installed: '0.4.1', fetchImpl });
   assert.strictEqual(r.newer, false);
 });
+
+// 21/11/2026: pre-release suffixes (first one shipped: 1.0.0-beta.1).
+test('isNewer: SemVer pre-releases', () => {
+  assert.strictEqual(vc.isNewer('1.0.0-beta.1', '0.10.0'), true);
+  assert.strictEqual(vc.isNewer('1.0.0', '1.0.0-beta.1'), true, 'a release beats its own pre-release');
+  assert.strictEqual(vc.isNewer('1.0.0-beta.1', '1.0.0'), false);
+  assert.strictEqual(vc.isNewer('1.0.0-beta.2', '1.0.0-beta.1'), true);
+  assert.strictEqual(vc.isNewer('1.0.0-beta.10', '1.0.0-beta.2'), true, 'numeric identifiers compare numerically');
+  assert.strictEqual(vc.isNewer('1.0.0-beta.1', '1.0.0-beta.1'), false);
+  assert.strictEqual(vc.isNewer('1.0.0-rc.1', '1.0.0-beta.9'), true);
+  assert.strictEqual(vc.isNewer('1.0.1-beta.1', '1.0.0'), true);
+  assert.strictEqual(vc.isNewer('v1.0.0', '1.0.0-beta.1'), true, 'a leading v is ignored');
+});

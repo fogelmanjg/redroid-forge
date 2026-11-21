@@ -8,7 +8,7 @@ host-side daemon instead of native VA-API inside Android, the socket protocol, a
 compatibility table) and its own `test/` directory for the daemon's own build/verification tooling —
 none of that lives here any more.
 
-**Which tag gets built** is `REDROID_HWENC_VERSION` (`docker-compose.yml`, default `v0.2.0`), overridable
+**Which tag gets built** is `REDROID_HWENC_VERSION` (`docker-compose.yml`, default `v0.3.0`), overridable
 per host in that host's own `.env` independently of every other host — pin one GPU to a known-good tag
 while another tries a newer one, with a plain rebuild as the rollback. This used to be a vendored,
 hand-copied checkout that needed porting upstream fixes file by file by hand; that is also gone.

@@ -27,8 +27,35 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
 
 ## [Unreleased]
 
+## [1.0.0-beta.1] - 2026-11-21
+
+First pre-release of 1.0, decided by the user on 21/11/2026 after the hwenc work below. Still
+inside the Phase 10 feature freeze (`docs/ROADMAP.md`): bug fixes and docs, plus the per-stream
+hwenc change, which fixes a real multi-viewer bug. Three planned UI items (rotate button and
+movable button bar in the expandida, columns/full-width in the visores grid) are deferred to a
+later beta.
+
 ### Fixed
 
+- **hwenc daemon memory leak** (redroid-hwenc v0.3.0, now the pinned `REDROID_HWENC_VERSION`):
+  the legacy encoder never destroyed its per-frame VA parameter/packed-header buffers, ~27 KB per
+  encoded frame, never returned -- the "daemon gets heavy" seen on prod (55 MB -> 3-4.5 GB in
+  12-17 h). Measured flat over 5.7k frames on the dev forge.
+- **Two viewers of the same instance gave black/frozen video** (e.g. the scrcpy app on a tablet
+  plus the browser's expandida). The daemon identified a stream by (process, resolution), so two
+  encoders in the same instance crossed P-frame references. The Codec2 component
+  (`android/vaapi_codec2`) now sends a per-session `stream_id` and the daemon keeps one encoder per
+  stream (same model as Android's software encoder: one per viewer). Needs the new hwenc artifacts
+  (the redroid-hwenc v0.3.0 release tarball); an older component keeps working, with the old
+  behaviour. Android 11 (HIDL) does not send `stream_id` yet.
+- **hwenc daemon isolation** (redroid-hwenc v0.3.0): one thread per connection, socket timeouts,
+  connection caps, a per-process circuit breaker, and `SIGPIPE` no longer kills the daemon when a
+  client hangs up early (which cut the encoder for every instance until the supervisor relaunched
+  it).
+- `versionCheck.isNewer` understands SemVer pre-releases: `1.0.0` is newer than `1.0.0-beta.1`
+  (the old loose compare said no, so a host on this beta would never have been told about 1.0.0).
+- `android/build.sh`/`ninja.sh` copied `protocol.h` from `backend/native/vaapi-daemon/`, gone since
+  the daemon is built from redroid-hwenc; they take it from `REDROID_HWENC_DIR` now.
 - **Expandida viewer: the scrcpy-server it starts is now always torn down when the viewer goes
   away** (21/11/2026). Three ways it could outlive its viewer and keep encoding at 60 fps through
   the host's shared VA-API daemon with nobody watching (the suspected source of that daemon's
@@ -47,14 +74,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
   distinct size requested, and hands every viewer the latest frame (a late joiner gets it right
   away). After 3 failures in a row every viewer of that instance is told to give up at once,
   instead of each one hammering adb against an instance that is gone.
-
-### Added
-
-- `CONTRIBUTING.md` and `.github/ISSUE_TEMPLATE/` (bug report, feature request) -- Phase 10 step 3
-  of `docs/ROADMAP.md`, the project's own 1.0 gate. States the current feature freeze up front.
-
-### Fixed
-
+- meminfoFix forces mode 644 on the copied `.rc` instead of trusting the source's permission; the
+  core picker visually aligns SMT sibling pairs.
 - Modules tab and User modules tab: sort modules worst-first (never accepted, then
   accepted-but-outdated, then accepted) -- same "don't bury what needs attention" pattern as the
   Doctor tab's own sort (0.9.1), which this one was meant to have had from the start.
@@ -62,6 +83,18 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
   as covering only Phases 0-7/9 at tag `v0.3.0` -- both stale since Phase 11 (the built-in
   ventanita/expandida viewer) shipped in 0.9.0/0.9.1/0.10.0. Added a credit for `scrcpy`
   (Genymobile) alongside the existing `redroid` credit.
+
+### Added
+
+- Known-combinations: user modules are excluded from the match, and cifi's real combination is
+  validated. cifi watchdog starts enabled by default, with a first-use warning. A dedicated column
+  for the eye/preview/expand buttons in the "completo" view; a floating help over the expandida's
+  keyboard button.
+- `docs/TROUBLESHOOTING.md` and `docs/HOWTO.md`, seeded with real cases (including the YV12 crash
+  watching Play Store video in landscape, root cause confirmed and linked upstream, and "never give
+  an instance a single CPU").
+- `CONTRIBUTING.md` and `.github/ISSUE_TEMPLATE/` (bug report, feature request) -- Phase 10 step 3
+  of `docs/ROADMAP.md`, the project's own 1.0 gate. States the current feature freeze up front.
 
 ## [0.10.0] - 2026-11-15
 

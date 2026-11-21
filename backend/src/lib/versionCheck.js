@@ -50,20 +50,48 @@ async function fetchLatestRelease({ repo = REPO, fetchImpl = fetch } = {}) {
   return { latest: tag.replace(/^v/, ''), url: body.html_url || null, publishedAt: body.published_at || null };
 }
 
-// Loose compare, good enough for "is there anything newer" -- not a strict semver library
-// (this project has none as a dependency): numeric parts compared left to right, a missing
-// part counts as 0, anything non-numeric (a suffix like "-beta") falls back to string compare
-// of the whole remainder so it never throws, only possibly gives a less precise answer.
-function isNewer(latest, installed) {
-  const a = String(latest).split('.');
-  const b = String(installed).split('.');
+// "Is `latest` newer than `installed`", SemVer-style without a semver dependency: the numeric
+// core (MAJOR.MINOR.PATCH, a missing part counts as 0) compared left to right; with equal cores,
+// a release beats any pre-release of it (1.0.0 > 1.0.0-beta.1, SemVer 11.3), and two
+// pre-releases compare identifier by identifier (numeric ones numerically: beta.10 > beta.2).
+// 21/11/2026: the old loose compare parsed "0-beta" as 0, so 1.0.0 was NOT newer than
+// 1.0.0-beta.1 -- a host on the first beta would never have been told about the final release.
+// Anything unparseable still never throws: it falls back to a plain string comparison.
+function splitVersion(v) {
+  const str = String(v).trim().replace(/^v/, '');
+  const dash = str.indexOf('-');
+  const core = (dash === -1 ? str : str.slice(0, dash)).split('+')[0];
+  const pre = dash === -1 ? null : str.slice(dash + 1).split('+')[0];
+  return { core: core.split('.'), pre: pre ? pre.split('.') : null };
+}
+
+function comparePre(a, b) {
   for (let i = 0; i < Math.max(a.length, b.length); i++) {
-    const an = Number.parseInt(a[i], 10);
-    const bn = Number.parseInt(b[i], 10);
+    if (a[i] === undefined) return -1; // fewer identifiers = lower precedence (SemVer 11.4.4)
+    if (b[i] === undefined) return 1;
+    const an = /^\d+$/.test(a[i]) ? Number(a[i]) : null;
+    const bn = /^\d+$/.test(b[i]) ? Number(b[i]) : null;
+    if (an !== null && bn !== null) { if (an !== bn) return an > bn ? 1 : -1; continue; }
+    if (an !== null) return -1; // numeric identifiers sort before alphanumeric ones
+    if (bn !== null) return 1;
+    if (a[i] !== b[i]) return a[i] > b[i] ? 1 : -1;
+  }
+  return 0;
+}
+
+function isNewer(latest, installed) {
+  const a = splitVersion(latest);
+  const b = splitVersion(installed);
+  for (let i = 0; i < Math.max(a.core.length, b.core.length, 3); i++) {
+    const an = a.core[i] === undefined || a.core[i] === '' ? 0 : Number(a.core[i]);
+    const bn = b.core[i] === undefined || b.core[i] === '' ? 0 : Number(b.core[i]);
     if (Number.isNaN(an) || Number.isNaN(bn)) return String(latest) !== String(installed) && String(latest) > String(installed);
     if (an !== bn) return an > bn;
   }
-  return false;
+  if (!a.pre && !b.pre) return false;
+  if (!a.pre) return true;   // release vs. one of its pre-releases
+  if (!b.pre) return false;
+  return comparePre(a.pre, b.pre) > 0;
 }
 
 async function checkForUpdate({ repo = REPO, installed = getInstalledVersion(), fetchImpl = fetch } = {}) {
