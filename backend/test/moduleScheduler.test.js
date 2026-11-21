@@ -127,6 +127,28 @@ test('moduleScheduler.start: a new containerId for an already-scheduled module r
   assert.deepEqual(requireFixtureEntry(root, id).calls, ['new-container']);
 }));
 
+// 21/11/2026: every (re)scheduling restarts the watchdog from zero, even for the same container.
+test('moduleScheduler.start: scheduling again restarts the timer from zero', (t) => withWatchdogFixture({
+  intervalMs: 1000,
+  entryBody: `
+    module.exports.calls = [];
+    module.exports.runTick = async () => { module.exports.calls.push(1); };
+  `,
+}, async ({ root, id, fakeStore }) => {
+  fakeStore.set('inst-1', { id: 'inst-1' });
+  t.mock.timers.enable({ apis: ['setInterval'] });
+
+  scheduler.start('inst-1', 'container-1', [id]);
+  t.mock.timers.tick(900);              // almost a full interval into the first cycle...
+  scheduler.start('inst-1', 'container-1', [id]); // ...the instance is started again
+  t.mock.timers.tick(200);              // 1100 ms since the first start, 200 since the second
+  await new Promise((r) => setTimeout(r, 0));
+  assert.equal(requireFixtureEntry(root, id).calls.length, 0, 'the old cycle must not fire');
+  t.mock.timers.tick(800);              // a full interval since the second start
+  await new Promise((r) => setTimeout(r, 0));
+  assert.equal(requireFixtureEntry(root, id).calls.length, 1);
+}));
+
 test('moduleScheduler.pause: the timer keeps firing but the module is not actually invoked while paused', (t) => withWatchdogFixture({
   intervalMs: 1000,
   entryBody: `

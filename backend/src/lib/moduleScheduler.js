@@ -51,14 +51,18 @@ function start(instanceId, containerId, requiredModuleIds) {
     scheduled.set(instanceId, perInstance);
   }
   for (const manifest of modules) {
+    // Every (re)scheduling starts the watchdog from zero (21/11/2026, asked by the user): a
+    // fresh timer and fresh lastRunAt/lastOk/lastError on every start, restart, recreate and
+    // backend boot -- never "keep the old timer" (that used to be the rule, and it is how a
+    // recreated instance kept ticking against its deleted container). One timer per module
+    // either way: the previous one is cleared first. The pause state is NOT reset -- it is the
+    // instance's own persisted choice (instance.watchdogPaused), not part of the timer.
     const existing = perInstance.get(manifest.id);
-    if (existing && existing.containerId === containerId) continue; // already scheduled, leave its timer running
-    // Scheduled against a container that is not this one any more (the instance was recreated
-    // without a stop() first): that timer would tick against a deleted container forever. Replace
-    // it. Defense in depth -- routes/instances.js's recreate path now calls stop() itself.
     if (existing) {
       clearInterval(existing.timer);
-      log(`"${manifest.id}" for ${instanceId} was scheduled against container ${String(existing.containerId).slice(0, 12)}; rescheduling against ${String(containerId).slice(0, 12)}`);
+      if (existing.containerId !== containerId) {
+        log(`"${manifest.id}" for ${instanceId} was scheduled against container ${String(existing.containerId).slice(0, 12)}; rescheduling against ${String(containerId).slice(0, 12)}`);
+      }
     }
     const entry = {
       containerId, intervalMs: manifest.schedule.intervalMs, lastRunAt: null, lastOk: null, lastError: null,

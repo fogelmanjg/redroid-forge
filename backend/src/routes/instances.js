@@ -1136,4 +1136,30 @@ router.delete('/:id', async (req, res) => {
   }
 });
 
+// Backend (re)start (21/11/2026, found updating prod to 1.0.0-beta.1): instances whose
+// containers kept running across a restart/rebuild of this app were left without the two things
+// the start route sets up -- the host's VA-API daemon (stage 5, ensureHostInfraReady: it is only
+// launched on demand, and it dies with the old app container) and their watchdog timers
+// (moduleScheduler lives in memory). So after any update every running hwenc instance had no
+// hardware encoder and the cifi watchdog stopped, until someone restarted each instance by hand.
+// Called once at boot: for every instance whose container is running, the same two steps the
+// start route runs, without touching the container itself. Per-instance failures are logged
+// and never stop the others (or the boot).
+async function reattachRunningInstances() {
+  for (const instance of store.readAll()) {
+    try {
+      if (!instance.containerId) continue;
+      const info = await runtime.inspect(instance.containerId);
+      if (info.State.Status !== 'running') continue;
+      const requiredModuleIds = requiredModuleIdsFor(instance);
+      await moduleRunner.ensureHostInfraReady(requiredModuleIds);
+      moduleScheduler.start(instance.id, instance.containerId, requiredModuleIds);
+      console.log(`[instances] reattached running instance "${instance.name}" (${requiredModuleIds.join(', ') || 'no modules'})`);
+    } catch (e) {
+      console.warn(`[instances] could not reattach "${instance.name}" at boot: ${e.message}`);
+    }
+  }
+}
+
 module.exports = router;
+module.exports.reattachRunningInstances = reattachRunningInstances;

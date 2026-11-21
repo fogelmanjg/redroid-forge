@@ -81,6 +81,9 @@ require('./lib/knownDbUpdate').startScheduler();
 // Port-knocking daemon (docs/ROADMAP.md Phase 9) -- idle until an instance actually opts an
 // interface into knockRequiredHosts; see lib/fwknop.js for why this is safe to always run.
 require('./lib/fwknop').start();
+// Instances that kept running across this app's restart get their VA-API daemon and watchdogs
+// back (see reattachRunningInstances' own comment). Not awaited: the HTTP server is already up.
+require('./routes/instances').reattachRunningInstances().catch((e) => console.warn('reattachRunningInstances:', e.message));
 
 // Last safety net: a bug in a single request cannot bring down the whole process
 // (and with it the management of ALL the running instances).

@@ -27,6 +27,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
 
 ## [Unreleased]
 
+## [1.0.0-beta.2] - 2026-11-21
+
 ### Added
 
 - **Expanded viewer: rotate the device** -- a ⟳ button sends scrcpy's own `ROTATE_DEVICE` control message
@@ -56,6 +58,14 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
   failed on a host with a dev instance on binder slot 3; one codec2Service test was skipped
   unless `REDROID_HWENC_ARTIFACTS_DIR` was set (so it never ran); one live preview test could
   flake under load and, when it failed, hang the whole run.
+- **After a backend restart or update, running instances lost their hwenc daemon and their
+  watchdogs** until each one was restarted by hand: the VA-API daemon is only launched on demand
+  and dies with the old app container, and watchdog timers live in memory. At boot, every
+  instance whose container is running now gets both back (the same two steps the start route
+  runs), without touching the container.
+- **Watchdogs restart from zero on every start, restart, recreate and backend boot** (a fresh
+  timer and fresh last-run state; the pause state is kept -- it is the instance's own choice).
+  Before, starting an instance kept whatever timer it already had.
 - **A recreated instance's watchdog ticked against the deleted container.** The recreate path
   (`POST /:id/display`: display, resources, gpuMode, bind hosts) never stopped the instance's
   module scheduler, and `start()` skipped a module already scheduled -- after recreating both
