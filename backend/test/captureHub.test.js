@@ -58,16 +58,25 @@ test('the loop stops when the last viewer leaves', async () => {
   assert.deepStrictEqual(reg.stats(), []);
 });
 
+// No timing race (21/11/2026: it waited 5 ms and flaked under the parallel full-suite load): a
+// long interval, so there is no second tick to race; wait for the first capture, then join and
+// poll for the late joiner's frame. try/finally so a failure never leaves the hub ticking.
 test('a late joiner gets the last frame right away, at its own size', async () => {
-  const { deps } = fakeDeps();
+  const { calls, deps } = fakeDeps();
   const reg = createRegistry(deps);
-  const a = sub(reg, 'i1', 160);
-  await wait(INTERVAL / 2);
-  const b = sub(reg, 'i1', 240);
-  await wait(5); // well before the next tick
-  assert.strictEqual(b.frames.length, 1);
-  assert.match(b.frames[0], /^png1@240$/);
-  a.handle.unsubscribe(); b.handle.unsubscribe();
+  const a = reg.subscribe('i1', { host: 'h', adbPort: 5800, intervalMs: 60000, size: 160, onFrame: () => {} });
+  let b;
+  try {
+    for (let i = 0; i < 100 && calls.capture === 0; i++) await wait(5);
+    const frames = [];
+    b = reg.subscribe('i1', { host: 'h', adbPort: 5800, intervalMs: 60000, size: 240, onFrame: (f) => frames.push(f.toString()) });
+    for (let i = 0; i < 100 && frames.length === 0; i++) await wait(5);
+    assert.deepStrictEqual(frames, ['png1@240']);
+    assert.strictEqual(calls.capture, 1, 'served from the last capture, not a new one');
+  } finally {
+    a.unsubscribe();
+    if (b) b.unsubscribe();
+  }
 });
 
 test('after N failures in a row every viewer is told to give up, and capturing stops', async () => {

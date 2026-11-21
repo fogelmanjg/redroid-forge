@@ -91,6 +91,9 @@ function createRegistry({
     hub.capturing = false;
     if (hub.subscribers.size === 0) { dispose(hub); return; }
     hub.timer = setTimeout(() => tick(hub), hub.intervalMs);
+    // Never the thing that keeps a process alive on its own (the HTTP server does that in prod);
+    // without this, a test that failed before unsubscribing hung the whole `node --test` run.
+    if (hub.timer.unref) hub.timer.unref();
   }
 
   // -> { setSize, unsubscribe }. onFrame(jpeg) for every frame at this subscriber's size,

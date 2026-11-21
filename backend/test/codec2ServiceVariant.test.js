@@ -54,8 +54,25 @@ test('artifactsBaseDir: aidl keeps the original flat layout (ARTIFACTS_DIR as-is
   assert.strictEqual(artifactsBaseDir('aidl'), ARTIFACTS_DIR);
 });
 
-test('artifactsBaseDir: hidl gets its own subfolder, when ARTIFACTS_DIR is configured', { skip: !ARTIFACTS_DIR }, () => {
-  assert.strictEqual(artifactsBaseDir('hidl'), path.join(ARTIFACTS_DIR, 'android11-hidl'));
+// It used to be skipped whenever REDROID_HWENC_ARTIFACTS_DIR was not set -- i.e. on every plain
+// `npm test` run, so it never actually ran (21/11/2026). ARTIFACTS_DIR is read once, at module
+// load: load a fresh copy of codec2Service.js with the variable set, then put the original
+// module and environment back so no other test sees the change.
+test('artifactsBaseDir: hidl gets its own subfolder, when ARTIFACTS_DIR is configured', () => {
+  const modPath = require.resolve('../src/lib/codec2Service');
+  const original = require.cache[modPath];
+  const prevEnv = process.env.REDROID_HWENC_ARTIFACTS_DIR;
+  process.env.REDROID_HWENC_ARTIFACTS_DIR = '/tmp/fake-hwenc-artifacts';
+  delete require.cache[modPath];
+  try {
+    const fresh = require(modPath);
+    assert.strictEqual(fresh.artifactsBaseDir('hidl'), path.join('/tmp/fake-hwenc-artifacts', 'android11-hidl'));
+    assert.strictEqual(fresh.artifactsBaseDir('aidl'), '/tmp/fake-hwenc-artifacts');
+  } finally {
+    if (prevEnv === undefined) delete process.env.REDROID_HWENC_ARTIFACTS_DIR;
+    else process.env.REDROID_HWENC_ARTIFACTS_DIR = prevEnv;
+    if (original) require.cache[modPath] = original; else delete require.cache[modPath];
+  }
 });
 
 // hidlIntelRisk itself was removed 09/11/2026 -- Intel on the HIDL path turned out to hit the

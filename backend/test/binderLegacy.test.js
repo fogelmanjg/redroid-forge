@@ -77,9 +77,13 @@ test('nextFreeSlot binderfs: skips the slots reserved by another orchestrator', 
   });
 });
 
+// Hermetic since 21/11/2026: it used to read the REAL store and the real /dev permissions --
+// it failed on server01 (got 4) as soon as a real dev instance held binder slot 3.
 test('nextFreeSlot legacy: it also respects the reserved ones', () => {
-  const slot = nextFreeSlot({ legacy: true, exists: () => true, reserved: [1, 2] });
-  assert.strictEqual(slot, 3);
+  withInstances([], () => {
+    const slot = nextFreeSlot({ legacy: true, exists: () => true, accessible: () => true, reserved: [1, 2] });
+    assert.strictEqual(slot, 3);
+  });
 });
 
 // ---- legacyDevicesParam: the `devices=` line that creates N slots ----
