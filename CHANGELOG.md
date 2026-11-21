@@ -29,17 +29,31 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
 
 ### Added
 
-- **Expandida: rotate the device** -- a ⟳ button sends scrcpy's own `ROTATE_DEVICE` control message
+- **Expanded viewer: rotate the device** -- a ⟳ button sends scrcpy's own `ROTATE_DEVICE` control message
   (portrait <-> landscape, same start-stop permission as every other input); the browser decoder
   is reconfigured when the stream restarts at the swapped size.
-- **Expandida: move the button bar** between the bottom (default) and the right edge, so in
+- **Expanded viewer: move the button bar** between the bottom (default) and the right edge, so in
   portrait the bar does not eat into the picture; remembered per browser.
 - **Visores: "Per row"** -- `Auto (size)` keeps the original layout (as many cards as fit at the
   slider's size); 1/2/3/4/6 lays the cards out in that many equal columns over the full width,
   each preview filling its column and captured by the backend at that real width.
 
+### Changed
+
+- **Terminology: "ventanita" is now the *live preview* and "expandida" the *expanded viewer*** in
+  every doc, log message and code identifier (Spanish docs: *vista previa en vivo* / *vista
+  expandida*) -- the Spanish nicknames had leaked into the English docs and code. The
+  per-browser list of previews turned on moved from the `ventanitaIds` to the `previewIds`
+  localStorage key; the old one is still read, so nobody loses their selection. Older entries
+  below were updated to the new terms too.
+- README/CONTRIBUTING: status updated for the 1.0 pre-release cycle.
+
 ### Fixed
 
+- The test suite is hermetic: 519/519, nothing skipped. One binder test read the real store and
+  failed on a host with a dev instance on binder slot 3; one codec2Service test was skipped
+  unless `REDROID_HWENC_ARTIFACTS_DIR` was set (so it never ran); one live preview test could
+  flake under load and, when it failed, hang the whole run.
 - **A recreated instance's watchdog ticked against the deleted container.** The recreate path
   (`POST /:id/display`: display, resources, gpuMode, bind hosts) never stopped the instance's
   module scheduler, and `start()` skipped a module already scheduled -- after recreating both
@@ -52,7 +66,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
 First pre-release of 1.0, decided by the user on 21/11/2026 after the hwenc work below. Still
 inside the Phase 10 feature freeze (`docs/ROADMAP.md`): bug fixes and docs, plus the per-stream
 hwenc change, which fixes a real multi-viewer bug. Three planned UI items (rotate button and
-movable button bar in the expandida, columns/full-width in the visores grid) are deferred to a
+movable button bar in the expanded viewer, columns/full-width in the visores grid) are deferred to a
 later beta.
 
 ### Fixed
@@ -62,7 +76,7 @@ later beta.
   encoded frame, never returned -- the "daemon gets heavy" seen on prod (55 MB -> 3-4.5 GB in
   12-17 h). Measured flat over 5.7k frames on the dev forge.
 - **Two viewers of the same instance gave black/frozen video** (e.g. the scrcpy app on a tablet
-  plus the browser's expandida). The daemon identified a stream by (process, resolution), so two
+  plus the browser's expanded viewer). The daemon identified a stream by (process, resolution), so two
   encoders in the same instance crossed P-frame references. The Codec2 component
   (`android/vaapi_codec2`) now sends a per-session `stream_id` and the daemon keeps one encoder per
   stream (same model as Android's software encoder: one per viewer). Needs the new hwenc artifacts
@@ -76,7 +90,7 @@ later beta.
   (the old loose compare said no, so a host on this beta would never have been told about 1.0.0).
 - `android/build.sh`/`ninja.sh` copied `protocol.h` from `backend/native/vaapi-daemon/`, gone since
   the daemon is built from redroid-hwenc; they take it from `REDROID_HWENC_DIR` now.
-- **Expandida viewer: the scrcpy-server it starts is now always torn down when the viewer goes
+- **Expanded viewer: the scrcpy-server it starts is now always torn down when the viewer goes
   away** (21/11/2026). Three ways it could outlive its viewer and keep encoding at 60 fps through
   the host's shared VA-API daemon with nobody watching (the suspected source of that daemon's
   memory growth on prod, which only happens while encode sessions are active): (1) the WS 'close'
@@ -88,7 +102,7 @@ later beta.
   ended -- now SIGTERM, verify, SIGKILL, and a log line if it still survives. Also: a failed start
   now closes the WS instead of writing an HTTP 500 into an already-upgraded socket, and
   `OpusTranscoder.close()` is idempotent.
-- **Ventanita: one shared capture per instance instead of one per viewer** (21/11/2026,
+- **Live preview: one shared capture per instance instead of one per viewer** (21/11/2026,
   `lib/captureHub.js`). Every open frontend ran its own `screencap` loop per instance; now the
   backend runs at most one per instance, only while someone is watching, shrinks it once per
   distinct size requested, and hands every viewer the latest frame (a late joiner gets it right
@@ -101,14 +115,14 @@ later beta.
   Doctor tab's own sort (0.9.1), which this one was meant to have had from the start.
 - `README.md`/`README.es.md` no longer claim "no bundled web viewer yet" or describe the project
   as covering only Phases 0-7/9 at tag `v0.3.0` -- both stale since Phase 11 (the built-in
-  ventanita/expandida viewer) shipped in 0.9.0/0.9.1/0.10.0. Added a credit for `scrcpy`
+  live preview/expanded viewer) shipped in 0.9.0/0.9.1/0.10.0. Added a credit for `scrcpy`
   (Genymobile) alongside the existing `redroid` credit.
 
 ### Added
 
 - Known-combinations: user modules are excluded from the match, and cifi's real combination is
   validated. cifi watchdog starts enabled by default, with a first-use warning. A dedicated column
-  for the eye/preview/expand buttons in the "completo" view; a floating help over the expandida's
+  for the eye/preview/expand buttons in the "completo" view; a floating help over the expanded viewer's
   keyboard button.
 - `docs/TROUBLESHOOTING.md` and `docs/HOWTO.md`, seeded with real cases (including the YV12 crash
   watching Play Store video in landscape, root cause confirmed and linked upstream, and "never give
@@ -120,13 +134,13 @@ later beta.
 
 ### Added
 
-- Instances: a new "expandida" viewer mode -- full-screen, real-time video (H.264 via
+- Instances: a new "expanded viewer" viewer mode -- full-screen, real-time video (H.264 via
   `VideoDecoder`), audio (Opus via `AudioDecoder`), and input (pointer → touch, a hidden text
   field, a nav bar for back/home/recent-apps/volume/fullscreen), reachable from a new ⛶ button
-  next to the existing ventanita toggle. Drives the real `scrcpy-server.jar` this project already
+  next to the existing live preview toggle. Drives the real `scrcpy-server.jar` this project already
   pushes and launches itself through a new WS route (`/api/instances/:id/viewer/full`,
   `backend/src/routes/viewerExpanded.js`) and a new frontend module (`frontend/viewerExpanded.js`)
-  -- not screencap polling like the ventanita, the actual streaming-quality experience that mode
+  -- not screencap polling like the live preview, the actual streaming-quality experience that mode
   explicitly isn't. Reuses the existing `permissions.js` model as-is (`view` to watch, `start-stop`
   to send input). See `docs/ROADMAP.md`'s Phase 11 for the full design.
 
@@ -159,7 +173,7 @@ later beta.
 
 ### Fixed
 
-- Instances: the live preview ("ventanita"/"visores", added in 0.9.0) could fail to start with
+- Instances: the live preview ("live preview"/"visores", added in 0.9.0) could fail to start with
   "Upstream capture failing" on a host where its instance had never been `adb connect`-ed under
   the exact `127.0.0.1:<port>` string before -- `adb -s host:port` matches an already-connected
   serial literally, with no IP normalization, so a device already reachable only as
@@ -175,7 +189,7 @@ later beta.
 
 ### Added
 
-- Instances: an embedded live preview ("ventanita") right in the dashboard, toggled per instance
+- Instances: an embedded live preview ("live preview") right in the dashboard, toggled per instance
   with a 👁 button next to its address. Backed by a periodic screenshot (`adb exec-out screencap`)
   rather than a real scrcpy video session: the shared hardware-encode daemon's VA-API path was
   found to fail intermittently under host-wide concurrent load (the exact same request that
@@ -196,7 +210,7 @@ later beta.
   viewer mode: a from-scratch client of the real scrcpy-server protocol (push the official
   `scrcpy-server.jar` into the container, launch it directly with `app_process`, speak its
   video/audio/control socket framing) -- reserved for later, independent of the screenshot-based
-  ventanita above, which does not and will not depend on it.
+  live preview above, which does not and will not depend on it.
 
 ## [0.8.2] - 2026-11-14
 

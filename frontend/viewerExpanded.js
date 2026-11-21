@@ -1,14 +1,14 @@
-// "Expandida" viewer -- Hitos 3+4 of the web viewer plan (/home/jgustavo/.claude/plans/
+// "expanded viewer" viewer -- Hitos 3+4 of the web viewer plan (/home/jgustavo/.claude/plans/
 // recursive-dreaming-honey.md), merged into one deliverable since input only makes sense once a
 // live video session exists to point it at. Real scrcpy video (H.264, WebCodecs VideoDecoder) +
 // audio (Opus, WebCodecs AudioDecoder) + pointer/keyboard input, full-screen -- the streaming-
-// quality experience the ventanita (viewer.js, screencap-based) explicitly does not try to be.
+// quality experience the live preview (viewer.js, screencap-based) explicitly does not try to be.
 //
-// Unlike Viewer (viewer.js), which tracks one session per instance (several ventanitas can be on
-// at once), this is a single full-screen overlay -- opening a second instance's expandida closes
+// Unlike Viewer (viewer.js), which tracks one session per instance (several live previews can be on
+// at once), this is a single full-screen overlay -- opening a second instance's expanded viewer closes
 // whichever one was already open, same as any other full-screen modal on this page. No
 // localStorage persistence either: this is always an explicit, one-shot "open" action (the
-// plan's own "acción explícita, independiente del toggle de la ventanita"), never something that
+// plan's own "acción explícita, independiente del toggle de la live preview"), never something that
 // should come back on its own after a reload.
 const ViewerExpanded = (() => {
   let state = null; // { instanceId, ws, overlay, canvas, ctx, videoDecoder, audioDecoder,

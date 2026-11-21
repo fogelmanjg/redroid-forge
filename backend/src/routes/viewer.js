@@ -2,7 +2,7 @@
 
 // GET /api/instances/:id/viewer (WebSocket upgrade) -- Hito 2 of the web viewer work (see
 // /home/jgustavo/.claude/plans/recursive-dreaming-honey.md): streams one instance's screen to a
-// browser "ventanita" (frontend/viewer.js). An 'upgrade' event never goes through Express
+// browser "live preview" (frontend/viewer.js). An 'upgrade' event never goes through Express
 // middleware at all, so this replicates auth.attachUser/requireAuth by hand (auth.resolveUser,
 // factored out of attachUser for exactly this) instead of being able to reuse the
 // routes/instances.js pattern of a plain Express handler.
@@ -17,10 +17,10 @@
 // times in a row failed 3 times in a row minutes later, with other instances' own encode
 // activity interleaved in the daemon's log throughout) -- a crash that kills the whole
 // scrcpy-server process, not just that one connection. `adb exec-out screencap` never touches
-// MediaCodec/VA-API, so it cannot hit that bug by construction, and the ventanita never needed
+// MediaCodec/VA-API, so it cannot hit that bug by construction, and the live preview never needed
 // smoothness or real video to begin with (decided explicitly, 15/11/2026: "no necesito
 // fluidez"). The real scrcpy pipeline (viewerSession.js, launchServer.js's bitRate/maxFps knobs)
-// is untouched -- Hito 4 (expandida/pantalla completa, which DOES need real video+audio) is a
+// is untouched -- Hito 4 (expanded viewer/pantalla completa, which DOES need real video+audio) is a
 // different call into that same code, not a mode flag added here.
 
 const store = require('../lib/store');

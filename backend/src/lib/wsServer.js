@@ -83,7 +83,7 @@ class WsConnection extends EventEmitter {
   // FIN); it does NOT cover one that just vanishes -- a tablet going to sleep, Wi-Fi dropping, a
   // client PC freezing outright (seen live on jgustavo46 the day before). No FIN ever arrives,
   // and without traffic in our direction the kernel only notices via TCP keepalive, ~2 h by
-  // default: all that time the expandida's scrcpy-server kept encoding at 60 fps through the
+  // default: all that time the expanded viewer's scrcpy-server kept encoding at 60 fps through the
   // shared VA-API daemon for nobody. Now this side pings every HEARTBEAT_INTERVAL_MS; every
   // browser answers a ping with a pong on its own (RFC 6455 5.5.2, no page code involved), and
   // ANY inbound byte counts as "still there". Nothing for HEARTBEAT_TIMEOUT_MS -> destroy(), whose

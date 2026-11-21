@@ -31,7 +31,7 @@ function buildArgs({ scid, maxSize, maxFps, bitRate, logLevel = 'info', audio, a
   // cleanup=false (default is true): the server deletes its own jar from /data/local/tmp on
   // exit -- fine for a single desktop-client session, but a real correctness risk for this
   // project's actual use case, where more than one session can run against the SAME instance at
-  // once (ventanita + expandida, decided explicitly as allowed) -- one session exiting must never
+  // once (live preview + expanded viewer, decided explicitly as allowed) -- one session exiting must never
   // delete the jar out from under another still-running one. pushServer.pushToContainer()
   // already re-pushes before every launch regardless, so disabling the server's own self-cleanup
   // costs nothing.
@@ -39,7 +39,7 @@ function buildArgs({ scid, maxSize, maxFps, bitRate, logLevel = 'info', audio, a
   if (maxSize) args.push(`max_size=${maxSize}`);
   if (maxFps) args.push(`max_fps=${maxFps}`);
   // scrcpy's own default is 8000000 (8 Mbps) -- tuned for a real desktop-sized window, not a
-  // ~200px ventanita nobody expects smoothness from (decided explicitly, 15/11/2026: "no necesito
+  // ~200px live preview nobody expects smoothness from (decided explicitly, 15/11/2026: "no necesito
   // fluidez"). bitRate is in bits/second, same unit scrcpy's own CLI takes.
   if (bitRate) args.push(`video_bit_rate=${bitRate}`);
   // audio defaults to on (every real session carries all 3 channels, per the project's own

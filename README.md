@@ -12,7 +12,7 @@ A standalone app (frontend + backend in a single container) to manage
 [redroid](https://github.com/remote-android/redroid-doc) instances on any PC that only has Docker,
 without depending on any other infrastructure.
 
-> Work in progress, nearing its 1.0 milestone. It consolidates several separate projects in one
+> In the 1.0 pre-release cycle (`1.0.0-beta.N`, first beta 21/11/2026). It consolidates several separate projects in one
 > place (`redroid-manager`, `redroid-hwenc`, `redroid-nvidia`, and what currently lives spread
 > across `jg-dashboard`/`plenum-redroid`). See [`docs/REQUIREMENTS.md`](docs/REQUIREMENTS.md) (what
 > and why), [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) (how the pieces fit together — base
@@ -21,12 +21,12 @@ without depending on any other infrastructure.
 > user module, the manifest schema, the 7-stage hook contract) and
 > [`docs/ROADMAP.md`](docs/ROADMAP.md) (in what order) and [`CHANGELOG.md`](CHANGELOG.md) (tagged
 > releases, SemVer policy) for the full picture. What exists today covers **Phases 0 through 7, 9
-> and 11** of the roadmap — everything in the Features table below. **`1.0.0` is reserved for Phase
+> and 11** of the roadmap — everything in the Features table below. **The final `1.0.0` is tied to Phase
 > 10's own gate** (securing and removing the legacy code this project replaces, plus writing this
 > exact kind of definitive documentation) — in progress, not a feature requirement; Phase 8
 > (federation: `jg-dashboard`/Plenum becoming `oidc` consumers of this app) is independent and can
-> land before or after 1.0. **The project is in a feature freeze since 16/11/2026: only bug fixes
-> and documentation land until 1.0 ships** — see [`CONTRIBUTING.md`](CONTRIBUTING.md).
+> land before or after 1.0. **The project is in a feature freeze since 16/11/2026: until 1.0 ships,
+> only bug fixes, documentation and the small items already planned for the betas land** — see [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
 ## Screenshots
 
@@ -55,7 +55,7 @@ means validated with evidence on real hardware, not a guarantee.
 | **Access control** | ✅ | Three roles (admin/operator/viewer) with per-instance ownership. Pluggable: `none` (default, zero-friction), `local` (built-in accounts), `oidc` (any number of standard identity providers at once — Keycloak, Google, Plenum, another federation, ... — roles assigned here, never read from the provider), `both` (local accounts and OIDC on the same login screen). A local account can also be reached through a linked OIDC identity (opt-in, proven by logging into both at once — never by matching a claimed email). A setup wizard creates the first admin live from `none` mode, and a self-lockout guard keeps `local`/`both` from ever becoming a permanently closed door. Switching modes and adding/editing/removing OIDC providers can both be done live from the Identities panel — no `.env` edit needed — though a restart is still required to apply, same rule as every other setting in this app. |
 | **Network exposure control** | ✅ | The app and every instance bind to `127.0.0.1` only, by default — `redroid` itself has no access control of its own. Opt into any specific interface (or all of them) per instance and for the app itself, from the UI; Docker/container-internal interfaces (`docker0`, `br-*`, `veth*`, ...) are filtered out of that picker by default, with an admin override. |
 | **Doctor** | ✅ | Host diagnostics with the exact command to fix what's missing — it only diagnoses, never runs anything on its own. |
-| **Screen viewing** | ✅ | Bundled web viewer right in the Instances tab — own scrcpy-server protocol client, no third-party viewer embedded. A persistent small live preview per instance ("ventanita"), and an opt-in full-screen mode with real video (H.264)/audio (Opus)/input ("expandida"). Also: scrcpy connector scripts (`connect.sh`/`connect.ps1`) for a desktop scrcpy client, and a port for viewing from an Android device itself. |
+| **Screen viewing** | ✅ | Bundled web viewer right in the Instances tab — own scrcpy-server protocol client, no third-party viewer embedded. A persistent small live preview per instance, and an opt-in full-screen expanded viewer with real video (H.264)/audio (Opus)/input. Also: scrcpy connector scripts (`connect.sh`/`connect.ps1`) for a desktop scrcpy client, and a port for viewing from an Android device itself. |
 | **Federation** | 📝 planned | `jg-dashboard` and Plenum becoming consumers of this app via `oidc`, reusing each host's existing identity provider instead of a separate login. |
 | **Port knocking** | ✅ done | Per-instance, per-interface SPA (`fwknop`) gate for the ADB/scrcpy port, on top of the network controls above -- opened from the UI by an already-authenticated session, never by the connecting device. |
 
@@ -202,17 +202,17 @@ No install needed on the viewing side — open the Instances tab in a browser. T
 reusing the same access-control model as the rest of the app (`view` to watch, `start-stop` to
 send input):
 
-- **"Ventanita"**: a small, persistent live preview per instance, always visible on the Instances
+- **Live preview**: a small, persistent live preview per instance, always visible on the Instances
   tab (periodic screenshots, not full video — it is meant to just be there, not to be fluid).
-- **"Expandida"**: an opt-in full-screen mode with real streaming-quality video (H.264, decoded
+- **Expanded viewer**: an opt-in full-screen mode with real streaming-quality video (H.264, decoded
   with `VideoDecoder`) and audio (Opus, `AudioDecoder`), plus input (click/tap, a hidden text
   field for typing, and a nav bar for back/home/recent-apps/volume). Reachable from the ⛶ button
-  next to the ventanita toggle on each instance's row.
+  next to the live preview toggle on each instance's row.
 
 Both drive the real `scrcpy-server.jar` this project pushes and launches on the instance itself —
 own protocol client (`backend/src/lib/scrcpy/`), not an embedded third-party viewer. See
 [`docs/ROADMAP.md`](docs/ROADMAP.md)'s Phase 11 for the full design and
-[`CHANGELOG.md`](CHANGELOG.md) (`0.9.0`/`0.9.1`/`0.10.0`) for what shipped when.
+[`CHANGELOG.md`](CHANGELOG.md) (`0.9.0`/`0.9.1`/`0.10.0`, then the `1.0.0-beta` releases) for what shipped when.
 
 ## Viewing the screen from another PC (scrcpy) — e.g. a TV with an old laptop
 
@@ -286,7 +286,7 @@ backend/src/lib/          dockerRuntime, binder, hwsimWifi, androidIdentity, doc
                            knownDb*, permissions, userStore, session, oidc, auth, accountLinks,
                            roleAssignments, quotas, networkInterfaceFilter, settings
 backend/src/routes/       instances, doctor, images, modules, db, settings, backups, network, auth,
-                           viewer (ventanita), viewerExpanded (expandida, Phase 11)
+                           viewer (live preview), viewerExpanded (expanded viewer, Phase 11)
 backend/src/lib/scrcpy/   own scrcpy-server protocol client (Phase 11): protocol.js (wire format),
                            pushServer.js/launchServer.js (push+launch the real jar), forward.js,
                            the video/audio/control sockets, viewerSession.js (ties it all together),
@@ -325,7 +325,7 @@ replacement or a competitor. Explicit acknowledgement:
   Android-in-Docker itself that all of this runs on. Apache License 2.0 (kernel modules under
   GPL v2).
 - **[scrcpy](https://github.com/Genymobile/scrcpy)** (Genymobile) — Apache License 2.0. The
-  built-in web viewer's "expandida" mode pushes and launches the real `scrcpy-server` binary from
+  built-in web viewer's expanded mode pushes and launches the real `scrcpy-server` binary from
   that project on each instance — downloaded and `sha256`-verified from its official GitHub
   release at image build time (see `Dockerfile`, pinned version), not forked or copied.
   `backend/src/lib/scrcpy/protocol.js` is this project's own client of that server's real wire

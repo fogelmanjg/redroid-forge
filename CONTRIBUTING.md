@@ -6,8 +6,9 @@ message should be in English, same as the rest of the codebase and docs.
 
 ## Current status: feature freeze (since 16/11/2026)
 
-**Only bug fixes, performance fixes, and documentation are being merged right now.** The project
-is closing in on its `1.0.0` release — see `docs/ROADMAP.md`'s Phase 10 for exactly what that
+**Only bug fixes, performance fixes, and documentation are being merged right now** (plus the
+handful of small UI items the maintainer already planned for the `1.0.0-beta` releases). The project
+is in its `1.0.0` pre-release cycle (first beta: 21/11/2026) — see `docs/ROADMAP.md`'s Phase 10 for exactly what that
 means (it is a cleanup/documentation gate, not a feature-completeness one) and `CHANGELOG.md`'s
 versioning policy for how `1.0.0` is decided. A new module, a new API route, a new frontend
 capability — anything that would be a MINOR bump under that policy — will not be merged until the

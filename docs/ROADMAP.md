@@ -1138,19 +1138,19 @@ Two independent, opt-in modes per instance, both reusing the existing `permissio
 (`view` to watch, `start-stop` to send input) and the real `scrcpy-server.jar` this project pushes
 and launches itself (no `adb shell input`, no third-party viewer):
 
-- **"Ventanita"** (15/11/2026): a persistent small preview per instance, on the Instances tab.
+- **Live preview** (15/11/2026): a persistent small preview per instance, on the Instances tab.
   Shipped via a much simpler `adb exec-out screencap` polling loop instead of real video —
   the shared VA-API hwenc daemon this host's scrcpy-server encode path depends on was found to
   fail intermittently under host-wide concurrent load (killing the whole scrcpy-server process,
-  not just that connection), and the ventanita never needed real smoothness to begin with
+  not just that connection), and the live preview never needed real smoothness to begin with
   ("no necesito fluidez", explicit decision). `backend/src/lib/screenshotCapture.js`,
   `backend/src/routes/viewer.js`, `frontend/viewer.js`.
-- **"Expandida"** (15/11/2026): full-screen, real video (H.264, `VideoDecoder`) + audio (Opus,
+- **Expanded viewer** (15/11/2026): full-screen, real video (H.264, `VideoDecoder`) + audio (Opus,
   `AudioDecoder`) + input (pointer → touch, a hidden `<input>` for plain committed text, a nav
   bar for back/home/recent-apps/volume), driving the real scrcpy-server pipeline built and
   validated for this project's own protocol client (`backend/src/lib/scrcpy/*`,
   `viewerSession.js`) — no screencap polling here, this is the actual streaming-quality
-  experience the ventanita explicitly is not. `backend/src/routes/viewerExpanded.js`,
+  experience the live preview explicitly is not. `backend/src/routes/viewerExpanded.js`,
   `frontend/viewerExpanded.js`.
   - **Audio, real device content (15/11/2026):** no Android image/host combination tried so far
     across this project ships a working Opus audio ENCODER (confirmed down to the vendor's own

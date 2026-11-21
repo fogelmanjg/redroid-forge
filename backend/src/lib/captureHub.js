@@ -1,6 +1,6 @@
 'use strict';
 
-// Shared ventanita capture (21/11/2026). Before this, routes/viewer.js started its OWN
+// Shared live preview capture (21/11/2026). Before this, routes/viewer.js started its OWN
 // screenshotCapture loop per WebSocket: every open frontend (each browser tab, each PC, the
 // "completo" 👁 toggle AND the "visores" grid) ran a separate `adb exec-out screencap` per
 // instance every 1.5 s -- N viewers = N captures of the same screen. Asked for explicitly: "la
@@ -25,7 +25,7 @@ const MAX_CONSECUTIVE_ERRORS = 3;
 // Injectable capture/shrink so the tests run without adb or a device.
 function createRegistry({
   capture = screenshotCapture.captureScreenshot,
-  shrink = screenshotCapture.shrinkForVentanita,
+  shrink = screenshotCapture.shrinkForPreview,
   clampSize = screenshotCapture.clampSize,
 } = {}) {
   const hubs = new Map(); // instanceId -> hub
@@ -77,7 +77,7 @@ function createRegistry({
     } catch (e) {
       hub.consecutiveErrors += 1;
       // Logged once here, not once per subscriber.
-      console.error(`ventanita capture error for instance ${hub.instanceId}:`, e.message);
+      console.error(`live preview capture error for instance ${hub.instanceId}:`, e.message);
       for (const sub of hub.subscribers) if (sub.onError) sub.onError(e);
       if (hub.consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
         hub.capturing = false;

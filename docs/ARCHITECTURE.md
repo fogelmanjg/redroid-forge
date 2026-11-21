@@ -127,7 +127,7 @@ launchServer.js`/`pushServer.js`). **Native, not a module**, per `docs/MODULE-AU
 test: any instance, with any combination of modules, can open a viewer session — it does
 not depend on the instance having been created with a particular module. That is a separate
 question from whether a viewer *runs by default*: like auth's own "no login configured" flag,
-each viewer (the ventanita, and the expandida full-screen mode) is its own explicit,
+each viewer (the live preview, and the full-screen expanded viewer) is its own explicit,
 independently-toggled, default-off switch — nobody pays for a real scrcpy-server encode session
 without asking for one.
 

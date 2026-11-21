@@ -6,8 +6,8 @@
 // proven safe by the user; no session-limiting or "who controls" arbitration here, see the
 // plan's own "Concurrencia ya probada" note).
 //
-// Hito 2 only drives this in "ventanita" shape (video only, small, 5fps, no audio) -- the
-// `maxSize`/`maxFps`/`audio` knobs exist already so Hito 4's "expandida" mode is a different
+// Hito 2 only drives this in "live preview" shape (video only, small, 5fps, no audio) -- the
+// `maxSize`/`maxFps`/`audio` knobs exist already so Hito 4's "expanded viewer" mode is a different
 // start() call with different numbers, not a second code path (per the plan: "probablemente
 // apagar y relanzar scrcpy-server con otros parámetros en vez de renegociar en vivo").
 //

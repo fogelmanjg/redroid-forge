@@ -214,23 +214,27 @@ let openRenameId = null;
 // networkInterfacesCache for the other edit panels.
 let directoryCache = null;
 
-// Ventanita toggle state (Hito 2 of the web viewer work), per user via localStorage -- default
+// Live preview toggle state (Hito 2 of the web viewer work), per user via localStorage -- default
 // off for every instance: nobody pays the cost of a real scrcpy-server session (real encode on
 // the device, even at 5fps) just for having opened the dashboard, per the plan's own decided
 // "native capability, opt-in behavior" split. Persisted so a reload keeps whatever the user
 // explicitly turned on, same spirit as I18n's own `lang` localStorage key.
-function loadVentanitaIds() {
-  try { return new Set(JSON.parse(localStorage.getItem('ventanitaIds') || '[]')); } catch (e) { return new Set(); }
+function loadPreviewIds() {
+  // 'ventanitaIds' is the same setting's key before the 21/11/2026 rename (ventanita -> live
+  // preview): read it as a fallback so nobody loses the previews they had turned on.
+  try {
+    return new Set(JSON.parse(localStorage.getItem('previewIds') || localStorage.getItem('ventanitaIds') || '[]'));
+  } catch (e) { return new Set(); }
 }
-function saveVentanitaIds(ids) {
-  try { localStorage.setItem('ventanitaIds', JSON.stringify(Array.from(ids))); } catch (e) { /* no storage: just won't persist across reloads */ }
+function savePreviewIds(ids) {
+  try { localStorage.setItem('previewIds', JSON.stringify(Array.from(ids))); } catch (e) { /* no storage: just won't persist across reloads */ }
 }
-let ventanitaIds = loadVentanitaIds();
+let previewIds = loadPreviewIds();
 
 // Instances tab view mode (15/11/2026) -- "full" (today's row-pair table, unchanged), "minimal"
 // (name+address+actions only, for someone who, in the user's own words, "no quiere saber nada de
 // nada"), "viewers" (a grid of live previews, one per instance). Persisted per browser, same
-// spirit as ventanitaIds/I18n's own `lang` key -- a reload keeps whichever view this user picked,
+// spirit as previewIds/I18n's own `lang` key -- a reload keeps whichever view this user picked,
 // not necessarily what anyone else using this dashboard prefers.
 function loadInstanceViewMode() {
   const v = localStorage.getItem('instanceViewMode');
@@ -242,8 +246,8 @@ function saveInstanceViewMode(mode) {
 let instanceViewMode = loadInstanceViewMode();
 
 // Preview tile size for "viewers" mode only -- the slider's current value in px. Drives BOTH the
-// CSS display size (.instances-grid .viewer-ventanita-img in style.css) AND, since 15/11/2026,
-// the actual backend capture size (screenshotCapture.js, via Viewer.mountVentanita's `size`
+// CSS display size (.instances-grid .viewer-preview-img in style.css) AND, since 15/11/2026,
+// the actual backend capture size (screenshotCapture.js, via Viewer.mountPreview's `size`
 // argument and Viewer.setSize/setSizeAll for a live resize) -- stretching the old fixed ~80px
 // capture past its native size with CSS alone just looked blurry, so the slider now asks the
 // backend to capture bigger instead of faking it client-side. Clamped to the slider's own
@@ -271,11 +275,11 @@ $$('.view-mode-btn').forEach((btn) => {
 });
 const viewersSizeSlider = $('#viewers-size-slider');
 viewersSizeSlider.value = viewersSize;
-$('#instances-grid').style.setProperty('--ventanita-size', `${viewersSize}px`);
+$('#instances-grid').style.setProperty('--live preview-size', `${viewersSize}px`);
 viewersSizeSlider.addEventListener('input', () => {
   viewersSize = parseInt(viewersSizeSlider.value, 10);
   saveViewersSize(viewersSize);
-  $('#instances-grid').style.setProperty('--ventanita-size', `${viewersSize}px`);
+  $('#instances-grid').style.setProperty('--live preview-size', `${viewersSize}px`);
   // Live, while dragging -- every card's own session gets the new capture size right away
   // (next tick, see screenshotCapture.js's own comment), not just on the next full reload.
   if (instanceViewMode === 'viewers') Viewer.setSizeAll(effectiveViewersSize());
@@ -296,7 +300,7 @@ function loadViewersColumns() {
 }
 let viewersColumns = loadViewersColumns();
 
-// The capture size (short side, px) every ventanita in the grid should ask the backend for.
+// The capture size (short side, px) every live preview in the grid should ask the backend for.
 function effectiveViewersSize() {
   if (viewersColumns === 'auto') return viewersSize;
   const grid = $('#instances-grid');
@@ -1777,7 +1781,7 @@ async function loadInstances({ silent = false } = {}) {
 
       if (instanceViewMode === 'viewers') {
         // "Visores" (15/11/2026) -- a grid card per instance: name, address, its own live
-        // ventanita (always mounted here, independent of the "completo" tab's per-row 👁
+        // live preview (always mounted here, independent of the "completo" tab's per-row 👁
         // toggle -- showing the preview IS this view's whole point), and the same action
         // buttons as every other mode.
         const card = document.createElement('div');
@@ -1792,7 +1796,7 @@ async function loadInstances({ silent = false } = {}) {
         if (AuthUi.can('view')) {
           const viewerWrap = document.createElement('div');
           viewerWrap.className = 'instance-card-viewer';
-          Viewer.mountVentanita(viewerWrap, inst.id, effectiveViewersSize());
+          Viewer.mountPreview(viewerWrap, inst.id, effectiveViewersSize());
           card.appendChild(viewerWrap);
         }
 
@@ -1904,25 +1908,25 @@ async function loadInstances({ silent = false } = {}) {
         const viewerBtns = document.createElement('div');
         viewerBtns.className = 'instance-viewer-col-btns';
 
-        // Ventanita toggle (Hito 2 of the web viewer work) -- explicit, per-instance, default
-        // off, independent of the "expandida"/fullscreen viewer (Hito 4): turning this on does
+        // Live preview toggle (Hito 2 of the web viewer work) -- explicit, per-instance, default
+        // off, independent of the "expanded viewer"/fullscreen viewer (Hito 4): turning this on does
         // not turn that on, and vice versa, per the plan's own decided "native capability,
         // opt-in behavior" split.
-        const ventanitaBtn = document.createElement('button');
-        ventanitaBtn.type = 'button';
-        ventanitaBtn.className = 'icon-button';
-        const isOn = ventanitaIds.has(inst.id);
-        ventanitaBtn.textContent = isOn ? '\u{1F441}\u{FE0F}' : '\u{1F441}'; // 👁️ on / 👁 off
-        ventanitaBtn.title = t(isOn ? 'instances.viewer.ventanitaHideHint' : 'instances.viewer.ventanitaShowHint');
-        ventanitaBtn.addEventListener('click', () => {
-          if (ventanitaIds.has(inst.id)) { ventanitaIds.delete(inst.id); Viewer.unmountVentanita(inst.id); } else { ventanitaIds.add(inst.id); }
-          saveVentanitaIds(ventanitaIds);
+        const previewBtn = document.createElement('button');
+        previewBtn.type = 'button';
+        previewBtn.className = 'icon-button';
+        const isOn = previewIds.has(inst.id);
+        previewBtn.textContent = isOn ? '\u{1F441}\u{FE0F}' : '\u{1F441}'; // 👁️ on / 👁 off
+        previewBtn.title = t(isOn ? 'instances.viewer.previewHideHint' : 'instances.viewer.previewShowHint');
+        previewBtn.addEventListener('click', () => {
+          if (previewIds.has(inst.id)) { previewIds.delete(inst.id); Viewer.unmountPreview(inst.id); } else { previewIds.add(inst.id); }
+          savePreviewIds(previewIds);
           loadInstances({ silent: true });
         });
-        viewerBtns.appendChild(ventanitaBtn);
+        viewerBtns.appendChild(previewBtn);
 
-        // "Expandida" (Hitos 3+4) -- a one-shot action, not a toggle: opening it does not turn
-        // the ventanita above on or off, and vice versa (independent, per the plan).
+        // "expanded viewer" (Hitos 3+4) -- a one-shot action, not a toggle: opening it does not turn
+        // the live preview above on or off, and vice versa (independent, per the plan).
         const expandBtn = document.createElement('button');
         expandBtn.type = 'button';
         expandBtn.className = 'icon-button';
@@ -1934,13 +1938,13 @@ async function loadInstances({ silent = false } = {}) {
         viewerCol.appendChild(viewerBtns);
 
         // The preview image itself, in its OWN wrap below the buttons rather than next to the
-        // eye button (Viewer.mountVentanita just appends an <img> into whatever container it's
+        // eye button (Viewer.mountPreview just appends an <img> into whatever container it's
         // given) -- that's what lets the column stay narrow while the preview below it is free
         // to be full-size.
-        const ventanitaWrap = document.createElement('div');
-        ventanitaWrap.className = 'viewer-ventanita-wrap';
-        if (isOn) Viewer.mountVentanita(ventanitaWrap, inst.id);
-        viewerCol.appendChild(ventanitaWrap);
+        const previewWrap = document.createElement('div');
+        previewWrap.className = 'viewer-live preview-wrap';
+        if (isOn) Viewer.mountPreview(previewWrap, inst.id);
+        viewerCol.appendChild(previewWrap);
 
         tdViewer.appendChild(viewerCol);
         trPrimary.appendChild(tdViewer);
@@ -2109,9 +2113,9 @@ async function loadInstances({ silent = false } = {}) {
     // (that already unmounts inline, see the click handler above).
     const instanceIds = new Set(instances.map((i) => i.id));
     const shouldBeMounted = (id) => instanceIds.has(id)
-      && (instanceViewMode === 'viewers' || (instanceViewMode === 'full' && ventanitaIds.has(id)));
+      && (instanceViewMode === 'viewers' || (instanceViewMode === 'full' && previewIds.has(id)));
     for (const id of Viewer.mountedIds()) {
-      if (!shouldBeMounted(id)) Viewer.unmountVentanita(id);
+      if (!shouldBeMounted(id)) Viewer.unmountPreview(id);
     }
   } catch (e) {
     target.innerHTML = isViewers ? `<p>${t('common.error', { msg: e.message })}</p>` : `<tr><td>${t('common.error', { msg: e.message })}</td></tr>`;

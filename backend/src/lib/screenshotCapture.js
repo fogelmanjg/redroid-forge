@@ -1,17 +1,17 @@
 'use strict';
 
-// Ventanita capture loop (15/11/2026) -- replaces the scrcpy video pipeline for the ventanita
+// Live preview capture loop (15/11/2026) -- replaces the scrcpy video pipeline for the live preview
 // specifically, after finding the shared hwenc daemon's VA-API encode path fails intermittently
 // under host-wide concurrent load (confirmed live: the exact same max_size that worked 3 times
 // in a row failed 3 times in a row minutes later, with other instances' own encode activity
 // interleaved in the daemon's log throughout) -- a crash that kills the WHOLE scrcpy-server
 // process, not just degrades that one connection. `adb exec-out screencap` never touches
 // MediaCodec/VA-API at all, so it cannot hit that bug by construction. Also simply cheaper end to
-// end, which matters since the ventanita was explicitly scoped to not need smoothness: no
+// end, which matters since the live preview was explicitly scoped to not need smoothness: no
 // scrcpy-server process running on the device, no adb forward, no WebCodecs decoder in the
 // browser -- just one PNG every couple of seconds. The real scrcpy pipeline (viewerSession.js)
-// is untouched and still what Hito 4 (expandida/pantalla completa) will use -- this file is only
-// ever reached from the ventanita's own default path.
+// is untouched and still what Hito 4 (expanded viewer/pantalla completa) will use -- this file is only
+// ever reached from the live preview's own default path.
 
 const { spawn } = require('child_process');
 const sharp = require('sharp');
@@ -71,23 +71,23 @@ async function captureScreenshot(host, adbPort) {
 // (routes/viewer.js's resize control message) and must never be trusted as-is: an oversized
 // value would mean sharp doing real, repeated work resizing a full-resolution screencap to a huge
 // target every ~1.5s, for every open viewer.
-const VENTANITA_DEFAULT_SIZE = 160; // unchanged from before this became configurable -- the
+const PREVIEW_DEFAULT_SIZE = 160; // unchanged from before this became configurable -- the
 // "completo" tab's per-row 👁 toggle never sends a size, so it keeps today's look exactly.
-const VENTANITA_MIN_SIZE = 60;
-const VENTANITA_MAX_SIZE = 480; // headroom above the "visores" slider's own max (400) on purpose.
-const VENTANITA_JPEG_QUALITY = 20; // 1-100; low on purpose -- size over fidelity was the explicit ask
+const PREVIEW_MIN_SIZE = 60;
+const PREVIEW_MAX_SIZE = 480; // headroom above the "visores" slider's own max (400) on purpose.
+const PREVIEW_JPEG_QUALITY = 20; // 1-100; low on purpose -- size over fidelity was the explicit ask
 
 function clampSize(size) {
   const n = Number(size);
-  if (!Number.isFinite(n)) return VENTANITA_DEFAULT_SIZE;
-  return Math.min(VENTANITA_MAX_SIZE, Math.max(VENTANITA_MIN_SIZE, Math.round(n)));
+  if (!Number.isFinite(n)) return PREVIEW_DEFAULT_SIZE;
+  return Math.min(PREVIEW_MAX_SIZE, Math.max(PREVIEW_MIN_SIZE, Math.round(n)));
 }
 
-function shrinkForVentanita(pngBuffer, shortSide) {
+function shrinkForPreview(pngBuffer, shortSide) {
   const size = clampSize(shortSide);
   return sharp(pngBuffer)
     .resize(size, size, { fit: 'outside' })
-    .jpeg({ quality: VENTANITA_JPEG_QUALITY })
+    .jpeg({ quality: PREVIEW_JPEG_QUALITY })
     .toBuffer();
 }
 
@@ -109,7 +109,7 @@ function startLoop(host, adbPort, intervalMs, initialSize, onFrame, onError) {
     if (stopped) return;
     try {
       const png = await captureScreenshot(host, adbPort);
-      const jpeg = await shrinkForVentanita(png, size);
+      const jpeg = await shrinkForPreview(png, size);
       if (!stopped) onFrame(jpeg);
     } catch (e) {
       if (!stopped && onError) onError(e);
@@ -129,4 +129,4 @@ function startLoop(host, adbPort, intervalMs, initialSize, onFrame, onError) {
   };
 }
 
-module.exports = { captureScreenshot, shrinkForVentanita, startLoop, clampSize, VENTANITA_DEFAULT_SIZE };
+module.exports = { captureScreenshot, shrinkForPreview, startLoop, clampSize, PREVIEW_DEFAULT_SIZE };

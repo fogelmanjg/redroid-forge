@@ -1,13 +1,13 @@
-// Ventanita player -- WebSocket delivering a small, heavily-compressed JPEG screenshot every
+// Live preview player -- WebSocket delivering a small, heavily-compressed JPEG screenshot every
 // couple of seconds, shown in an <img>, nothing else. Changed 15/11/2026 from an earlier
 // WebCodecs/H.264 version: the
 // shared VA-API encode daemon this host's scrcpy-server path depends on turned out to fail
 // intermittently under host-wide concurrent load (killing the whole scrcpy-server process, not
-// just that connection), and the ventanita never needed real video to begin with (decided
+// just that connection), and the live preview never needed real video to begin with (decided
 // explicitly: "no necesito fluidez"). `adb exec-out screencap` on the backend side
 // (screenshotCapture.js) never touches that encoder at all, so this sidesteps the bug by
 // construction instead of working around it. The real scrcpy/WebCodecs pipeline this replaced is
-// still what Hito 4 (expandida/pantalla completa, which DOES need real video+audio) will use.
+// still what Hito 4 (expanded viewer/pantalla completa, which DOES need real video+audio) will use.
 //
 // mount/unmount are keyed by instanceId and idempotent -- app.js's per-row toggle (persisted in
 // localStorage, see its own comment) just calls these on click/reload, never has to track
@@ -35,7 +35,7 @@ const Viewer = (() => {
     if (oldUrl) URL.revokeObjectURL(oldUrl);
   }
 
-  // Idempotent AND safe to call on every re-render of a row that still wants its ventanita on --
+  // Idempotent AND safe to call on every re-render of a row that still wants its live preview on --
   // app.js's table is fully rebuilt from scratch on every background poll (loadInstances'
   // own module comment), so a naive "always create a new img" here would tear down and reopen
   // the WS every few seconds. If a session already exists, just move its existing (still-live)
@@ -52,7 +52,7 @@ const Viewer = (() => {
   // call's own `size` was silently never applied to it, only the next slider drag would. Calling
   // setSize() here too closes that gap: every mount (new or reused) now asks for the CURRENT
   // size, not just connection-time.
-  function mountVentanita(container, instanceId, size) {
+  function mountPreview(container, instanceId, size) {
     const existing = sessions.get(instanceId);
     if (existing) {
       container.appendChild(existing.img);
@@ -60,7 +60,7 @@ const Viewer = (() => {
       return;
     }
     const img = document.createElement('img');
-    img.className = 'viewer-ventanita-img';
+    img.className = 'viewer-preview-img';
     container.appendChild(img);
 
     const state = { instanceId, img, url: null, ws: null };
@@ -70,11 +70,11 @@ const Viewer = (() => {
     ws.binaryType = 'arraybuffer';
     state.ws = ws;
     ws.addEventListener('message', (ev) => handleMessage(state, ev.data));
-    ws.addEventListener('close', () => unmountVentanita(instanceId));
+    ws.addEventListener('close', () => unmountPreview(instanceId));
     ws.addEventListener('error', () => {}); // 'close' always follows -- nothing extra to do here
   }
 
-  function unmountVentanita(instanceId) {
+  function unmountPreview(instanceId) {
     const state = sessions.get(instanceId);
     if (!state) return;
     sessions.delete(instanceId);
@@ -86,7 +86,7 @@ const Viewer = (() => {
   // Resizes an ALREADY-OPEN session's capture live (routes/viewer.js's own matching comment) --
   // "la proxima actualizacion viene el tamaño nuevo": the backend applies it starting with
   // whichever capture tick hasn't started yet, no reconnect. A session not open yet (or already
-  // gone) just has nothing to send to -- the next mountVentanita's own `size` argument covers
+  // gone) just has nothing to send to -- the next mountPreview's own `size` argument covers
   // that case instead.
   function setSize(instanceId, size) {
     const state = sessions.get(instanceId);
@@ -100,5 +100,5 @@ const Viewer = (() => {
   function isMounted(instanceId) { return sessions.has(instanceId); }
   function mountedIds() { return Array.from(sessions.keys()); }
 
-  return { mountVentanita, unmountVentanita, setSize, setSizeAll, isMounted, mountedIds };
+  return { mountPreview, unmountPreview, setSize, setSizeAll, isMounted, mountedIds };
 })();

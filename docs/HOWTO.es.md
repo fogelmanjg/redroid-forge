@@ -6,9 +6,9 @@ Recetas cortas y orientadas a la tarea, para cosas que alguien preguntó "¿cóm
 espíritu que `TROUBLESHOOTING.md`: esto crece a partir de preguntas reales, no es una lista
 especulativa escrita de una sentada — abrí un issue si la tarea que buscás todavía no está acá.
 
-## Escribir en una instancia desde el visor "expandida" (pantalla completa)
+## Escribir en una instancia desde la vista expandida (pantalla completa)
 
-1. Abrí el visor **"expandida"** de la instancia (pantalla completa, video/audio/input en tiempo
+1. Abrí la **vista expandida** de la instancia (pantalla completa, video/audio/input en tiempo
    real).
 2. Clickeá el botón **⌨** de la barra inferior — hay que clickearlo una vez antes de que escribir
    con el teclado físico haga algo; aparece un globo de ayuda arriba al pasar el mouse o enfocarlo.

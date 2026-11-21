@@ -1,6 +1,6 @@
 // WsConnection heartbeat (21/11/2026): a client that vanishes without a FIN (sleeping tablet,
 // dropped Wi-Fi, a frozen PC) must still end the connection -- 'close' is what tears the
-// expandida's scrcpy-server down. Runs with a 40 ms heartbeat (timeout = 3x) instead of 10 s.
+// expanded viewer's scrcpy-server down. Runs with a 40 ms heartbeat (timeout = 3x) instead of 10 s.
 process.env.REDROID_FORGE_WS_HEARTBEAT_MS = '40';
 
 const test = require('node:test');

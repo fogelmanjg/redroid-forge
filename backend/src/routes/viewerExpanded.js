@@ -1,13 +1,13 @@
 'use strict';
 
-// GET /api/instances/:id/viewer/full (WebSocket upgrade) -- the "expandida" mode of the plan at
+// GET /api/instances/:id/viewer/full (WebSocket upgrade) -- the "expanded viewer" mode of the plan at
 // /home/jgustavo/.claude/plans/recursive-dreaming-honey.md (Hitos 3+4, merged into one
 // deliverable: input only makes sense once a live video session already exists to point it at).
 // Separate path and separate file from routes/viewer.js on purpose -- the payload shape is
 // completely different (real scrcpy video/audio chunks, not a JPEG per message), same reasoning
 // that already split routes/instances.js from this file's sibling.
 //
-// Capability: `view` to open the connection at all (any role, same as the ventanita); `start-stop`
+// Capability: `view` to open the connection at all (any role, same as the live preview); `start-stop`
 // is re-checked (not just at connect time) before applying any input message, computed once as
 // `canControl` -- a viewer-only user can still watch, their input messages are just ignored.
 //
@@ -27,7 +27,7 @@ const { OpusTranscoder } = require('../lib/scrcpy/opusTranscoder');
 const PATH_RE = /^\/api\/instances\/([^/]+)\/viewer\/full(?:\?.*)?$/;
 
 // scrcpy's own desktop-client defaults (app/src/cli.c) -- "calidad tipo streaming", not the
-// ventanita's deliberately tiny/slow numbers. maxSize 0 means "no cap" in scrcpy-server's own
+// live preview's deliberately tiny/slow numbers. maxSize 0 means "no cap" in scrcpy-server's own
 // argv handling (launchServer.buildArgs only adds max_size= when truthy) -- capped here instead
 // at a sane ceiling so a 4K-configured instance doesn't push an enormous frame into a browser tab.
 const MAX_SIZE = 1920;
@@ -127,12 +127,12 @@ async function handleUpgrade(req, socket, head) {
         for (const opusPkt of opus.push(pkt.payload)) ws.send(encodeMediaFrame(TAG_AUDIO, opusPkt));
       },
       onError: (err) => {
-        console.error(`expandida viewer session error for instance ${instanceId}:`, err.message);
+        console.error(`expanded viewer session error for instance ${instanceId}:`, err.message);
         ws.close(1011, 'Upstream session failing');
       },
     });
   } catch (e) {
-    console.error(`expandida viewer failed to start for instance ${instanceId}:`, e.message);
+    console.error(`expanded viewer failed to start for instance ${instanceId}:`, e.message);
     // A WS close, not rejectUpgrade(): the 101 already went out in acceptUpgrade, so an HTTP 500
     // written now would just be garbage bytes inside the WS stream. The 'close' handler above
     // does the opus cleanup.

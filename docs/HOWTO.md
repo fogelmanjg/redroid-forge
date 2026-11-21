@@ -6,9 +6,9 @@ Short, task-oriented recipes for things people asked "how do I do this?" about. 
 `TROUBLESHOOTING.md`: this grows from real questions, not a speculative checklist written in one
 sitting — open an issue if the task you're after isn't here yet.
 
-## Type into an instance from the "expandida" (full-screen) viewer
+## Type into an instance from the expanded viewer (full-screen)
 
-1. Open the instance's **"expandida"** viewer (full-screen, real-time video/audio/input).
+1. Open the instance's **expanded viewer** (full-screen, real-time video/audio/input).
 2. Click the **⌨** button in the bottom bar — it has to be clicked once before physical typing
    does anything; a tooltip appears above it on hover/focus as a reminder.
 3. Type normally on your physical keyboard. Only plain text reaches the device.
