@@ -95,6 +95,13 @@ private:
     // Same pattern as C2SoftAvcEnc::mSpsPpsHeaderReceived -- it is sent
     // only once, not on every frame.
     bool mCsdSent = false;
+    // 21/11/2026: identifies THIS encoder session to the host daemon (EncodeRequest.stream_id),
+    // which keeps one encoder state per (process, stream_id). Without it, two viewers of the same
+    // instance (two encoders in this same process, same resolution) looked like one stream to the
+    // daemon and got P frames referencing each other's frames. New on every onInit()/onReset():
+    // a restarted session is a new stream (starts with an IDR). Never 0 (0 = "older component").
+    uint32_t mStreamId = 0;
+    static uint32_t newStreamId();
 };
 
 }  // namespace android

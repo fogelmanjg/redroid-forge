@@ -16,7 +16,10 @@ LOG=${2:-/dev/stdout}
 mkdir -p "$AOSP/external/vaapi_codec2"
 rsync -a "$HERE/vaapi_codec2/" "$AOSP/external/vaapi_codec2/"
 # protocol.h: a single source of truth, the daemon's (the Android component includes it as is).
-cp "$HERE/../backend/native/vaapi-daemon/protocol.h" "$AOSP/external/vaapi_codec2/component/protocol.h"
+# protocol.h lives in redroid-hwenc since the daemon is built from there (14/11/2026); the old
+# backend/native/vaapi-daemon/ copy no longer exists. REDROID_HWENC_DIR points at that checkout.
+HWENC=${REDROID_HWENC_DIR:-$HOME/redroid-hwenc}
+cp "$HWENC/tier5-vaapi-daemon/protocol.h" "$AOSP/external/vaapi_codec2/component/protocol.h"
 
 # Soong's analysis reached >37 GB because Go's garbage collector does not know the container's cap
 # and lets the heap grow up to twice the live size. Soong launches soong_build with `env -i`

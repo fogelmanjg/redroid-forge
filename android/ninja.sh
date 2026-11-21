@@ -17,7 +17,10 @@ LOG=${2:-/dev/stdout}
 
 mkdir -p "$AOSP/external/vaapi_codec2"
 rsync -a "$HERE/vaapi_codec2/" "$AOSP/external/vaapi_codec2/"
-cp "$HERE/../backend/native/vaapi-daemon/protocol.h" "$AOSP/external/vaapi_codec2/component/protocol.h"
+# protocol.h lives in redroid-hwenc since the daemon is built from there (14/11/2026); the old
+# backend/native/vaapi-daemon/ copy no longer exists. REDROID_HWENC_DIR points at that checkout.
+HWENC=${REDROID_HWENC_DIR:-$HOME/redroid-hwenc}
+cp "$HWENC/tier5-vaapi-daemon/protocol.h" "$AOSP/external/vaapi_codec2/component/protocol.h"
 
 docker exec -i -u jgustavo -e HOME=/home/jgustavo -e USER=jgustavo redroid-build-persist python3 - "$TARGET" > "$LOG" 2>&1 <<'PY'
 import json, os, subprocess, sys, time
