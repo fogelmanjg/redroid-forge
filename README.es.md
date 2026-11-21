@@ -27,8 +27,9 @@ sin depender de ninguna otra infraestructura.
 > 10** (asegurar y borrar el código legacy que este proyecto reemplaza, más escribir documentación
 > definitiva como esta) — en curso, no una condición de features; la Fase 8 (federación:
 > `jg-dashboard`/Plenum como clientes `oidc` de esta app) es independiente y puede llegar antes o
-> después de la 1.0. **El proyecto está en feature freeze desde el 16/11/2026: hasta que salga la 1.0
-> solo entran fixes, documentación y los ítems chicos ya planificados para las betas** — ver [`CONTRIBUTING.md`](CONTRIBUTING.md) (solo en inglés).
+> después de la 1.0. **El proyecto está en feature freeze desde el 16/11/2026, solo para
+> funcionalidades grandes: hasta que salga la 1.0 siguen entrando arreglos de bugs, molestias y
+> cosas que faltan en la interfaz y ya deberían estar, además de documentación** — ver [`CONTRIBUTING.md`](CONTRIBUTING.md) (solo en inglés).
 
 ## Capturas de pantalla
 

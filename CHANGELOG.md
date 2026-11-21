@@ -46,7 +46,9 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
   per-browser list of previews turned on moved from the `ventanitaIds` to the `previewIds`
   localStorage key; the old one is still read, so nobody loses their selection. Older entries
   below were updated to the new terms too.
-- README/CONTRIBUTING: status updated for the 1.0 pre-release cycle.
+- README/CONTRIBUTING: status updated for the 1.0 pre-release cycle, and the freeze clarified: it
+  holds back big features only -- bug fixes, annoyances and missing UI bits that should already be
+  there keep landing.
 
 ### Fixed
 

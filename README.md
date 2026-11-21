@@ -25,8 +25,9 @@ without depending on any other infrastructure.
 > 10's own gate** (securing and removing the legacy code this project replaces, plus writing this
 > exact kind of definitive documentation) — in progress, not a feature requirement; Phase 8
 > (federation: `jg-dashboard`/Plenum becoming `oidc` consumers of this app) is independent and can
-> land before or after 1.0. **The project is in a feature freeze since 16/11/2026: until 1.0 ships,
-> only bug fixes, documentation and the small items already planned for the betas land** — see [`CONTRIBUTING.md`](CONTRIBUTING.md).
+> land before or after 1.0. **The project is in a feature freeze since 16/11/2026, for big features
+> only: until 1.0 ships, bug fixes, annoyances and missing UI bits that should already be there
+> keep landing, along with documentation** — see [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
 ## Screenshots
 
