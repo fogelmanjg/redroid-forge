@@ -1220,7 +1220,7 @@ async function reattachRunningInstances() {
       if (instance.locked) {
         // Locked but running: started outside this app (`docker start` by hand). Stop it.
         console.warn(`[instances] "${instance.name}" is locked but its container was running (started outside the app): stopping it`);
-        await runtime.stop(instance.containerId);
+        await runtime.stop(instance.containerId, { graceSeconds: 2 });
         continue;
       }
       const requiredModuleIds = requiredModuleIdsFor(instance);
@@ -1233,5 +1233,32 @@ async function reattachRunningInstances() {
   }
 }
 
+// A container start that did not come from this app (lib/externalStartWatcher.js: `docker
+// start` by hand, or Docker's restart policy after a crash / Docker restart / host reboot).
+// Locked -> stop it right away. Otherwise -> exactly the post-start steps of the start route, so
+// the instance ends up as if it had been started from the UI (hwenc daemon, device profile,
+// fake-wifi radios, meminfo fix, runtime fixups, watchdogs from zero, knock guards).
+async function handleExternalStart(instance) {
+  const current = store.get(instance.id) || instance;
+  if (current.locked) {
+    console.warn(`[instances] "${current.name}" is locked but was started outside the app: stopping it`);
+    // 2 s grace, not Docker's 10: it is only seconds into its boot, and every extra second is
+    // Android running with an identity that is supposed to stay offline.
+    await runtime.stop(current.containerId, { graceSeconds: 2 });
+    return;
+  }
+  const requiredModuleIds = requiredModuleIdsFor(current);
+  await moduleRunner.ensureHostInfraReady(requiredModuleIds);
+  const reconciled = await reconcileDeviceProfile(current);
+  scheduleWifiFixes(reconciled);
+  meminfoFix.scheduleRefresh(reconciled);
+  const img = catalog.find((i) => i.id === reconciled.imageId);
+  moduleRunner.scheduleRuntimeFixups(requiredModuleIds, reconciled.containerId, { androidVersion: img?.androidVersion });
+  moduleScheduler.start(reconciled.id, reconciled.containerId, requiredModuleIds);
+  await applyKnockGuards(reconciled);
+  console.log(`[instances] "${current.name}" reconciled after an external start`);
+}
+
 module.exports = router;
 module.exports.reattachRunningInstances = reattachRunningInstances;
+module.exports.handleExternalStart = handleExternalStart;

@@ -41,6 +41,13 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
   (display/resources) of a locked instance leaves it stopped; the Doctor lists locked instances.
   If a locked instance is found running when the app starts (started by hand with `docker
   start`), it is stopped. `POST /api/instances/:id/lock` (`{ reason }`) and `/unlock`.
+- **Containers started outside the app are reconciled live.** `docker start` by hand, or Docker
+  itself (`unless-stopped` after a crash, a Docker restart or a host reboot / power cut), used to
+  bring an instance up without any of what the app's own start does -- no hwenc daemon, no
+  watchdogs, no fake-wifi radios -- and without respecting a lock. The app now follows Docker's
+  event stream: a start it did not ask for gets the same post-start steps as the start button,
+  and a locked instance is stopped within seconds (2 s grace). Preventing such starts outright is
+  planned for 1.0.1 or 1.1.
 
 ### Changed
 

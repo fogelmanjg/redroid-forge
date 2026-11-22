@@ -70,22 +70,56 @@ async function updateResources(containerId, { memoryMb, cpusetCpus }) {
   await docker.getContainer(containerId).update(update);
 }
 
+// Starts this app asks Docker for, so lib/externalStartWatcher.js can tell them apart from a
+// start that came from outside the app (`docker start` by hand, Docker's own restart policy
+// after a crash or a host reboot). containerId (full or short) -> time it was requested.
+const expectedStarts = new Map();
+const EXPECTED_START_TTL_MS = 30000; // the event follows the call within a second or two
+function expectStart(containerId) {
+  if (containerId) expectedStarts.set(String(containerId), Date.now());
+}
+// True (and forgotten) if this app asked for a start of this container in the last 30 s.
+function consumeExpectedStart(containerId) {
+  const now = Date.now();
+  for (const [id, at] of expectedStarts) {
+    if (now - at > EXPECTED_START_TTL_MS) { expectedStarts.delete(id); continue; }
+    if (id === containerId || containerId.startsWith(id) || id.startsWith(containerId)) {
+      expectedStarts.delete(id);
+      return true;
+    }
+  }
+  return false;
+}
+
 async function start(containerId) {
+  expectStart(containerId);
   try {
     await docker.getContainer(containerId).start();
   } catch (e) {
+    // Either way no 'start' event will follow, so the expectation must not linger: a leftover
+    // one would make the watcher ignore a real external start within its TTL (found live,
+    // 21/11/2026: an API start while the container was still stopping got a 304, and a
+    // `docker start` by hand right after was taken for the app's own).
+    expectedStarts.delete(String(containerId));
     if (e.statusCode !== 304) throw e; // 304 = it was already running
   }
 }
 
-async function stop(containerId) {
-  await docker.getContainer(containerId).stop().catch((e) => {
+// graceSeconds: Docker's own SIGTERM-then-SIGKILL window (its default is 10 s).
+async function stop(containerId, { graceSeconds } = {}) {
+  await docker.getContainer(containerId).stop(graceSeconds != null ? { t: graceSeconds } : {}).catch((e) => {
     if (e.statusCode !== 304) throw e;
   });
 }
 
 async function restart(containerId) {
-  await docker.getContainer(containerId).restart();
+  expectStart(containerId);
+  try {
+    await docker.getContainer(containerId).restart();
+  } catch (e) {
+    expectedStarts.delete(String(containerId));
+    throw e;
+  }
 }
 
 // Unlike anything touching HostConfig (binds, resources at creation, ...), the container's
@@ -264,5 +298,5 @@ async function runEphemeral(image, cmd, binds, timeoutMs = 30000) {
 module.exports = {
   docker, listLocalImageTags, create, start, stop, restart, remove, removeVolume, rename,
   inspect, inspectVolume, getImageDigest, getPid, getBridgeIp, exec, runEphemeral,
-  readLogs, readFile, writeFile, updateResources,
+  readLogs, readFile, writeFile, updateResources, expectStart, consumeExpectedStart,
 };
