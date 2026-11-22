@@ -27,6 +27,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
 
 ## [Unreleased]
 
+## [1.0.0-beta.5] - 2026-11-22
+
 ### Added
 
 - **Open an instance in scrcpy on your computer (📲), with a real test first.** A local launcher
@@ -42,7 +44,11 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
   exist only while a test runs. The launcher only ever runs `adb connect` + scrcpy (or the test
   echo) for a validated `host:port`, never options taken from the link; your own scrcpy flags
   (e.g. `--hwdec=disabled`) go in `~/.config/redroid-forge-launcher/config`. Not offered on
-  Android/iOS. `POST /api/scrcpy-launcher/test`, `GET /api/scrcpy-launcher/test/:code`.
+  Android/iOS. On an instance published only on 127.0.0.1 the 📲 is disabled with the reason (no
+  other computer can reach it). Launcher errors (e.g. adb cannot connect) open a dialog you have to
+  close (kdialog/zenity, a notification otherwise), and the page shows a short note when 📲 is
+  pressed -- it cannot tell by itself whether scrcpy connected. `POST /api/scrcpy-launcher/test`,
+  `GET /api/scrcpy-launcher/test/:code`.
 - **The "Viewers" view can open the expanded viewer** (⛶) from each card; before, only the "Full"
   view's rows had the button.
 
