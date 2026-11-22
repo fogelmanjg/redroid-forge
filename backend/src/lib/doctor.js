@@ -731,6 +731,17 @@ async function checkAdbPortRange() {
   };
 }
 
+// Locked instances (1.0.0-beta.4): informational, so a lock is never forgotten.
+function checkLockedInstances({ list = () => store.readAll() } = {}) {
+  const locked = list().filter((i) => i.locked);
+  if (locked.length === 0) return { status: 'ok', detail: 'No instance is locked.' };
+  return {
+    status: 'ok',
+    detail: `${locked.length} locked instance(s) (cannot be started, restarted or deleted until unlocked): `
+      + locked.map((i) => `${i.name} -- ${i.locked.reason || 'no reason given'} (by ${i.locked.by || '?'}, ${i.locked.at || '?'})`).join('; '),
+  };
+}
+
 async function runAll() {
   const [
     dockerSocket, hwsim, imagePresence, hwAccelCheck, nvencCheck, venus3dCheck, grallocFix, fwknopCheck,
@@ -764,6 +775,7 @@ async function runAll() {
     { id: 'fwknop', label: 'Port-knocking (fwknop)', ...fwknopCheck },
     { id: 'active-video-sessions', label: 'Active video sessions (scrcpy)', ...activeAdb },
     { id: 'adb-port-range', label: 'ADB port range availability', ...adbPortRange },
+    { id: 'locked-instances', label: 'Locked instances', ...checkLockedInstances() },
     ...imagePresence,
     ...grallocFix,
     ...checkAndroidIdRegistration(),
@@ -772,4 +784,4 @@ async function runAll() {
   return checks;
 }
 
-module.exports = { runAll, checkKnownDb, checkGrallocFix, checkActiveVideoSessions, classifyScrcpyServers, checkAdbPortRange };
+module.exports = { runAll, checkKnownDb, checkGrallocFix, checkActiveVideoSessions, classifyScrcpyServers, checkAdbPortRange, checkLockedInstances };

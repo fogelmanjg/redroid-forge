@@ -34,6 +34,13 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
   forge on the host owns it), and restarts it with a confirmation -- it cuts hardware encode on
   every instance for a few seconds. Before, the only way from the UI was changing the encode
   backend. `GET /api/settings/hwenc-daemon`, `POST /api/settings/hwenc-daemon/restart`.
+- **Lock an instance.** A 🔒 Lock button (`configure` permission) stops the instance and keeps it
+  from being started, restarted or deleted until it is unlocked -- e.g. the original of a
+  migration, kept for safety, whose copy already runs elsewhere with the same Google identity.
+  The reason, who and when show on a 🔒 locked chip and on the disabled buttons; a recreate
+  (display/resources) of a locked instance leaves it stopped; the Doctor lists locked instances.
+  If a locked instance is found running when the app starts (started by hand with `docker
+  start`), it is stopped. `POST /api/instances/:id/lock` (`{ reason }`) and `/unlock`.
 
 ### Changed
 

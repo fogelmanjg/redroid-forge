@@ -1797,15 +1797,53 @@ async function loadInstances({ silent = false } = {}) {
         });
         return del;
       };
+      // Locked instances (1.0.0-beta.4): start/restart/delete stay visible but disabled, with
+      // the lock's reason as their tooltip, so it is obvious WHY they do nothing.
+      const lockedHint = inst.locked
+        ? t('instances.lock.hint', { reason: inst.locked.reason || t('instances.lock.noReason'), by: inst.locked.by || '?', at: inst.locked.at ? new Date(inst.locked.at).toLocaleString() : '?' })
+        : null;
+      const disableForLock = (btn) => { btn.disabled = true; btn.title = lockedHint; return btn; };
+      const buildLockBtn = () => {
+        const b = document.createElement('button');
+        b.className = 'secondary';
+        if (inst.locked) {
+          b.textContent = `🔓 ${t('instances.lock.unlock')}`;
+          b.addEventListener('click', async () => {
+            if (!confirm(t('instances.lock.confirmUnlock', { name: inst.name }))) return;
+            try { await api(`/instances/${inst.id}/unlock`, { method: 'POST' }); } catch (e) { alert(e.message); }
+            await loadInstances({ silent: true });
+          });
+        } else {
+          b.textContent = `🔒 ${t('instances.lock.lock')}`;
+          b.title = t('instances.lock.lockHint');
+          b.addEventListener('click', async () => {
+            const reason = prompt(t('instances.lock.promptReason', { name: inst.name }));
+            if (reason === null) return; // cancelled
+            b.disabled = true;
+            try { await api(`/instances/${inst.id}/lock`, { method: 'POST', body: JSON.stringify({ reason }) }); } catch (e) { alert(e.message); }
+            await loadInstances({ silent: true });
+          });
+        }
+        return b;
+      };
       // Only the actions that make sense for the current state (see instanceState.js).
       const appendActionButtons = (container) => {
         for (const action of state.actions) {
           if (action === 'delete') {
-            if (AuthUi.can('delete')) container.appendChild(buildDeleteBtn());
+            if (AuthUi.can('delete')) container.appendChild(inst.locked ? disableForLock(buildDeleteBtn()) : buildDeleteBtn());
           } else if (AuthUi.can('start-stop')) {
-            container.appendChild(mk(t(`instances.${action}`), action));
+            const btn = mk(t(`instances.${action}`), action);
+            container.appendChild(inst.locked && (action === 'start' || action === 'restart') ? disableForLock(btn) : btn);
           }
         }
+        if (AuthUi.can('configure')) container.appendChild(buildLockBtn());
+      };
+      const buildLockChip = () => {
+        const chip = document.createElement('span');
+        chip.className = 'resource-chip lock-chip';
+        chip.textContent = `🔒 ${t('instances.lock.chip')}`;
+        chip.title = lockedHint;
+        return chip;
       };
       const buildAddressSpan = (className) => {
         const address = `${location.hostname}:${inst.adbPort}`;
@@ -1835,6 +1873,7 @@ async function loadInstances({ silent = false } = {}) {
         nameSpan.className = 'instance-name';
         nameSpan.textContent = inst.name;
         minWrap.appendChild(nameSpan);
+        if (inst.locked) minWrap.appendChild(buildLockChip());
         minWrap.appendChild(buildAddressSpan('instance-minimal-address'));
 
         const minButtons = document.createElement('div');
@@ -1860,6 +1899,7 @@ async function loadInstances({ silent = false } = {}) {
         nameDiv.className = 'instance-card-name';
         nameDiv.textContent = inst.name;
         card.appendChild(nameDiv);
+        if (inst.locked) card.appendChild(buildLockChip());
         card.appendChild(buildAddressSpan('instance-card-address'));
 
         if (AuthUi.can('view')) {
@@ -1956,6 +1996,7 @@ async function loadInstances({ silent = false } = {}) {
       statusSpan.className = 'instance-status';
       statusSpan.innerHTML = `<span class="status-dot ${state.tone}"></span>${t('instances.status.' + state.key)}`;
       primary.appendChild(statusSpan);
+      if (inst.locked) primary.appendChild(buildLockChip());
 
       primary.appendChild(buildAddressSpan('instance-address'));
 

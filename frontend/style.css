@@ -373,3 +373,6 @@ tr.instance-row-secondary > td { padding-top: 0.2rem; }
 /* Settings > hwenc: shared daemon state + restart (1.0.0-beta.4). */
 .hwenc-daemon-row { display: flex; align-items: center; gap: 0.8rem; flex-wrap: wrap; }
 .hwenc-daemon-row[hidden] { display: none; }
+
+/* Locked instance chip (1.0.0-beta.4). */
+.lock-chip { border-color: var(--warn); color: var(--warn); }

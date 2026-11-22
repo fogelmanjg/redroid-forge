@@ -30,6 +30,18 @@ function httpError(message, httpStatus) {
   return Object.assign(new Error(message), { httpStatus });
 }
 
+// Locked instances (21/11/2026, 1.0.0-beta.4, asked by the user): `instance.locked =
+// { at, by, reason }` marks an instance that must not run -- e.g. the original of a migration,
+// kept for safety, whose clone already runs elsewhere with the same Android/Google identity.
+// Locking stops it; while locked, every path that would run Android (start, restart, the
+// restart at the end of a recreate) and delete are refused with the reason. Unlocking is an
+// explicit action. Same `configure` permission as the rest of an instance's configuration.
+function assertNotLocked(instance, action) {
+  if (!instance.locked) return;
+  const l = instance.locked;
+  throw httpError(`Instance "${instance.name}" is locked (${l.reason || 'no reason given'}; by ${l.by || '?'} on ${l.at || '?'}) -- unlock it before you ${action} it.`, 409);
+}
+
 function findImage(imageId) {
   const img = catalog.find((i) => i.id === imageId);
   if (!img) throw httpError(`Unknown image: ${imageId}`, 400);
@@ -473,6 +485,7 @@ router.post('/:id/start', async (req, res) => {
   if (!instance) return res.status(404).json({ error: 'Instance not found' });
   try {
     permissions.assertCan(req.user, 'start-stop', instance);
+    assertNotLocked(instance, 'start');
     // It revalidates the contract on every start, not only at creation: if the
     // manifest of a module this instance uses went up a version since it was
     // created, the next start stays blocked until it is accepted again.
@@ -518,6 +531,7 @@ router.post('/:id/restart', async (req, res) => {
   if (!instance) return res.status(404).json({ error: 'Instancia no encontrada' });
   try {
     permissions.assertCan(req.user, 'start-stop', instance);
+    assertNotLocked(instance, 'restart');
     await revalidateModulesIfImageKnown(instance);
     const requiredModuleIds = requiredModuleIdsFor(instance);
     await moduleRunner.ensureHostInfraReady(requiredModuleIds);
@@ -914,7 +928,8 @@ router.post('/:id/display', async (req, res) => {
       watchdogPaused: moduleScheduler.defaultPauseForNewModules(instance.watchdogPaused, requiredModuleIds),
     });
 
-    if (wasRunning) {
+    // A locked instance is always stopped (locking stops it), but never start one here either.
+    if (wasRunning && !updated.locked) {
       await moduleRunner.ensureHostInfraReady(requiredModuleIds);
       await runtime.start(containerId);
       updated = await reconcileDeviceProfile(updated);
@@ -1127,6 +1142,7 @@ router.delete('/:id', async (req, res) => {
   if (!instance) return res.status(404).json({ error: 'Instancia no encontrada' });
   try {
     permissions.assertCan(req.user, 'delete', instance);
+    assertNotLocked(instance, 'delete');
     moduleScheduler.stop(instance.id);
     meminfoFix.release(instance.id);
     // Guard rules (docs/ROADMAP.md Phase 9) are keyed by this instance's own container bridge
@@ -1140,6 +1156,47 @@ router.delete('/:id', async (req, res) => {
     meminfoFix.cleanup(instance.volumeName);
     store.remove(instance.id);
     res.status(204).end();
+  } catch (e) {
+    sendError(res, e);
+  }
+});
+
+// Lock = stop + mark (see assertNotLocked). Body: { reason } (optional, free text, trimmed).
+router.post('/:id/lock', async (req, res) => {
+  const instance = store.get(req.params.id);
+  if (!instance) return res.status(404).json({ error: 'Instance not found' });
+  try {
+    permissions.assertCan(req.user, 'configure', instance);
+    const reason = String((req.body && req.body.reason) || '').trim().slice(0, 300) || null;
+    let running = false;
+    try { running = (await runtime.inspect(instance.containerId)).State.Status === 'running'; } catch { running = false; }
+    if (running) {
+      // Same teardown as the stop route.
+      moduleScheduler.stop(instance.id);
+      meminfoFix.release(instance.id);
+      await releaseWifiFixes(instance);
+      await releaseKnockGuards(instance);
+      await runtime.stop(instance.containerId);
+    }
+    // The loopback/none-mode admin bypass has no username; say so rather than leave it blank.
+    const locked = { at: new Date().toISOString(), by: req.user?.username || req.user?.name || req.user?.id || 'admin (local)', reason };
+    const updated = store.upsert({ ...instance, locked });
+    console.log(`[instances] "${instance.name}" locked by ${locked.by || '?'}${running ? ' (it was running: stopped)' : ''}: ${reason || 'no reason'}`);
+    res.json(await withRuntimeStatus(updated));
+  } catch (e) {
+    sendError(res, e);
+  }
+});
+
+router.post('/:id/unlock', async (req, res) => {
+  const instance = store.get(req.params.id);
+  if (!instance) return res.status(404).json({ error: 'Instance not found' });
+  try {
+    permissions.assertCan(req.user, 'configure', instance);
+    const { locked, ...rest } = instance;
+    const updated = store.upsert({ ...rest, locked: null });
+    console.log(`[instances] "${instance.name}" unlocked by ${req.user?.username || req.user?.name || req.user?.id || 'admin (local)'}`);
+    res.json(await withRuntimeStatus(updated));
   } catch (e) {
     sendError(res, e);
   }
@@ -1160,6 +1217,12 @@ async function reattachRunningInstances() {
       if (!instance.containerId) continue;
       const info = await runtime.inspect(instance.containerId);
       if (info.State.Status !== 'running') continue;
+      if (instance.locked) {
+        // Locked but running: started outside this app (`docker start` by hand). Stop it.
+        console.warn(`[instances] "${instance.name}" is locked but its container was running (started outside the app): stopping it`);
+        await runtime.stop(instance.containerId);
+        continue;
+      }
       const requiredModuleIds = requiredModuleIdsFor(instance);
       await moduleRunner.ensureHostInfraReady(requiredModuleIds);
       moduleScheduler.start(instance.id, instance.containerId, requiredModuleIds);
