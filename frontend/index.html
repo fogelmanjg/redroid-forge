@@ -33,6 +33,7 @@
       <div class="toolbar">
         <button id="btn-new-instance" data-i18n="instances.new">+ New instance</button>
         <button id="btn-refresh-instances" data-i18n="common.refresh">Refresh</button>
+        <button id="btn-scrcpy-launcher" type="button" class="secondary">Test local scrcpy</button>
         <span class="view-mode-switch">
           <button type="button" class="view-mode-btn" data-view-mode="full" data-i18n="instances.viewMode.full" data-i18n-title="instances.viewMode.fullHint">Full</button>
           <button type="button" class="view-mode-btn" data-view-mode="minimal" data-i18n="instances.viewMode.minimal" data-i18n-title="instances.viewMode.minimalHint">Minimal</button>
@@ -269,6 +270,25 @@ gunzip -c image.tar.gz | docker load</pre>
     </form>
   </dialog>
 
+  <dialog id="scrcpy-launcher-dialog">
+    <form method="dialog">
+      <h2 data-i18n="scrcpyLauncher.title">Local scrcpy</h2>
+      <p data-i18n="scrcpyLauncher.intro"></p>
+      <p id="scrcpy-launcher-status" class="scrcpy-launcher-status"></p>
+      <p id="scrcpy-launcher-detail" class="contract-meta"></p>
+      <div id="scrcpy-launcher-install" class="scrcpy-launcher-install" hidden>
+        <p data-i18n="scrcpyLauncher.installIntro"></p>
+        <pre><code></code></pre>
+        <p><a target="_blank" rel="noopener" data-i18n="scrcpyLauncher.guide">Install guide</a></p>
+      </div>
+      <div class="dialog-actions">
+        <button type="button" id="btn-scrcpy-launcher-close" data-i18n="common.close">Close</button>
+        <button type="button" id="btn-scrcpy-launcher-toggle"></button>
+        <button type="button" id="btn-scrcpy-launcher-test"></button>
+      </div>
+    </form>
+  </dialog>
+
   <dialog id="login-dialog">
     <form id="login-form-local" method="dialog">
       <h2 data-i18n="auth.loginTitle">Log in</h2>
@@ -311,6 +331,7 @@ gunzip -c image.tar.gz | docker load</pre>
   <script src="authUi.js"></script>
   <script src="viewer.js"></script>
   <script src="viewerExpanded.js"></script>
+  <script src="scrcpyLauncher.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

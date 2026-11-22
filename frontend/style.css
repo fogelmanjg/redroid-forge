@@ -376,3 +376,20 @@ tr.instance-row-secondary > td { padding-top: 0.2rem; }
 
 /* Locked instance chip (1.0.0-beta.4). */
 .lock-chip { border-color: var(--warn); color: var(--warn); }
+
+/* Local scrcpy (1.0.0-beta.5, frontend/scrcpyLauncher.js). The 📲 is a link (the browser hands
+   scrcpy-redroid:// to the local launcher), styled like the icon buttons next to it. */
+.scrcpy-link {
+  display: inline-flex; align-items: center; justify-content: center;
+  padding: 0.2rem 0.5rem; border: 1px solid var(--border); border-radius: 6px;
+  text-decoration: none; color: inherit; line-height: 1.2;
+}
+.scrcpy-link:hover { border-color: var(--fg); }
+.instance-card-viewer-buttons { display: flex; gap: 0.3rem; justify-content: center; }
+#scrcpy-launcher-dialog { max-width: 560px; }
+#scrcpy-launcher-dialog h2 { margin: 0; }
+.scrcpy-launcher-status { font-weight: 600; margin: 0; }
+.scrcpy-launcher-install pre {
+  margin: 0; padding: 0.5rem 0.7rem; border: 1px solid var(--border); border-radius: 6px;
+  overflow-x: auto; font-size: 0.8rem; white-space: pre;
+}

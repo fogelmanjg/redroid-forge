@@ -35,6 +35,9 @@ app.get('/favicon.svg', (req, res) => {
 });
 
 app.use(express.static(path.join(__dirname, '..', '..', 'frontend')));
+// The local scrcpy launcher's files (1.0.0-beta.5), downloadable without logging in -- they are the
+// same files the public repo has, nothing instance-specific. See docs/HOWTO.md.
+app.use('/launcher', express.static(path.join(__dirname, '..', '..', 'launcher')));
 
 // Sets req.user on every request (the always-admin bypass user in "none" mode, or whoever the
 // session cookie says in "local"/"oidc") -- runs before anything else so /api/auth/me can
@@ -55,6 +58,7 @@ app.use('/api/quotas', require('./routes/quotas'));
 app.use('/api/backups', require('./routes/backups'));
 app.use('/api/network', require('./routes/network'));
 app.use('/api/version', require('./routes/version'));
+app.use('/api/scrcpy-launcher', require('./routes/scrcpyLauncher'));
 
 if (auth.LOCAL_ENABLED) require('./lib/userStore').ensureBootstrapAdmin();
 
@@ -81,6 +85,8 @@ require('./lib/knownDbUpdate').startScheduler();
 // Port-knocking daemon (docs/ROADMAP.md Phase 9) -- idle until an instance actually opts an
 // interface into knockRequiredHosts; see lib/fwknop.js for why this is safe to always run.
 require('./lib/fwknop').start();
+// A firewall rule for the "Test local scrcpy" port left behind by a process that died mid-test.
+require('./lib/scrcpyLauncherTest').getShared().removeLeftoverRule().catch(() => {});
 // Instances that kept running across this app's restart get their VA-API daemon and watchdogs
 // back (see reattachRunningInstances' own comment). Not awaited: the HTTP server is already up.
 require('./routes/instances').reattachRunningInstances().catch((e) => console.warn('reattachRunningInstances:', e.message));

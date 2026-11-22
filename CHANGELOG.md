@@ -27,6 +27,25 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
 
 ## [Unreleased]
 
+### Added
+
+- **Open an instance in scrcpy on your computer (📲), with a real test first.** A local launcher
+  (`launcher/linux/`, Linux only for now, installed per user without root, also served by the
+  forge at `/launcher/linux/`) handles `scrcpy-redroid://` links. A browser cannot tell whether a
+  URL scheme has a handler, so nothing is guessed from the user agent: the new **▶ Test local
+  scrcpy** button (Instances toolbar) proves the whole path -- the forge opens a temporary fake ADB
+  device (`REDROID_FORGE_LAUNCHER_TEST_PORT`, default 15599) plus, when it has iptables access, a
+  temporary firewall rule, and hands out a one-time code; the launcher connects with the local
+  `adb` and answers with it. Only then is the feature turned on, in that browser
+  (localStorage), and every running instance shows 📲. A failed test shows the install steps with
+  this forge's address filled in and a link to the guide (docs/HOWTO.md). The port and the rule
+  exist only while a test runs. The launcher only ever runs `adb connect` + scrcpy (or the test
+  echo) for a validated `host:port`, never options taken from the link; your own scrcpy flags
+  (e.g. `--hwdec=disabled`) go in `~/.config/redroid-forge-launcher/config`. Not offered on
+  Android/iOS. `POST /api/scrcpy-launcher/test`, `GET /api/scrcpy-launcher/test/:code`.
+- **The "Viewers" view can open the expanded viewer** (⛶) from each card; before, only the "Full"
+  view's rows had the button.
+
 ## [1.0.0-beta.4] - 2026-11-22
 
 ### Changed

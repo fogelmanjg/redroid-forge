@@ -1,0 +1,20 @@
+# redroid-forge scrcpy launcher -- your local settings.
+# Copied to ~/.config/redroid-forge-launcher/config by install.sh (only if you had none). It is a bash
+# file read by the launcher; only you can edit it, and the links clicked in the browser cannot.
+
+# Extra flags for every scrcpy the launcher opens. Examples:
+#   --hwdec=disabled     force software decode (some GPUs hang decoding hardware-encoded streams)
+#   --audio-codec=aac    or --no-audio, if audio gives you trouble
+#   --max-size=1600      cap the window resolution
+SCRCPY_ARGS=()
+
+# Only connect to these hosts (as they appear in the link, without the port). Empty = any host.
+# Example: ALLOWED_HOSTS=(forge.example.lan 100.64.0.10)
+ALLOWED_HOSTS=()
+
+# Binaries, if they are not the ones in your PATH.
+# SCRCPY=/usr/local/bin/scrcpy
+# ADB=/usr/bin/adb
+
+# Seconds to wait for `adb connect`.
+# CONNECT_TIMEOUT=10

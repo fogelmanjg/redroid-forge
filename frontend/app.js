@@ -1845,6 +1845,29 @@ async function loadInstances({ silent = false } = {}) {
         chip.title = lockedHint;
         return chip;
       };
+      // The expanded viewer button, shared by the "full" rows and the "viewers" cards (1.0.0-beta.5:
+      // the cards had no way to open it).
+      const buildExpandBtn = () => {
+        const expandBtn = document.createElement('button');
+        expandBtn.type = 'button';
+        expandBtn.className = 'icon-button';
+        expandBtn.textContent = '⛶';
+        expandBtn.title = t('instances.viewer.expandHint');
+        expandBtn.addEventListener('click', () => ViewerExpanded.open(inst.id));
+        return expandBtn;
+      };
+      // "Open in local scrcpy" (1.0.0-beta.5) -- only when this browser passed the launcher test and
+      // has it turned on (frontend/scrcpyLauncher.js), and only for a running instance. A plain link:
+      // the browser hands scrcpy-redroid:// to the local launcher.
+      const buildScrcpyBtn = () => {
+        if (!ScrcpyLauncher.isEnabled() || inst.status !== 'running') return null;
+        const a = document.createElement('a');
+        a.className = 'icon-button scrcpy-link';
+        a.href = ScrcpyLauncher.linkFor(inst);
+        a.textContent = '\u{1F4F2}'; // 📲
+        a.title = t('instances.viewer.scrcpyHint');
+        return a;
+      };
       const buildAddressSpan = (className) => {
         const address = `${location.hostname}:${inst.adbPort}`;
         const addrSpan = document.createElement('span');
@@ -1907,6 +1930,15 @@ async function loadInstances({ silent = false } = {}) {
           viewerWrap.className = 'instance-card-viewer';
           Viewer.mountPreview(viewerWrap, inst.id, effectiveViewersSize());
           card.appendChild(viewerWrap);
+        }
+
+        if (AuthUi.can('view')) {
+          const viewerButtons = document.createElement('div');
+          viewerButtons.className = 'instance-card-viewer-buttons';
+          viewerButtons.appendChild(buildExpandBtn());
+          const scrcpyBtn = buildScrcpyBtn();
+          if (scrcpyBtn) viewerButtons.appendChild(scrcpyBtn);
+          card.appendChild(viewerButtons);
         }
 
         const cardButtons = document.createElement('div');
@@ -2037,13 +2069,9 @@ async function loadInstances({ silent = false } = {}) {
 
         // "expanded viewer" (Hitos 3+4) -- a one-shot action, not a toggle: opening it does not turn
         // the live preview above on or off, and vice versa (independent, per the plan).
-        const expandBtn = document.createElement('button');
-        expandBtn.type = 'button';
-        expandBtn.className = 'icon-button';
-        expandBtn.textContent = '⛶'; // ⛶
-        expandBtn.title = t('instances.viewer.expandHint');
-        expandBtn.addEventListener('click', () => ViewerExpanded.open(inst.id));
-        viewerBtns.appendChild(expandBtn);
+        viewerBtns.appendChild(buildExpandBtn());
+        const scrcpyBtn = buildScrcpyBtn();
+        if (scrcpyBtn) viewerBtns.appendChild(scrcpyBtn);
 
         viewerCol.appendChild(viewerBtns);
 
@@ -3218,6 +3246,11 @@ async function loadDoctor() {
 }
 
 $('#btn-refresh-instances').addEventListener('click', loadInstances);
+ScrcpyLauncher.init({
+  button: $('#btn-scrcpy-launcher'),
+  dialogEl: $('#scrcpy-launcher-dialog'),
+  changed: () => loadInstances({ silent: true }),
+});
 $('#btn-refresh-modules').addEventListener('click', loadModules);
 $('#btn-refresh-user-modules').addEventListener('click', loadUserModulesTab);
 $('#btn-refresh-identities').addEventListener('click', loadIdentities);

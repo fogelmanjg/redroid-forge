@@ -1,0 +1,114 @@
+#!/bin/bash
+# redroid-forge local scrcpy launcher (Linux) -- the handler of scrcpy-redroid:// links.
+#
+# A page cannot run programs on your machine; this script is what your desktop runs when you click a
+# scrcpy-redroid:// link in redroid-forge (registered by install.sh as the x-scheme-handler). It only
+# ever does two fixed things, and validates every part of the link first -- a web page decides the
+# link, so nothing in it is ever passed to scrcpy or adb as a free argument:
+#
+#   scrcpy-redroid://connect/<host>:<port>/<title>  adb connect + scrcpy -s <host>:<port> (+ your config)
+#   scrcpy-redroid://test/<host>:<port>/<code>      adb connect + adb shell echo <code> <versions>, for
+#                                                  redroid-forge's "Test local scrcpy" button
+#
+# Your own settings (extra scrcpy flags, allowed hosts, binaries) go in
+# ~/.config/redroid-forge-launcher/config -- see config.example next to this script.
+# Log: ~/.cache/redroid-forge-launcher/launcher.log
+
+set -uo pipefail
+
+LAUNCHER_VERSION=1
+SCHEME=scrcpy-redroid
+
+CONFIG="${XDG_CONFIG_HOME:-$HOME/.config}/redroid-forge-launcher/config"
+LOG_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/redroid-forge-launcher"
+LOG="$LOG_DIR/launcher.log"
+mkdir -p "$LOG_DIR"
+
+# Defaults; the config file may override them.
+SCRCPY=scrcpy
+ADB=adb
+SCRCPY_ARGS=()
+ALLOWED_HOSTS=()      # empty = any host; otherwise only these (exact match, without the port)
+CONNECT_TIMEOUT=10
+# shellcheck source=/dev/null
+[ -f "$CONFIG" ] && . "$CONFIG"
+
+log() { printf '%s %s\n' "$(date '+%F %T')" "$*" >>"$LOG"; }
+
+notify() {   # $1 = title, $2 = body, $3 = icon (optional)
+    log "$1: $2"
+    if command -v notify-send >/dev/null 2>&1; then
+        notify-send -a "redroid-forge" ${3:+-i "$3"} "$1" "$2" 2>/dev/null || true
+    fi
+}
+
+fail() { notify "redroid-forge scrcpy launcher" "$1" dialog-error; exit 1; }
+
+# %XX decoding, for the title only (it is shown as the window title, nothing else).
+urldecode() { local s="${1//+/ }"; printf '%b' "${s//%/\\x}"; }
+
+valid_target() {   # host:port, host = DNS name, IPv4, or [IPv6]
+    local t="$1" host port
+    [[ "$t" =~ ^(\[[0-9A-Fa-f:.]+\]|[A-Za-z0-9]([A-Za-z0-9.-]{0,251}[A-Za-z0-9])?):([0-9]{1,5})$ ]] || return 1
+    host="${BASH_REMATCH[1]}"; port="${BASH_REMATCH[3]}"
+    [ "$port" -ge 1 ] && [ "$port" -le 65535 ] || return 1
+    if [ "${#ALLOWED_HOSTS[@]}" -gt 0 ]; then
+        local h ok=""
+        for h in "${ALLOWED_HOSTS[@]}"; do [ "$h" = "$host" ] && ok=1; done
+        [ -n "$ok" ] || return 2
+    fi
+    return 0
+}
+
+adb_connect() {   # $1 = host:port
+    local out
+    out=$(timeout "$CONNECT_TIMEOUT" "$ADB" connect "$1" 2>&1)
+    log "adb connect $1: $out"
+    [[ "$out" == *"connected to"* ]]
+}
+
+url="${1:-}"
+[ -n "$url" ] || fail "No link given. This program is run by your browser when you click a $SCHEME:// link."
+[[ "$url" == "$SCHEME://"* ]] || fail "Not a $SCHEME:// link: $url"
+log "link: $url"
+rest="${url#"$SCHEME://"}"
+rest="${rest%/}"                       # some browsers add a trailing slash
+action="${rest%%/*}"; rest="${rest#*/}"
+target="${rest%%/*}"
+arg=""; [[ "$rest" == */* ]] && arg="${rest#*/}"
+
+command -v "$ADB" >/dev/null 2>&1 || fail "adb is not installed (Debian: sudo apt install adb)."
+
+valid_target "$target"; rc=$?
+[ "$rc" -eq 2 ] && fail "$target is not in ALLOWED_HOSTS ($CONFIG)."
+[ "$rc" -eq 0 ] || fail "Invalid address in the link: $target"
+
+case "$action" in
+    test)
+        [[ "$arg" =~ ^[0-9a-f]{32}$ ]] || fail "Invalid test code in the link."
+        scrcpy_v=none
+        command -v "$SCRCPY" >/dev/null 2>&1 && scrcpy_v=$("$SCRCPY" --version 2>/dev/null | head -1 | awk '{print $2}')
+        adb_v=$("$ADB" version 2>/dev/null | awk 'NR==1{print $NF}')
+        adb_connect "$target" || fail "adb could not reach $target. Is that host reachable from this computer (network, VPN, firewall)? See $LOG."
+        out=$(timeout "$CONNECT_TIMEOUT" "$ADB" -s "$target" shell echo redroid-forge-launcher-test "$arg" "$LAUNCHER_VERSION" "${scrcpy_v:-unknown}" "${adb_v:-unknown}" 2>&1 | tr -d '\r')
+        log "test answer: $out"
+        "$ADB" disconnect "$target" >/dev/null 2>&1 || true
+        [ "$out" = ok ] || fail "redroid-forge did not accept the test ($out). Start the test again from the page."
+        if [ "$scrcpy_v" = none ]; then
+            notify "redroid-forge scrcpy launcher" "The launcher works, but scrcpy is not installed (Debian: sudo apt install scrcpy)." dialog-warning
+        else
+            notify "redroid-forge scrcpy launcher" "Test OK -- scrcpy $scrcpy_v. You can go back to the page." dialog-information
+        fi
+        ;;
+    connect)
+        command -v "$SCRCPY" >/dev/null 2>&1 || fail "scrcpy is not installed (Debian: sudo apt install scrcpy)."
+        title=$(urldecode "$arg" | tr -cd '[:print:]' | cut -c1-80)
+        [ -n "$title" ] || title="$target"
+        adb_connect "$target" || fail "adb could not connect to $target. Is the instance running and reachable from this computer? See $LOG."
+        log "scrcpy -s $target --window-title '$title' ${SCRCPY_ARGS[*]}"
+        exec "$SCRCPY" -s "$target" --window-title "$title" "${SCRCPY_ARGS[@]}" >>"$LOG" 2>&1
+        ;;
+    *)
+        fail "Unknown action in the link: $action"
+        ;;
+esac

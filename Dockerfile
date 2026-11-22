@@ -99,6 +99,7 @@ COPY backend/package.json backend/package-lock.json ./
 RUN npm install --omit=dev
 COPY backend ./
 COPY frontend ../frontend
+COPY launcher ../launcher
 COPY --from=ffmpeg-lgpl /opt/ffmpeg-lgpl/lib/*.so* /usr/lib/
 COPY --from=redroid-hwenc-daemon /tmp/redroid-hwenc/tier5-vaapi-daemon/daemon native/vaapi-daemon/daemon
 # Re-declared here (ARGs don't cross FROM boundaries) just to freeze it into an ENV --
