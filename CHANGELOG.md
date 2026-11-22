@@ -48,6 +48,16 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
   event stream: a start it did not ask for gets the same post-start steps as the start button,
   and a locked instance is stopped within seconds (2 s grace). Preventing such starts outright is
   planned for 1.0.1 or 1.1.
+- **Doctor: the known-combinations database checks for a newer one when you open it, with an
+  Update button.** It used to only repeat the last daily check and say "update it with POST
+  /api/db/update" -- there was no button anywhere. Now opening the Doctor asks GitHub right then
+  (same conditions as the daily check), and if a newer signed database is published the check
+  turns to warn with "Update to serial N", which downloads, verifies the signature and applies it.
+
+### Fixed
+
+- `POST /api/db/check` and `POST /api/db/update` were open to any logged-in user; they are admin
+  only now (applying replaces the database every instance's support level comes from).
 
 ### Changed
 

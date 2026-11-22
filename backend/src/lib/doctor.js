@@ -674,21 +674,32 @@ async function checkGrallocFix({ readFile = runtime.readFile, vendorOf = hwAccel
 // Known-combinations database (docs/KNOWN-COMBINATIONS.md). Informative: never
 // 'fail' because of age -- the app works the same without it, it just knows less
 // about which combinations are validated.
-function checkKnownDb() {
+// 1.0.0-beta.4: opening the Doctor checks GitHub for a newer database right then (when the
+// automatic check is on and this build has trusted keys -- the same conditions as the daily
+// check), instead of only reporting the last daily result; when one is published the check
+// carries `updateAvailable`/`remoteSerial` and the Doctor tab shows an Update button
+// (POST /api/db/update, admin only). Applying stays an explicit action, as designed.
+async function checkKnownDb({ runCheck = null } = {}) {
   const knownDbStore = require('./knownDbStore');
+  const updater = require('./knownDbUpdate');
   try {
     const cur = knownDbStore.loadCurrent();
     const s = knownDbStore.summarize(cur);
     const origen = s.source === 'snapshot' ? 'this version\'s snapshot' : 'downloaded database';
     const detail = `Database serial ${s.serial} (${s.generatedAt.slice(0, 10)}, ${origen}): ${s.counts.combinaciones} combination(s), ${s.counts.oficiales} validated by the project.`;
-    const last = require('./knownDbUpdate').getLastCheck();
-    const nueva = last && last.ok && last.disponible
-      ? ` A newer database is published (serial ${last.serialRemoto}): update it with POST /api/db/update.`
-      : '';
-    if (s.warnings.length) {
-      return { status: 'warn', detail: `${detail}${nueva} Warnings: ${s.warnings.join('; ')}` };
+    let last = updater.getLastCheck();
+    if (runCheck) {
+      last = await runCheck().catch(() => last); // injected (tests)
+    } else if (updater.getConfig().chequeoAutomatico && updater.loadTrustedKeys().length) {
+      last = await updater.runCheck().catch(() => last);
     }
-    return { status: 'ok', detail: `${detail}${nueva}` };
+    const available = !!(last && last.ok && last.disponible);
+    const nueva = available ? ` A newer database is published (serial ${last.serialRemoto}): use the Update button.` : '';
+    const extra = available ? { updateAvailable: true, remoteSerial: last.serialRemoto } : {};
+    if (s.warnings.length) {
+      return { status: 'warn', detail: `${detail}${nueva} Warnings: ${s.warnings.join('; ')}`, ...extra };
+    }
+    return { status: available ? 'warn' : 'ok', detail: `${detail}${nueva}`, ...extra };
   } catch (e) {
     return {
       status: 'warn',
@@ -745,7 +756,7 @@ function checkLockedInstances({ list = () => store.readAll() } = {}) {
 async function runAll() {
   const [
     dockerSocket, hwsim, imagePresence, hwAccelCheck, nvencCheck, venus3dCheck, grallocFix, fwknopCheck,
-    activeAdb, adbPortRange,
+    activeAdb, adbPortRange, knownDb,
   ] = await Promise.all([
     checkDockerSocket(),
     checkHwsim(),
@@ -757,6 +768,7 @@ async function runAll() {
     checkFwknop(),
     checkActiveVideoSessions(),
     checkAdbPortRange(),
+    checkKnownDb(),
   ]);
 
   const checks = [
@@ -771,7 +783,7 @@ async function runAll() {
     { id: 'hw-accel', label: 'HW acceleration (hwenc, VA-API)', ...hwAccelCheck },
     { id: 'hw-accel-nvenc', label: 'HW acceleration (nvenc, NVIDIA)', ...nvencCheck },
     { id: 'hw-accel-venus3d', label: 'HW acceleration (venus3d, NVIDIA 3D)', ...venus3dCheck },
-    { id: 'known-db', label: 'Known-combinations database', ...checkKnownDb() },
+    { id: 'known-db', label: 'Known-combinations database', ...knownDb },
     { id: 'fwknop', label: 'Port-knocking (fwknop)', ...fwknopCheck },
     { id: 'active-video-sessions', label: 'Active video sessions (scrcpy)', ...activeAdb },
     { id: 'adb-port-range', label: 'ADB port range availability', ...adbPortRange },

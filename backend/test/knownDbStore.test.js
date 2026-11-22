@@ -114,10 +114,21 @@ test('real snapshot: every ok validation carries reproducible checks', () => {
   }
 });
 
-test('doctor.checkKnownDb: ok on the real snapshot', () => {
-  const r = require('../src/lib/doctor').checkKnownDb();
+// The GitHub query is injected (never the network in tests). 1.0.0-beta.4: the Doctor checks for a
+// newer database when it runs, and flags it so the tab can show an Update button.
+test('doctor.checkKnownDb: ok on the real snapshot when no newer database is published', async () => {
+  const r = await require('../src/lib/doctor').checkKnownDb({ runCheck: async () => ({ ok: true, disponible: false }) });
   assert.strictEqual(r.status, 'ok');
   assert.match(r.detail, /serial/);
+  assert.strictEqual(r.updateAvailable, undefined);
+});
+
+test('doctor.checkKnownDb: a newer published database -> warn, updateAvailable + remoteSerial', async () => {
+  const r = await require('../src/lib/doctor').checkKnownDb({ runCheck: async () => ({ ok: true, disponible: true, serialRemoto: 999 }) });
+  assert.strictEqual(r.status, 'warn');
+  assert.strictEqual(r.updateAvailable, true);
+  assert.strictEqual(r.remoteSerial, 999);
+  assert.match(r.detail, /serial 999/);
 });
 
 // The route tests run WITHOUT trusted keys (an empty file) so that none of them
@@ -134,8 +145,11 @@ process.env.REDROID_FORGE_DB_TRUSTED_KEYS_FILE = NO_KEYS;
 // to the snapshot alone here, same as a brand new install with no cache yet.
 process.env.REDROID_FORGE_DB_CACHE_FILE = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'nodbcache-')), 'database.json');
 
-async function withServer(fn) {
+// `user`: what auth.attachUser would have set. POST /check and /update are admin only since
+// 1.0.0-beta.4, so the existing tests run as an admin; a test below covers the 403.
+async function withServer(fn, { user = { id: 'admin', role: 'admin' } } = {}) {
   const app = express();
+  app.use((req, res, next) => { req.user = user; next(); });
   app.use('/api/db', require('../src/routes/db'));
   const server = await new Promise((resolve) => { const s = app.listen(0, () => resolve(s)); });
   try { await fn(`http://127.0.0.1:${server.address().port}`); } finally { server.close(); }
@@ -187,4 +201,13 @@ test('GET /api/db includes the update state', async () => {
     assert.strictEqual(j.actualizacion.chequeoAutomatico, true);
     assert.match(j.actualizacion.urlBase, /redroid-forge-db/);
   });
+});
+
+test('POST /api/db/update and /check: admin only (403 for a non-admin user)', async () => {
+  await withServer(async (base) => {
+    for (const path of ['/api/db/update', '/api/db/check']) {
+      const r = await fetch(`${base}${path}`, { method: 'POST' });
+      assert.strictEqual(r.status, 403, path);
+    }
+  }, { user: { id: 'u1', role: 'operator' } });
 });

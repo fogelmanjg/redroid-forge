@@ -3189,6 +3189,27 @@ async function loadDoctor() {
         <p class="detail">${c.detail || ''}</p>
         ${c.fix ? `<pre>${c.fix.replace(/</g, '&lt;')}</pre>` : ''}
       `;
+      // Known-combinations database (1.0.0-beta.4): the check looks for a newer signed database
+      // when the Doctor runs; if there is one, offer to apply it right here (admin only on the
+      // backend -- a non-admin just gets the error message).
+      if (c.id === 'known-db' && c.updateAvailable) {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.textContent = t('doctor.knownDb.update', { serial: c.remoteSerial });
+        btn.addEventListener('click', async () => {
+          btn.disabled = true;
+          btn.textContent = t('doctor.knownDb.updating');
+          try {
+            const r = await api('/db/update', { method: 'POST' });
+            alert(t('doctor.knownDb.updated', { serial: r && r.serial != null ? r.serial : c.remoteSerial }));
+          } catch (e) {
+            alert(e.message);
+          }
+          loadDoctor();
+          loadInstances({ silent: true }); // support levels come from this database
+        });
+        li.appendChild(btn);
+      }
       list.appendChild(li);
     }
   } catch (e) {

@@ -1,6 +1,7 @@
 const express = require('express');
 const store = require('../lib/knownDbStore');
 const updater = require('../lib/knownDbUpdate');
+const permissions = require('../lib/permissions');
 
 const router = express.Router();
 
@@ -41,12 +42,16 @@ router.get('/combinaciones', (req, res) => {
 
 // Checks right now whether there is a newer database (it neither downloads nor applies).
 router.post('/check', async (req, res) => {
+  if (!permissions.canManageSettings(req.user)) return res.status(403).json({ error: 'Admin only' });
   const r = await updater.runCheck();
   res.status(r.ok ? 200 : 502).json(r);
 });
 
 // Downloads, verifies the signature and applies. Only on the user's action.
 router.post('/update', async (req, res) => {
+  // Admin only (1.0.0-beta.4): it replaces the database every instance's support level comes
+  // from -- it used to be open to any logged-in user.
+  if (!permissions.canManageSettings(req.user)) return res.status(403).json({ error: 'Admin only' });
   try {
     const { db } = store.loadCurrent();
     const cfg = updater.getConfig();
