@@ -27,6 +27,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
 
 ## [Unreleased]
 
+## [1.0.0-beta.3] - 2026-11-21
+
 ### Added
 
 - **Watchdogs can be turned on and off from the instance row.** A watchdog module's chip (cifi
