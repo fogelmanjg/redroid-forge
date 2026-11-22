@@ -36,6 +36,9 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
   scrcpy that exits with an error now gets the same error dialog as a failed `adb connect`, with
   scrcpy's own last error line -- before, the window just never appeared. Reinstall the launcher
   (same commands as the first time) to get it.
+- Opening an instance in local scrcpy (📲) left an empty tab behind in Firefox: the link is now
+  handed to the system the way "open in the app" pages do (a top-level navigation), not through a
+  link click.
 - **"Viewers" with 3 or 4 per row left the sides empty.** The page is capped at 960px; the grid
   split those same 960px among more columns. The viewers view now uses the whole window.
 - The live preview size slider ("Auto" per row) and the preview's centering had stopped applying

@@ -39,15 +39,14 @@ const ScrcpyLauncher = (() => {
     return `scrcpy-redroid://connect/${location.hostname}:${inst.adbPort}/${encodeURIComponent(inst.name || '')}`;
   }
 
-  // Gives a scrcpy-redroid:// URL to the OS's handler without navigating this page.
+  // Gives a scrcpy-redroid:// URL to the OS's handler. A top-level navigation to an external scheme
+  // (what "open in the app" pages do) is handed to the system handler and the page stays where it
+  // is. 22/11/2026: a programmatic click on a hidden <a> left an empty tab (only a title) behind in
+  // Firefox ESR every time scrcpy opened.
   function handOff(url) {
-    const a = document.createElement('a');
-    a.href = url;
-    a.style.display = 'none';
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
+    window.location.href = url;
   }
+
   // A short note on the page: it cannot know whether scrcpy connected (that happens between this
   // computer and the instance), so it says what is happening and where an error would show up.
   let toastTimer = null;
