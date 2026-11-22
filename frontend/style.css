@@ -47,6 +47,7 @@ nav { display: flex; gap: 0.5rem; }
 .tab-btn.active { background: var(--accent); color: #fff; border-color: var(--accent); }
 
 main { padding: 1rem 1.25rem; max-width: 960px; margin: 0 auto; }
+main.main-wide { max-width: none; }
 
 .tab { display: none; }
 .tab.active { display: block; }
@@ -257,7 +258,7 @@ tr.instance-row-secondary > td { padding-top: 0.2rem; }
 .instance-viewer-cell { width: 1%; white-space: nowrap; vertical-align: top; }
 .instance-viewer-col { display: flex; flex-direction: column; align-items: center; gap: 0.3rem; }
 .instance-viewer-col-btns { display: flex; gap: 0.3rem; }
-.viewer-live preview-wrap { display: flex; align-items: center; justify-content: center; }
+.viewer-preview-wrap { display: flex; align-items: center; justify-content: center; }
 .viewer-preview-img { max-width: 160px; max-height: 160px; border: 1px solid var(--border); border-radius: 4px; background: #000; }
 
 /* "expanded viewer" full-screen overlay (Hitos 3+4, frontend/viewerExpanded.js) -- a fixed full-
@@ -333,7 +334,7 @@ tr.instance-row-secondary > td { padding-top: 0.2rem; }
 
 /* "Visores" grid -- cards wrap left-to-right, as many per row as fit, then onto further rows,
    per the explicit ask ("se puedan ver varias una al lado de otra y varias filas si hace
-   falta"). --live preview-size (set by app.js from the slider above) sizes the CSS display AND is
+   falta"). --preview-size (set by app.js from the slider above) sizes the CSS display AND is
    sent to the backend as the actual capture target (screenshotCapture.js) -- not just a CSS
    stretch of a fixed small image, so this stays sharp across the slider's whole range. */
 .instances-grid { display: flex; flex-wrap: wrap; gap: 1rem; margin-top: 1rem; }
@@ -352,7 +353,7 @@ tr.instance-row-secondary > td { padding-top: 0.2rem; }
 .instance-card-address { font-family: monospace; font-size: 0.8rem; opacity: 0.8; cursor: pointer; border: 1px solid var(--border); border-radius: 4px; padding: 0.05rem 0.4rem; }
 .instance-card-address:hover { border-color: var(--accent); }
 .instance-card-buttons { display: flex; gap: 0.3rem; flex-wrap: wrap; justify-content: center; }
-.instances-grid .viewer-preview-img { max-width: none; max-height: none; width: var(--live preview-size, 200px); height: auto; }
+.instances-grid .viewer-preview-img { max-width: none; max-height: none; width: var(--preview-size, 200px); height: auto; }
 /* "Per row" = a fixed number of columns (1.0.0-beta.2): equal columns sharing the whole width,
    each preview filling its card instead of using the slider's size. `minmax(0, 1fr)`, not `1fr`,
    so a long instance name cannot force its column wider than the others. */
@@ -385,7 +386,6 @@ tr.instance-row-secondary > td { padding-top: 0.2rem; }
   text-decoration: none; color: inherit; line-height: 1.2;
 }
 .scrcpy-link:hover { border-color: var(--fg); }
-.instance-card-viewer-buttons { display: flex; gap: 0.3rem; justify-content: center; }
 #scrcpy-launcher-dialog { max-width: 560px; }
 #scrcpy-launcher-dialog h2 { margin: 0; }
 .scrcpy-launcher-status { font-weight: 600; margin: 0; }

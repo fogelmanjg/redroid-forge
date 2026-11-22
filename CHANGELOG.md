@@ -36,6 +36,17 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
   scrcpy that exits with an error now gets the same error dialog as a failed `adb connect`, with
   scrcpy's own last error line -- before, the window just never appeared. Reinstall the launcher
   (same commands as the first time) to get it.
+- **"Viewers" with 3 or 4 per row left the sides empty.** The page is capped at 960px; the grid
+  split those same 960px among more columns. The viewers view now uses the whole window.
+- The live preview size slider ("Auto" per row) and the preview's centering had stopped applying
+  since 1.0.0-beta.2: the terminology rename turned the CSS names `--ventanita-size` and
+  `viewer-ventanita-wrap` into invalid ones with a space. Now `--preview-size` and
+  `viewer-preview-wrap`.
+
+### Changed
+
+- In the "Viewers" cards, ⛶ and 📲 sit in the same row as start/stop/restart/delete/lock instead
+  of a row of their own.
 
 ## [1.0.0-beta.5] - 2026-11-22
 

@@ -275,11 +275,11 @@ $$('.view-mode-btn').forEach((btn) => {
 });
 const viewersSizeSlider = $('#viewers-size-slider');
 viewersSizeSlider.value = viewersSize;
-$('#instances-grid').style.setProperty('--live preview-size', `${viewersSize}px`);
+$('#instances-grid').style.setProperty('--preview-size', `${viewersSize}px`);
 viewersSizeSlider.addEventListener('input', () => {
   viewersSize = parseInt(viewersSizeSlider.value, 10);
   saveViewersSize(viewersSize);
-  $('#instances-grid').style.setProperty('--live preview-size', `${viewersSize}px`);
+  $('#instances-grid').style.setProperty('--preview-size', `${viewersSize}px`);
   // Live, while dragging -- every card's own session gets the new capture size right away
   // (next tick, see screenshotCapture.js's own comment), not just on the next full reload.
   if (instanceViewMode === 'viewers') Viewer.setSizeAll(effectiveViewersSize());
@@ -1747,6 +1747,9 @@ async function loadInstances({ silent = false } = {}) {
   table.hidden = isViewers;
   grid.hidden = !isViewers;
   $('#viewers-size-control').hidden = !isViewers;
+  // The page is capped at 960px for reading; the viewers grid gets the whole window (1.0.0-beta.6:
+  // with 3 or 4 per row it split those same 960px and left the sides empty).
+  document.querySelector('main').classList.toggle('main-wide', isViewers);
   const target = isViewers ? grid : tbody;
   if (!silent) target.innerHTML = isViewers ? `<p>${t('common.loading')}</p>` : `<tr><td>${t('common.loading')}</td></tr>`;
   try {
@@ -1944,17 +1947,15 @@ async function loadInstances({ silent = false } = {}) {
           card.appendChild(viewerWrap);
         }
 
-        if (AuthUi.can('view')) {
-          const viewerButtons = document.createElement('div');
-          viewerButtons.className = 'instance-card-viewer-buttons';
-          viewerButtons.appendChild(buildExpandBtn());
-          const scrcpyBtn = buildScrcpyBtn();
-          if (scrcpyBtn) viewerButtons.appendChild(scrcpyBtn);
-          card.appendChild(viewerButtons);
-        }
-
+        // ⛶ and 📲 in the same row as start/stop/restart/delete/lock (1.0.0-beta.6), not a row of
+        // their own under the preview.
         const cardButtons = document.createElement('div');
         cardButtons.className = 'instance-card-buttons';
+        if (AuthUi.can('view')) {
+          cardButtons.appendChild(buildExpandBtn());
+          const scrcpyBtn = buildScrcpyBtn();
+          if (scrcpyBtn) cardButtons.appendChild(scrcpyBtn);
+        }
         appendActionButtons(cardButtons);
         card.appendChild(cardButtons);
 
@@ -2092,7 +2093,7 @@ async function loadInstances({ silent = false } = {}) {
         // given) -- that's what lets the column stay narrow while the preview below it is free
         // to be full-size.
         const previewWrap = document.createElement('div');
-        previewWrap.className = 'viewer-live preview-wrap';
+        previewWrap.className = 'viewer-preview-wrap';
         if (isOn) Viewer.mountPreview(previewWrap, inst.id);
         viewerCol.appendChild(previewWrap);
 
