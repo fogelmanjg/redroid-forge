@@ -35,6 +35,16 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
   every instance for a few seconds. Before, the only way from the UI was changing the encode
   backend. `GET /api/settings/hwenc-daemon`, `POST /api/settings/hwenc-daemon/restart`.
 
+### Changed
+
+- **Doctor: "Active ADB connections" is now "Active video sessions (scrcpy)"** and actually means
+  it. The old check counted TCP connections to each instance's ADB port, which the host's shared
+  adb server (also used by this app for live previews and watchdogs) always held -- it warned for
+  every instance anyone had viewed. It now counts the scrcpy-server processes inside each running
+  instance and says who started them: this forge's expanded viewer, an external scrcpy client,
+  or a session that looks like an expanded viewer's but is not tracked by this app (flagged as
+  left behind, with a fix).
+
 ## [1.0.0-beta.3] - 2026-11-21
 
 ### Added

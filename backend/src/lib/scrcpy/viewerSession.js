@@ -28,6 +28,13 @@ const { socketName } = require('./protocol');
 const HOST = '127.0.0.1'; // docker-compose.yml: network_mode: host -- this reaches the
 // instance's published adbPort directly, no host.docker.internal needed (confirmed in Hito 1).
 
+// scids of the scrcpy-servers this backend launched and has not stopped yet (21/11/2026) --
+// Doctor's video-sessions check uses it to tell this forge's own expanded viewer sessions apart
+// from external scrcpy clients and from a session left behind (launched by an earlier run of
+// this backend, which lost track of it when it restarted).
+const activeScids = new Set();
+function activeServerScids() { return new Set(activeScids); }
+
 async function start(instance, { maxSize, maxFps, bitRate, audio = false, audioCodec, onVideoPacket, onAudioPacket, onError } = {}) {
   let localPort;
   let scid;
@@ -48,6 +55,7 @@ async function start(instance, { maxSize, maxFps, bitRate, audio = false, audioC
     // Not swallowed silently any more (21/11/2026): a scrcpy-server that survives its session
     // keeps encoding through the shared VA-API daemon with nobody watching -- worth a log line.
     if (scid) {
+      activeScids.delete(scid);
       try {
         const gone = await launchServer.killServer(instance.containerId, scid, launchedChild);
         if (!gone) console.warn(`[viewer] scrcpy-server ${scid} on instance ${instance.id} is still running after SIGKILL`);
@@ -75,6 +83,7 @@ async function start(instance, { maxSize, maxFps, bitRate, audio = false, audioC
     const launched = await launchServer.launch(instance.containerId, HOST, instance.adbPort, { maxSize, maxFps, bitRate, audio, audioCodec });
     scid = launched.scid;
     launchedChild = launched.child;
+    activeScids.add(scid);
 
     localPort = await forward.allocateLocalPort();
     await forward.addForward(HOST, instance.adbPort, localPort, socketName(scid));
@@ -100,4 +109,4 @@ async function start(instance, { maxSize, maxFps, bitRate, audio = false, audioC
   }
 }
 
-module.exports = { start };
+module.exports = { start, activeServerScids };

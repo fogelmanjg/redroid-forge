@@ -476,42 +476,74 @@ async function checkFwknop() {
   return base;
 }
 
-// Heads-up only, never a blocker (14/11/2026) -- there is no way to tell from the host side
-// whether an established ADB connection is just a shell, `adb logcat`, or scrcpy actually
-// pulling video through the hwenc daemon (ADB multiplexes everything over one connection, no
-// separate port to tell them apart). Whoever reads this already knows what they are about to do
-// (recreate the redroid-forge container itself -- e.g. to change REDROID_HWENC_VERSION, or any
-// other image rebuild) is the only context that makes this worth a warning at all; nothing here
-// can act on it (the backend has no way to see its own container get replaced from the outside).
-async function checkActiveAdbConnections({ exec = execFileAsync, list = () => store.readAll() } = {}) {
-  const byPort = new Map(list().filter((i) => i.adbPort).map((i) => [String(i.adbPort), i]));
-  if (byPort.size === 0) return { status: 'ok', detail: 'There are no instances to check.' };
-
-  let stdout;
-  try {
-    ({ stdout } = await exec('ss', ['-Htn', 'state', 'established']));
-  } catch (e) {
-    return { status: 'ok', detail: `Could not list active connections (${e.message}) -- "ss" not available, nothing to warn about.` };
+// Active video sessions (rewritten 21/11/2026, 1.0.0-beta.4). It used to count established TCP
+// connections to each instance's ADB port, which in practice always warned: the host's single
+// shared adb server (the one this app itself uses for the live preview, watchdogs, etc.) keeps a
+// connection to every instance it has talked to, so it measured "adb knows this instance", not
+// "someone is watching it". Now it looks where the answer actually is: the scrcpy-server
+// processes running INSIDE each instance, classified by who started them --
+//   - this forge's expanded viewer: launched by this backend and still tracked
+//     (scrcpy/viewerSession.js's activeServerScids);
+//   - left behind: launched the way this backend launches them (`cleanup=false`) but not tracked
+//     by it -- a teardown that failed, or another forge on the same host; it may be encoding for
+//     nobody. (Not from a backend restart: checked live, restarting the app container ends the
+//     `adb shell` that holds the session, and Android ends the server with it.)
+//   - external: anything else (desktop scrcpy, a phone/tablet scrcpy app).
+// Still a heads-up (warn), never a blocker: what it is for is knowing, before rebuilding or
+// recreating this app's container (which briefly drops the hwenc daemon), who would notice.
+// Computed when the Doctor tab runs, like every other check.
+function classifyScrcpyServers(psOutput, ownScids) {
+  const out = { expanded: 0, leftBehind: 0, external: 0 };
+  for (const line of String(psOutput || '').split('\n')) {
+    if (!/^\s*app_process\b.*com\.genymobile\.scrcpy\.Server/.test(line)) continue;
+    const scid = (/\bscid=([0-9a-f]+)/.exec(line) || [])[1];
+    if (scid && ownScids.has(scid)) out.expanded++;
+    else if (/\bcleanup=false\b/.test(line)) out.leftBehind++;
+    else out.external++;
   }
+  return out;
+}
 
-  const hit = new Map();
-  for (const line of stdout.split('\n')) {
-    const cols = line.trim().split(/\s+/);
-    if (cols.length < 3) continue;
-    const localPort = cols[2].split(':').pop();
-    if (byPort.has(localPort)) hit.set(localPort, byPort.get(localPort));
+async function checkActiveVideoSessions({
+  list = () => store.readAll(),
+  isRunning = async (inst) => (await runtime.inspect(inst.containerId)).State.Status === 'running',
+  psScrcpy = (inst) => runtime.exec(inst.containerId, ['sh', '-c', 'ps -A -o ARGS | grep "[c]om.genymobile.scrcpy.Server" || true']),
+  ownScids = () => require('./scrcpy/viewerSession').activeServerScids(),
+} = {}) {
+  const instances = list().filter((i) => i.containerId);
+  if (instances.length === 0) return { status: 'ok', detail: 'There are no instances to check.' };
+  const own = ownScids();
+  const parts = [];
+  let leftBehindTotal = 0;
+  for (const inst of instances) {
+    let running = false;
+    try { running = await isRunning(inst); } catch { running = false; }
+    if (!running) continue;
+    let ps;
+    try { ps = await psScrcpy(inst); } catch (e) { parts.push(`${inst.name}: could not check (${e.message})`); continue; }
+    const c = classifyScrcpyServers(ps, own);
+    const total = c.expanded + c.leftBehind + c.external;
+    if (total === 0) continue;
+    const kinds = [];
+    if (c.expanded) kinds.push(`${c.expanded} expanded viewer`);
+    if (c.external) kinds.push(`${c.external} external scrcpy`);
+    if (c.leftBehind) kinds.push(`${c.leftBehind} LEFT BEHIND`);
+    leftBehindTotal += c.leftBehind;
+    parts.push(`${inst.name}: ${total} (${kinds.join(', ')})`);
   }
-
-  if (hit.size === 0) return { status: 'ok', detail: 'No instance currently has an established ADB connection.' };
-
-  const names = [...hit.values()].map((i) => i.name).join(', ');
-  return {
+  if (parts.length === 0) return { status: 'ok', detail: 'No instance has a video session (scrcpy) right now.' };
+  const result = {
     status: 'warn',
-    detail: `${hit.size} instance(s) with an active ADB connection right now: ${names}. Could just be a shell or `
-      + 'logcat -- but if it is scrcpy, recreating the redroid-forge container (rebuilding the image, e.g. for a '
-      + 'REDROID_HWENC_VERSION change) briefly drops the hwenc daemon and may glitch or interrupt the mirroring '
-      + 'for a moment. Worth a look before rebuilding/recreating the container.',
+    detail: `Video sessions right now -- ${parts.join('; ')}. Rebuilding or recreating the redroid-forge container `
+      + 'briefly drops the hwenc daemon and interrupts them; worth a look before doing it.',
   };
+  if (leftBehindTotal > 0) {
+    result.detail += ` ${leftBehindTotal} session(s) look like an expanded viewer session this app is not tracking `
+      + '(a teardown that failed, or another forge on this host): they may keep encoding for nobody.';
+    result.fix = 'If no other forge on this host is showing that instance, restarting the instance ends the left-behind '
+      + 'session.';
+  }
+  return result;
 }
 
 async function checkImagesPresent() {
@@ -712,7 +744,7 @@ async function runAll() {
     checkVenus3d(),
     checkGrallocFix().catch((e) => [{ id: 'redroid-gralloc-fix', label: 'Known redroid bug: gralloc crash on 10-bit formats', status: 'warn', detail: `could not be checked: ${e.message}` }]),
     checkFwknop(),
-    checkActiveAdbConnections(),
+    checkActiveVideoSessions(),
     checkAdbPortRange(),
   ]);
 
@@ -730,7 +762,7 @@ async function runAll() {
     { id: 'hw-accel-venus3d', label: 'HW acceleration (venus3d, NVIDIA 3D)', ...venus3dCheck },
     { id: 'known-db', label: 'Known-combinations database', ...checkKnownDb() },
     { id: 'fwknop', label: 'Port-knocking (fwknop)', ...fwknopCheck },
-    { id: 'active-adb-connections', label: 'Active ADB connections (possible scrcpy)', ...activeAdb },
+    { id: 'active-video-sessions', label: 'Active video sessions (scrcpy)', ...activeAdb },
     { id: 'adb-port-range', label: 'ADB port range availability', ...adbPortRange },
     ...imagePresence,
     ...grallocFix,
@@ -740,4 +772,4 @@ async function runAll() {
   return checks;
 }
 
-module.exports = { runAll, checkKnownDb, checkGrallocFix, checkActiveAdbConnections, checkAdbPortRange };
+module.exports = { runAll, checkKnownDb, checkGrallocFix, checkActiveVideoSessions, classifyScrcpyServers, checkAdbPortRange };
