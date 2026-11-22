@@ -110,9 +110,13 @@ test('legacyDevicesParam: what it declares is exactly what nextFreeSlot can then
   const present = new Set(legacyDevicesParam(5).split(',').map((n) => `/dev/${n}`));
   const exists = (p) => present.has(p);
   // Slots 1..4 exist and slot 0 is the fallback; with slot 0 reserved (Waydroid) and 1..4 used there is none left.
+  // Hermetic (22/11/2026): an empty store and accessible nodes -- it used to read the real store, and failed as
+  // soon as the dev host had an instance on slot 3 or 4.
   const taken = [1, 2, 3, 4];
-  assert.throws(() => nextFreeSlot({ legacy: true, exists, reserved: [0, ...taken] }), /no free slot/);
-  assert.strictEqual(nextFreeSlot({ legacy: true, exists, reserved: [0, 1, 2, 3] }), 4);
+  withInstances([], () => {
+    assert.throws(() => nextFreeSlot({ legacy: true, exists, accessible: () => true, reserved: [0, ...taken] }), /no free slot/);
+    assert.strictEqual(nextFreeSlot({ legacy: true, exists, accessible: () => true, reserved: [0, 1, 2, 3] }), 4);
+  });
 });
 
 test('legacyDevicesParam: rejects a slot count that makes no sense', () => {
