@@ -17,6 +17,9 @@ MIME=x-scheme-handler/scrcpy-redroid
 
 if [ "${1:-}" = --uninstall ]; then
     rm -f "$BIN_DIR/scrcpy-redroid-launcher" "$APP_DIR/$DESKTOP"
+    # The default xdg-mime wrote at install time, or it keeps pointing at the deleted .desktop.
+    MIMEAPPS="${XDG_CONFIG_HOME:-$HOME/.config}/mimeapps.list"
+    [ -f "$MIMEAPPS" ] && sed -i "\#^$MIME=$DESKTOP;\?\$#d" "$MIMEAPPS"
     command -v update-desktop-database >/dev/null 2>&1 && update-desktop-database "$APP_DIR" 2>/dev/null || true
     echo "Uninstalled. Your config in $CONF_DIR was kept (delete it by hand if you want)."
     echo "Remember to turn the launcher off in redroid-forge (it cannot tell by itself)."
