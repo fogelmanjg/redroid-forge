@@ -27,6 +27,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
 
 ## [Unreleased]
 
+## [1.0.0-beta.6] - 2026-11-22
+
 ### Fixed
 
 - **Local scrcpy (📲) did not open on most instances.** scrcpy asks for Opus audio by default, and
