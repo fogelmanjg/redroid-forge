@@ -27,12 +27,21 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
 
 ## [Unreleased]
 
+## [1.0.0-beta.4] - 2026-11-22
+
 ### Changed
 
 - The hwenc daemon is now built from **redroid-hwenc v0.4.0** (`REDROID_HWENC_VERSION`). The daemon
   itself is unchanged from v0.3.0; the release's Android 11-13 (HIDL) component now sends a
   per-session `stream_id` too, so two viewers of the same Android 11 instance get one encoder each
   -- point `REDROID_HWENC_ARTIFACTS_DIR` at the v0.4.0 artifacts and recreate those instances.
+- **Doctor: "Active ADB connections" is now "Active video sessions (scrcpy)"** and actually means
+  it. The old check counted TCP connections to each instance's ADB port, which the host's shared
+  adb server (also used by this app for live previews and watchdogs) always held -- it warned for
+  every instance anyone had viewed. It now counts the scrcpy-server processes inside each running
+  instance and says who started them: this forge's expanded viewer, an external scrcpy client,
+  or a session that looks like an expanded viewer's but is not tracked by this app (flagged as
+  left behind, with a fix).
 
 ### Added
 
@@ -65,16 +74,6 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
 
 - `POST /api/db/check` and `POST /api/db/update` were open to any logged-in user; they are admin
   only now (applying replaces the database every instance's support level comes from).
-
-### Changed
-
-- **Doctor: "Active ADB connections" is now "Active video sessions (scrcpy)"** and actually means
-  it. The old check counted TCP connections to each instance's ADB port, which the host's shared
-  adb server (also used by this app for live previews and watchdogs) always held -- it warned for
-  every instance anyone had viewed. It now counts the scrcpy-server processes inside each running
-  instance and says who started them: this forge's expanded viewer, an external scrcpy client,
-  or a session that looks like an expanded viewer's but is not tracked by this app (flagged as
-  left behind, with a fix).
 
 ## [1.0.0-beta.3] - 2026-11-21
 
