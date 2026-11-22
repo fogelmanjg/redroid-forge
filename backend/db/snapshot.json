@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "serial": 10,
-  "generatedAt": "2026-11-17T12:51:01Z",
+  "serial": 11,
+  "generatedAt": "2026-11-22T02:15:39Z",
   "minForgeVersion": "0.1.0",
   "bases": [
     {
@@ -691,6 +691,139 @@
       ]
     },
     {
+      "id": "redroid15-gapps-hwenc-armtranslation-aurorastore",
+      "base": "redroid-15-2025-06-27",
+      "gapps": "gapps-sdk35-r09-x86_64",
+      "magisk": null,
+      "modulos": {
+        "redroid-gralloc-fix": 3,
+        "hwenc": 10,
+        "gapps": 3,
+        "arm-translation": 3,
+        "aurora-store": 2
+      },
+      "soporte": "oficial",
+      "validaciones": [
+        {
+          "hardware": {
+            "vendor": "amd",
+            "gpu": "AMD Radeon Graphics (Cezanne, integrated -- Ryzen 7 5700G)",
+            "driver": "radeonsi"
+          },
+          "fecha": "2026-11-17",
+          "forgeVersion": "0.10.0",
+          "resultado": "ok",
+          "chequeos": [
+            {
+              "id": "produccion.estabilidad",
+              "resultado": "ok",
+              "detalle": "two real instances (cifi, cifi-nuevo) running this exact combination in redroid-forge-prod, both pinned to the same 2 physical cores; 4+ days of uptime with no crash or restart before the full jg-dashboard migration started"
+            },
+            {
+              "id": "produccion.fluidez-bajo-carga",
+              "resultado": "ok",
+              "detalle": "live scrcpy (real video) plus the built-in preview watched simultaneously on the typical heaviest in-game scene, both instances concurrently: no visible stutter, despite the pair of cores measuring 96-97% busy (mpstat) at the time"
+            },
+            {
+              "id": "hwenc.ahorro-cpu",
+              "resultado": "ok",
+              "detalle": "switching from software to hardware encode (this combination's hwenc module) measured as freeing ~40% of one core per instance -- the actual bottleneck for this specific game is its own CPU-bound logic (Unity's engine), not the encode"
+            }
+          ],
+          "notas": "Not a dedicated test campaign like the hwenc/gapps entries above -- real production use of the exact combination behind the jg-dashboard -> redroid-forge-prod migration (see project memory, 17/11/2026). The user module `cifi` (the per-instance watchdog) is deliberately left out of `modulos`: user modules are excluded from the known-combinations signature by design (see MODULE-AUTHORING.md's esModuloDeUsuario), not because it was absent on the real instances -- both cifi and cifi-nuevo actually run it."
+        },
+        {
+          "hardware": {
+            "vendor": "amd",
+            "gpu": "AMD Radeon Graphics (Cezanne, integrated -- Ryzen 7 5700G)",
+            "driver": "radeonsi"
+          },
+          "fecha": "2026-11-21",
+          "forgeVersion": "1.0.0-beta.3",
+          "resultado": "ok",
+          "chequeos": [
+            {
+              "id": "hwenc.daemon-sin-fuga",
+              "resultado": "ok",
+              "detalle": "redroid-forge-prod updated to the hwenc daemon of redroid-hwenc v0.3.0: the shared VA-API daemon stays flat (~55-60 MB) under real encode instead of growing ~27 KB per frame (it used to reach 3-4.5 GB in 12-17 h on this host)"
+            },
+            {
+              "id": "hwenc.un-encoder-por-stream",
+              "resultado": "ok",
+              "detalle": "two viewers of the same instance at once (scrcpy plus the built-in expanded viewer): the daemon log on prod shows one encoder slot per stream (distinct stream_id values from the instance's Codec2 process, after the instance was recreated to pick up the new component) -- no black/frozen video from crossed P-frame references"
+            },
+            {
+              "id": "produccion.reattach",
+              "resultado": "ok",
+              "detalle": "updating the app (1.0.0-beta.2 -> beta.3) with both instances left running: the hwenc daemon and the cifi watchdogs came back on their own at app start, no instance restarted"
+            }
+          ],
+          "notas": "Second validation of the same combination: what changed underneath (hwenc daemon v0.3.0 and its Android component with stream_id) on the same production host and the same two real instances. Module manifest versions are unchanged."
+        }
+      ],
+      "problemasConocidos": []
+    },
+    {
+      "id": "redroid15-gapps-hwenc-armtranslation-wifiinterno",
+      "base": "redroid-15-2025-06-27",
+      "gapps": "gapps-sdk35-r09-x86_64",
+      "magisk": null,
+      "modulos": {
+        "redroid-gralloc-fix": 3,
+        "gapps": 3,
+        "arm-translation": 3,
+        "wifi-interno": 2,
+        "hwenc": 10
+      },
+      "soporte": "oficial",
+      "validaciones": [
+        {
+          "hardware": {
+            "vendor": "amd",
+            "gpu": "AMD Radeon Graphics (Cezanne, integrated -- Ryzen 7 5700G)",
+            "driver": "radeonsi"
+          },
+          "fecha": "2026-11-21",
+          "forgeVersion": "1.0.0-beta.3",
+          "resultado": "ok",
+          "chequeos": [
+            {
+              "id": "migracion.data-desde-jg-dashboard",
+              "resultado": "ok",
+              "detalle": "a real Android 15 instance's /data (19.2 GB) copied from jg-dashboard (its custom image had GApps, ndk_translation, Magisk and the fake WiFi built in) into a new instance with this combination on redroid-forge-prod: all 30 user apps present, same Google account, same GMS/GSF Android ID (4361639805900567970), the same per-app Settings.Secure ANDROID_ID values"
+            },
+            {
+              "id": "gapps.play-store",
+              "resultado": "ok",
+              "detalle": "Play Store opens signed in and loads its content; GMS 26.45.31"
+            },
+            {
+              "id": "arm-translation.juego-real",
+              "resultado": "ok",
+              "detalle": "an ARM-only Unity game (Hero Wars, com.nexters.herowars) launches and loads with its player id, i.e. the account's progress"
+            },
+            {
+              "id": "wifi-interno.conectado",
+              "resultado": "ok",
+              "detalle": "after one restart of the instance: connected to 'jg-wifi', default network active, DNS resolves (see problemasConocidos for the first boot)"
+            },
+            {
+              "id": "hwenc.encode-real",
+              "resultado": "ok",
+              "detalle": "hardware H.264 through the shared VA-API daemon (redroid-hwenc v0.3.0) with this instance's stream_id"
+            }
+          ],
+          "notas": "Validated by migrating a real instance rather than with a dedicated test campaign. The user then keeps it in a 48 h trial for the Google side (identity/certification of the migrated device), which is about the migration, not about this module combination."
+        }
+      ],
+      "problemasConocidos": [
+        {
+          "id": "wifi-interno.primer-arranque",
+          "detalle": "the fake WiFi does not connect on the instance's very first boot after creation (the interface swap happens but the connection stays DISCONNECTED, no default network, DNS fails). Restarting the instance once fixes it for good. Same behaviour as the jg-dashboard fake WiFi this module was ported from."
+        }
+      ]
+    },
+    {
       "id": "redroid15-gapps",
       "base": "redroid-15-2025-06-27",
       "gapps": "gapps-sdk35-r09-x86_64",
@@ -963,51 +1096,6 @@
           "descripcion": "hwsim radios are claimed from a host-wide shared pool. Concurrent instances are coordinated within redroid-forge, but not against other, separate projects on the same host also using hwsim (e.g. jg-dashboard) -- that cross-project race is a known, deferred issue."
         }
       ]
-    },
-    {
-      "id": "redroid15-gapps-hwenc-armtranslation-aurorastore",
-      "base": "redroid-15-2025-06-27",
-      "gapps": "gapps-sdk35-r09-x86_64",
-      "magisk": null,
-      "modulos": {
-        "redroid-gralloc-fix": 3,
-        "hwenc": 10,
-        "gapps": 3,
-        "arm-translation": 3,
-        "aurora-store": 2
-      },
-      "soporte": "oficial",
-      "validaciones": [
-        {
-          "hardware": {
-            "vendor": "amd",
-            "gpu": "AMD Radeon Graphics (Cezanne, integrated -- Ryzen 7 5700G)",
-            "driver": "radeonsi"
-          },
-          "fecha": "2026-11-17",
-          "forgeVersion": "0.10.0",
-          "resultado": "ok",
-          "chequeos": [
-            {
-              "id": "produccion.estabilidad",
-              "resultado": "ok",
-              "detalle": "two real instances (cifi, cifi-nuevo) running this exact combination in redroid-forge-prod, both pinned to the same 2 physical cores; 4+ days of uptime with no crash or restart before the full jg-dashboard migration started"
-            },
-            {
-              "id": "produccion.fluidez-bajo-carga",
-              "resultado": "ok",
-              "detalle": "live scrcpy (real video) plus the built-in preview watched simultaneously on the typical heaviest in-game scene, both instances concurrently: no visible stutter, despite the pair of cores measuring 96-97% busy (mpstat) at the time"
-            },
-            {
-              "id": "hwenc.ahorro-cpu",
-              "resultado": "ok",
-              "detalle": "switching from software to hardware encode (this combination's hwenc module) measured as freeing ~40% of one core per instance -- the actual bottleneck for this specific game is its own CPU-bound logic (Unity's engine), not the encode"
-            }
-          ],
-          "notas": "Not a dedicated test campaign like the hwenc/gapps entries above -- real production use of the exact combination behind the jg-dashboard -> redroid-forge-prod migration (see project memory, 17/11/2026). The user module `cifi` (the per-instance watchdog) is deliberately left out of `modulos`: user modules are excluded from the known-combinations signature by design (see MODULE-AUTHORING.md's esModuloDeUsuario), not because it was absent on the real instances -- both cifi and cifi-nuevo actually run it."
-        }
-      ],
-      "problemasConocidos": []
     }
   ]
 }
