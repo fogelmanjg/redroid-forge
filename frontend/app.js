@@ -2384,6 +2384,53 @@ function renderAppBindHostsList(currentHosts, ifaces) {
   updateExclusivity();
 }
 
+// Shared hwenc daemon: state line + manual restart (1.0.0-beta.4). Admin only on the backend; a
+// non-admin just gets the 403 and the row stays hidden.
+function formatDuration(ms) {
+  const m = Math.floor(ms / 60000);
+  if (m < 60) return `${m} min`;
+  const h = Math.floor(m / 60);
+  return h < 24 ? `${h} h ${m % 60} min` : `${Math.floor(h / 24)} d ${h % 24} h`;
+}
+
+async function loadHwencDaemonStatus() {
+  const row = $('.hwenc-daemon-row');
+  const line = $('#settings-hwenc-daemon-status');
+  const btn = $('#settings-hwenc-daemon-restart');
+  try {
+    const st = await api('/settings/hwenc-daemon');
+    row.hidden = false;
+    if (st.adopted) {
+      line.textContent = t('settings.hwencDaemon.adopted', { socket: st.socketPath });
+      btn.disabled = true;
+    } else if (!st.running) {
+      line.textContent = t('settings.hwencDaemon.notRunning');
+      btn.disabled = false;
+    } else {
+      line.textContent = t('settings.hwencDaemon.running', {
+        uptime: st.startedAt ? formatDuration(Date.now() - new Date(st.startedAt).getTime()) : '?',
+        rss: st.rssKb != null ? `${Math.round(st.rssKb / 1024)} MB` : '?',
+      });
+      btn.disabled = false;
+    }
+  } catch (e) {
+    row.hidden = true;
+  }
+}
+
+$('#settings-hwenc-daemon-restart').addEventListener('click', async () => {
+  if (!confirm(t('settings.hwencDaemon.confirm'))) return;
+  const btn = $('#settings-hwenc-daemon-restart');
+  btn.disabled = true;
+  $('#settings-hwenc-daemon-status').textContent = t('settings.hwencDaemon.restarting');
+  try {
+    await api('/settings/hwenc-daemon/restart', { method: 'POST' });
+  } catch (e) {
+    alert(e.message);
+  }
+  loadHwencDaemonStatus();
+});
+
 async function loadSettings() {
   try {
     const settings = await api('/settings');
@@ -2400,6 +2447,7 @@ async function loadSettings() {
     $('#settings-encode-backend').value = settings.encodeBackend || '';
     $('#settings-adb-port-start').value = settings.adbPortStart || '';
     $('#settings-adb-port-end').value = settings.adbPortEnd || '';
+    loadHwencDaemonStatus();
   } catch (e) {
     alert(e.message);
   }

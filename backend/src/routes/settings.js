@@ -35,6 +35,31 @@ router.get('/adb-port-range-check', async (req, res) => {
 // Admin only (docs/ROADMAP.md Phase 7) -- this changes where every instance's backups land,
 // which interfaces are offered at all, and (appBindHosts) this app's OWN listen addresses -- none
 // of it scoped to any one instance's ownership.
+// Shared hwenc (VA-API) daemon: state + a manual restart (21/11/2026, 1.0.0-beta.4). Until now
+// the only way to relaunch it from the UI was changing the encode backend; restarting it by hand
+// (killing the process) was a routine fix while its memory leak existed. Admin only, like every
+// other host-wide setting here: a restart cuts hardware encode for EVERY instance on this host
+// for a few seconds (the same blip as the daemon's own crash-restart supervisor).
+router.get('/hwenc-daemon', async (req, res) => {
+  if (!permissions.canManageSettings(req.user)) return res.status(403).json({ error: 'Admin only' });
+  res.json(await hwAccel.daemonStatus());
+});
+
+router.post('/hwenc-daemon/restart', async (req, res) => {
+  if (!permissions.canManageSettings(req.user)) return res.status(403).json({ error: 'Admin only' });
+  const before = await hwAccel.daemonStatus();
+  if (before.adopted) {
+    // Another forge on this host owns it (same socket path): killing it is not this forge's call.
+    return res.status(409).json({ error: `The VA-API daemon at ${before.socketPath} belongs to another forge on this host -- restart it from there` });
+  }
+  try {
+    await hwAccel.restartDaemonWithCurrentSettings();
+    res.json(await hwAccel.daemonStatus());
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 router.put('/', async (req, res) => {
   if (!permissions.canManageSettings(req.user)) return res.status(403).json({ error: 'Admin only' });
   const {

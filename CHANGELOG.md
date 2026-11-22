@@ -27,6 +27,14 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
 
 ## [Unreleased]
 
+### Added
+
+- **Settings > hwenc: the shared daemon's state and a "Restart daemon" button** (admin only).
+  Shows whether the VA-API daemon runs, for how long and how much RAM it uses (or that another
+  forge on the host owns it), and restarts it with a confirmation -- it cuts hardware encode on
+  every instance for a few seconds. Before, the only way from the UI was changing the encode
+  backend. `GET /api/settings/hwenc-daemon`, `POST /api/settings/hwenc-daemon/restart`.
+
 ## [1.0.0-beta.3] - 2026-11-21
 
 ### Added

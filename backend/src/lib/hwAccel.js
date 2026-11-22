@@ -75,6 +75,31 @@ function stopDaemon() {
 // process's VA-API context were still open while the new one opens its own. A timeout fallback
 // (it still tries to start the new daemon even if the old one does not exit in time) matches this
 // function's own "never throws, a manual restart still applies it" contract.
+// State of the shared VA-API daemon for the Settings tab (21/11/2026, 1.0.0-beta.4): whether it
+// runs, whether THIS forge manages it or adopted another forge's (same socket path), since when,
+// and its resident memory (read from /proc -- the app shares the host's PID namespace, see
+// docker-compose.yml's `pid: host`). Never throws: anything unreadable is just null.
+async function daemonStatus() {
+  const own = daemonProcess !== null && !daemonProcess.killed;
+  let rssKb = null;
+  if (own && daemonProcess.pid) {
+    try {
+      const m = /VmRSS:\s+(\d+)/.exec(fs.readFileSync(`/proc/${daemonProcess.pid}/status`, 'utf-8'));
+      if (m) rssKb = Number(m[1]);
+    } catch { /* gone between the check and the read: report what we have */ }
+  }
+  const adopted = !own && await socketAnswers();
+  return {
+    running: own ? isDaemonAlive() : adopted,
+    managedHere: own,
+    adopted,
+    pid: own ? daemonProcess.pid : null,
+    startedAt: own && daemonStartedAt ? new Date(daemonStartedAt).toISOString() : null,
+    rssKb,
+    socketPath: SOCKET_PATH,
+  };
+}
+
 async function restartDaemonWithCurrentSettings() {
   const old = daemonProcess;
   daemonWanted = false;
@@ -292,6 +317,6 @@ function queryHwdecCaps({ socketPath = SOCKET_PATH, timeoutMs = 3000 } = {}) {
 module.exports = {
   detectGpuVendor, encodeSupported, ensureDaemonRunning, stopDaemon, restartDaemonWithCurrentSettings,
   nextRestartDelay, daemonBind, queryHwdecCaps, parseHwdecCaps,
-  HWDEC_COMPONENTS, VAAPI_ROOT, SOCKET_PATH, INSTANCE_VAAPI_DIR, socketAnswers,
+  HWDEC_COMPONENTS, VAAPI_ROOT, SOCKET_PATH, INSTANCE_VAAPI_DIR, socketAnswers, daemonStatus,
   isAmdPolarisFamily, encodeBackendRisk, effectiveEncodeBackend,
 };

@@ -369,3 +369,7 @@ tr.instance-row-secondary > td { padding-top: 0.2rem; }
 .instance-minimal-address { font-family: monospace; font-size: 0.85rem; opacity: 0.85; cursor: pointer; border: 1px solid var(--border); border-radius: 4px; padding: 0.05rem 0.4rem; }
 .instance-minimal-address:hover { border-color: var(--accent); }
 .instance-minimal-buttons { display: flex; gap: 0.3rem; margin-left: auto; flex-wrap: wrap; }
+
+/* Settings > hwenc: shared daemon state + restart (1.0.0-beta.4). */
+.hwenc-daemon-row { display: flex; align-items: center; gap: 0.8rem; flex-wrap: wrap; }
+.hwenc-daemon-row[hidden] { display: none; }

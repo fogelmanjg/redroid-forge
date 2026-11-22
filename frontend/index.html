@@ -133,6 +133,10 @@ gunzip -c image.tar.gz | docker load</pre>
             </select>
           </label>
           <p class="muted" data-i18n="settings.encodeBackend.restartHint"></p>
+          <div class="hwenc-daemon-row">
+            <span id="settings-hwenc-daemon-status" class="muted"></span>
+            <button type="button" id="settings-hwenc-daemon-restart" data-i18n="settings.hwencDaemon.restart">Restart daemon</button>
+          </div>
         </fieldset>
         <fieldset class="display-fields" style="grid-template-columns: 1fr 1fr;">
           <legend data-i18n="settings.adbPortRange.legend">ADB port range</legend>
