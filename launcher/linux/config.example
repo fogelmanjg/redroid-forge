@@ -4,7 +4,8 @@
 
 # Extra flags for every scrcpy the launcher opens. Examples:
 #   --hwdec=disabled     force software decode (some GPUs hang decoding hardware-encoded streams)
-#   --audio-codec=aac    or --no-audio, if audio gives you trouble
+#   --no-audio           no sound at all (the launcher otherwise adds --audio-codec=aac by itself:
+#                        redroid images have no Opus encoder, scrcpy's default)
 #   --max-size=1600      cap the window resolution
 SCRCPY_ARGS=()
 

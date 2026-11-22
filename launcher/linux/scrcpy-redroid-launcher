@@ -16,7 +16,7 @@
 
 set -uo pipefail
 
-LAUNCHER_VERSION=2
+LAUNCHER_VERSION=3
 SCHEME=scrcpy-redroid
 
 CONFIG="${XDG_CONFIG_HOME:-$HOME/.config}/redroid-forge-launcher/config"
@@ -121,8 +121,28 @@ case "$action" in
         title=$(urldecode "$arg" | tr -cd '[:print:]' | cut -c1-80)
         [ -n "$title" ] || title="$target"
         adb_connect "$target" || fail "adb could not connect to $target. Is the instance running and reachable from this computer? See $LOG."
-        log "scrcpy -s $target --window-title '$title' ${SCRCPY_ARGS[*]}"
-        exec "$SCRCPY" -s "$target" --window-title "$title" "${SCRCPY_ARGS[@]}" >>"$LOG" 2>&1
+        # Audio: redroid's Android images ship no Opus ENCODER, and Opus is scrcpy's default -- the
+        # server dies on the audio thread and takes the video down with it (found live 22/11/2026 on
+        # 3 of 4 instances). AAC works on every image tried; added unless your config already picks
+        # an audio codec or turns audio off.
+        args=("${SCRCPY_ARGS[@]}")
+        case " ${args[*]} " in
+            *" --audio-codec="*|*" --no-audio "*|*" --audio-source="*) ;;
+            *) args=(--audio-codec=aac "${args[@]}") ;;
+        esac
+        log "scrcpy -s $target --window-title '$title' ${args[*]}"
+        # Not exec'd any more (22/11/2026): if scrcpy fails -- or the session ends in an error -- the
+        # page cannot know, so the launcher shows it, with scrcpy's own last error line.
+        start=$(date +%s)
+        tmp=$(mktemp)
+        "$SCRCPY" -s "$target" --window-title "$title" "${args[@]}" >"$tmp" 2>&1
+        rc=$?
+        cat "$tmp" >>"$LOG"
+        last_err=$(grep -E 'ERROR|WARN: Device disconnected' "$tmp" | grep -v 'icon' | tail -1)
+        rm -f "$tmp"
+        log "scrcpy exited with $rc after $(( $(date +%s) - start )) s"
+        [ "$rc" -eq 0 ] || fail "scrcpy for $title ($target) closed with an error.
+${last_err:-(no error line; see the log)}"
         ;;
     *)
         fail "Unknown action in the link: $action"

@@ -27,6 +27,16 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
 
 ## [Unreleased]
 
+### Fixed
+
+- **Local scrcpy (📲) did not open on most instances.** scrcpy asks for Opus audio by default, and
+  redroid's Android images have no Opus encoder: the scrcpy server died on its audio thread and
+  took the video with it, on 3 of 4 instances tried. The launcher (v3) now adds
+  `--audio-codec=aac` unless your config already chooses an audio codec or `--no-audio`. And a
+  scrcpy that exits with an error now gets the same error dialog as a failed `adb connect`, with
+  scrcpy's own last error line -- before, the window just never appeared. Reinstall the launcher
+  (same commands as the first time) to get it.
+
 ## [1.0.0-beta.5] - 2026-11-22
 
 ### Added
