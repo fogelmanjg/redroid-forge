@@ -47,7 +47,7 @@ RUN curl -sL https://ffmpeg.org/releases/ffmpeg-${FFMPEG_VERSION}.tar.xz | tar x
 # that repo is pulled in.
 FROM node:22-alpine AS redroid-hwenc-daemon
 RUN apk add --no-cache git build-base libva-dev mesa-dev libdrm-dev vulkan-headers pkgconf
-ARG REDROID_HWENC_VERSION=v0.3.0
+ARG REDROID_HWENC_VERSION=v0.4.0
 RUN git clone --depth 1 --branch ${REDROID_HWENC_VERSION} \
       https://github.com/fogelmanjg/redroid-hwenc.git /tmp/redroid-hwenc
 COPY --from=ffmpeg-lgpl /opt/ffmpeg-lgpl/lib/*.so* /usr/lib/
@@ -104,7 +104,7 @@ COPY --from=redroid-hwenc-daemon /tmp/redroid-hwenc/tier5-vaapi-daemon/daemon na
 # Re-declared here (ARGs don't cross FROM boundaries) just to freeze it into an ENV --
 # Doctor reads this at runtime to show which redroid-hwenc tag is actually running,
 # since a build ARG alone is invisible once the image exists.
-ARG REDROID_HWENC_VERSION=v0.3.0
+ARG REDROID_HWENC_VERSION=v0.4.0
 ENV REDROID_FORGE_HWENC_DAEMON_VERSION=$REDROID_HWENC_VERSION
 
 ENV PORT=8080

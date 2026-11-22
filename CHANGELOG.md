@@ -27,6 +27,13 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
 
 ## [Unreleased]
 
+### Changed
+
+- The hwenc daemon is now built from **redroid-hwenc v0.4.0** (`REDROID_HWENC_VERSION`). The daemon
+  itself is unchanged from v0.3.0; the release's Android 11-13 (HIDL) component now sends a
+  per-session `stream_id` too, so two viewers of the same Android 11 instance get one encoder each
+  -- point `REDROID_HWENC_ARTIFACTS_DIR` at the v0.4.0 artifacts and recreate those instances.
+
 ### Added
 
 - **Settings > hwenc: the shared daemon's state and a "Restart daemon" button** (admin only).

@@ -12,7 +12,7 @@ services:
         # own .env, independently of every other host -- e.g. a GPU this project already has
         # working stays on the known-good tag while another host tries a newer one, with a plain
         # rebuild as the rollback if that one turns out to regress something.
-        REDROID_HWENC_VERSION: ${REDROID_HWENC_VERSION:-v0.3.0}
+        REDROID_HWENC_VERSION: ${REDROID_HWENC_VERSION:-v0.4.0}
     container_name: ${CONTAINER_NAME:-redroid-forge}
     privileged: true
     pid: host
