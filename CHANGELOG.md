@@ -27,6 +27,22 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
 
 ## [Unreleased]
 
+### Added
+
+- **Watchdogs can be turned on and off from the instance row.** A watchdog module's chip (cifi
+  today) shows its real state -- `cifi ● on` / `cifi ○ off` -- and clicking it opens a small
+  panel with the last pass (time, OK or the error) and an on/off button (`configure` permission).
+  Turning it on restarts the watchdog from zero and runs one pass right away instead of waiting a
+  whole interval. The pause/resume API existed already; the UI had no way to reach it, so the
+  only choices were accepting the contract or removing the module. `GET /api/instances` now
+  carries each instance's `watchdogs` state.
+
+### Fixed
+
+- Turning a watchdog on stored the choice by deleting its key, which made the next recompute of
+  the instance's modules (any recreate) treat it as new and re-pause it for modules that start
+  paused by default; it is an explicit `false` now.
+
 ## [1.0.0-beta.2] - 2026-11-21
 
 ### Added

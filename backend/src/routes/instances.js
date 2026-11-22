@@ -268,6 +268,12 @@ router.get('/', async (req, res) => {
   // only see their own instances"), not just blocked from acting on it.
   const all = permissions.visibleInstances(req.user, store.readAll());
   const withStatus = await Promise.all(all.map(withRuntimeStatus));
+  // Watchdog state per instance (21/11/2026) -- in-memory and cheap, so the UI's module chips can
+  // show "cifi ● on / ○ off" and the last pass without one extra request per row.
+  for (const inst of withStatus) {
+    const watchdogs = moduleScheduler.status(inst.id, requiredModuleIdsFor(inst));
+    if (watchdogs.length) inst.watchdogs = watchdogs;
+  }
   res.json(await instanceSupport.attachSupport(withStatus));
 });
 
@@ -1106,7 +1112,10 @@ function watchdogPauseRoute(paused) {
     if (!moduleRunner.watchdogModules(ids).some((m) => m.id === req.params.moduleId)) {
       return res.status(404).json({ error: `This instance has no watchdog module "${req.params.moduleId}"` });
     }
-    (paused ? moduleScheduler.pause : moduleScheduler.resume)(instance.id, req.params.moduleId);
+    // Turning ON restarts the watchdog from zero and runs one pass right away (resumeNow);
+    // turning OFF just pauses it (the timer keeps firing but skips, see moduleScheduler.tick).
+    if (paused) moduleScheduler.pause(instance.id, req.params.moduleId);
+    else moduleScheduler.resumeNow(instance.id, req.params.moduleId);
     res.json(moduleScheduler.status(instance.id, ids).find((w) => w.moduleId === req.params.moduleId));
   };
 }

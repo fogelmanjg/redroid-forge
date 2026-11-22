@@ -180,6 +180,17 @@ header nav { flex: 1; }
 .resource-chip:hover { border-color: var(--accent); }
 .resource-chip-warn { border-color: var(--warn); color: var(--warn); }
 .modules-cell-chips { display: flex; flex-wrap: wrap; gap: 0.2rem; max-width: 16rem; }
+/* Watchdog modules' on/off chip + its panel (1.0.0-beta.3). */
+.watchdog-chip { cursor: pointer; }
+.watchdog-chip.watchdog-on { border-color: var(--ok, #2e9d5b); color: var(--ok, #2e9d5b); }
+.watchdog-chip.watchdog-off { opacity: 0.75; }
+.watchdog-panel {
+  flex-basis: 100%; margin-top: 0.3rem; padding: 0.5rem 0.6rem; font-size: 0.8rem;
+  border: 1px solid var(--border); border-radius: 6px; background: rgba(127,127,127,0.06);
+  display: flex; flex-direction: column; gap: 0.35rem; align-items: flex-start;
+}
+.watchdog-panel-state { font-weight: 600; }
+.watchdog-panel-error { color: var(--warn); }
 .modules-cell-chips .resource-chip { cursor: default; margin: 0; }
 .modules-cell-chips .resource-chip:hover { border-color: var(--border); }
 

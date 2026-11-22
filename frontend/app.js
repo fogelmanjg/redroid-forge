@@ -1241,13 +1241,82 @@ function buildModulesCell(inst) {
     wrap.classList.add('muted');
     return wrap;
   }
+  const watchdogs = new Map((inst.watchdogs || []).map((w) => [w.moduleId, w]));
   for (const id of ids) {
+    const wd = watchdogs.get(id);
+    if (wd) { wrap.appendChild(buildWatchdogChip(inst, wd)); continue; }
     const chip = document.createElement('span');
     chip.className = 'resource-chip';
     chip.textContent = id;
     wrap.appendChild(chip);
   }
+  const openWd = openWatchdogKey && openWatchdogKey.startsWith(`${inst.id}:`)
+    ? watchdogs.get(openWatchdogKey.slice(inst.id.length + 1)) : null;
+  if (openWd) wrap.appendChild(buildWatchdogPanel(inst, openWd));
   return wrap;
+}
+
+// Watchdog modules (stage 7: cifi today) get a live on/off chip instead of a plain id
+// (21/11/2026, asked by the user: "no tengo control real, y debería"). The backend already had
+// pause/resume per instance; there was no way to reach it from the UI. Clicking the chip opens a
+// small panel under the module chips with the last pass and an on/off button. Turning it on
+// restarts the watchdog from zero and runs one pass right away (backend: resumeNow).
+// `openWatchdogKey` = "<instanceId>:<moduleId>", kept across the table's periodic re-renders.
+let openWatchdogKey = null;
+
+function buildWatchdogChip(inst, wd) {
+  const chip = document.createElement('span');
+  chip.className = `resource-chip watchdog-chip ${wd.paused ? 'watchdog-off' : 'watchdog-on'}`;
+  chip.textContent = `${wd.moduleId} ${wd.paused ? '○ off' : '● on'}`;
+  chip.title = t('instances.watchdog.chipHint');
+  chip.tabIndex = 0;
+  const key = `${inst.id}:${wd.moduleId}`;
+  const toggle = () => { openWatchdogKey = openWatchdogKey === key ? null : key; loadInstances({ silent: true }); };
+  chip.addEventListener('click', toggle);
+  chip.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); } });
+  return chip;
+}
+
+function describeWatchdogLastPass(wd) {
+  if (!wd.running) return t('instances.watchdog.notRunning');
+  if (!wd.lastRunAt) return t('instances.watchdog.noPassYet', { minutes: Math.round(wd.intervalMs / 60000) });
+  const when = new Date(wd.lastRunAt).toLocaleTimeString();
+  return wd.lastOk
+    ? t('instances.watchdog.lastPassOk', { time: when })
+    : t('instances.watchdog.lastPassError', { time: when, error: wd.lastError || '?' });
+}
+
+function buildWatchdogPanel(inst, wd) {
+  const panel = document.createElement('div');
+  panel.className = 'watchdog-panel';
+  const state = document.createElement('div');
+  state.className = 'watchdog-panel-state';
+  state.textContent = wd.paused ? t('instances.watchdog.stateOff') : t('instances.watchdog.stateOn', { minutes: Math.round(wd.intervalMs / 60000) });
+  panel.appendChild(state);
+  const last = document.createElement('div');
+  last.className = `watchdog-panel-last${wd.lastOk === false ? ' watchdog-panel-error' : ''}`;
+  last.textContent = describeWatchdogLastPass(wd);
+  panel.appendChild(last);
+  if (AuthUi.can('configure')) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.textContent = wd.paused ? t('instances.watchdog.turnOn') : t('instances.watchdog.turnOff');
+    btn.addEventListener('click', async () => {
+      btn.disabled = true;
+      try {
+        await api(`/instances/${encodeURIComponent(inst.id)}/watchdogs/${encodeURIComponent(wd.moduleId)}/${wd.paused ? 'resume' : 'pause'}`, { method: 'POST' });
+        await loadInstances({ silent: true });
+        // Turning on runs one pass right away; it takes a few seconds (open the app + taps), so
+        // refresh once more to show its result without waiting for the next background poll.
+        if (wd.paused) setTimeout(() => loadInstances({ silent: true }), 8000);
+      } catch (e) {
+        alert(e.message);
+        btn.disabled = false;
+      }
+    });
+    panel.appendChild(btn);
+  }
+  return panel;
 }
 
 // `inst.soporte` comes straight from the backend (GET /api/instances already attaches it per

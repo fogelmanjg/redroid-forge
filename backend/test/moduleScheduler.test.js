@@ -149,6 +149,43 @@ test('moduleScheduler.start: scheduling again restarts the timer from zero', (t)
   assert.equal(requireFixtureEntry(root, id).calls.length, 1);
 }));
 
+// 21/11/2026: turning a watchdog on from the UI.
+test('moduleScheduler.resumeNow: resumes, runs one pass right away and restarts the timer from zero', (t) => withWatchdogFixture({
+  intervalMs: 1000,
+  entryBody: `
+    module.exports.calls = [];
+    module.exports.runTick = async () => { module.exports.calls.push(1); };
+  `,
+}, async ({ root, id, fakeStore }) => {
+  fakeStore.set('inst-1', { id: 'inst-1', watchdogPaused: { [id]: true } });
+  t.mock.timers.enable({ apis: ['setInterval'] });
+  scheduler.start('inst-1', 'container-1', [id]);
+  t.mock.timers.tick(900);
+  await new Promise((r) => setTimeout(r, 0));
+  assert.equal(requireFixtureEntry(root, id).calls.length, 0, 'paused: nothing ran');
+
+  assert.equal(scheduler.resumeNow('inst-1', id), true);
+  await new Promise((r) => setTimeout(r, 0));
+  assert.equal(requireFixtureEntry(root, id).calls.length, 1, 'one immediate pass');
+  assert.equal(fakeStore.get('inst-1').watchdogPaused[id], false, 'stored as an explicit false, not a deleted key');
+
+  t.mock.timers.tick(200); // 1100 ms since start(), only 200 since resumeNow()
+  await new Promise((r) => setTimeout(r, 0));
+  assert.equal(requireFixtureEntry(root, id).calls.length, 1, 'the old cycle is gone');
+  t.mock.timers.tick(800);
+  await new Promise((r) => setTimeout(r, 0));
+  assert.equal(requireFixtureEntry(root, id).calls.length, 2, 'next pass one full interval after turning on');
+}));
+
+test('moduleScheduler.resumeNow: an instance that is not running just gets the resume persisted', (t) => withWatchdogFixture({
+  intervalMs: 1000,
+  entryBody: 'module.exports.runTick = async () => {};',
+}, async ({ id, fakeStore }) => {
+  fakeStore.set('inst-2', { id: 'inst-2', watchdogPaused: { [id]: true } });
+  assert.equal(scheduler.resumeNow('inst-2', id), false);
+  assert.equal(fakeStore.get('inst-2').watchdogPaused[id], false);
+}));
+
 test('moduleScheduler.pause: the timer keeps firing but the module is not actually invoked while paused', (t) => withWatchdogFixture({
   intervalMs: 1000,
   entryBody: `

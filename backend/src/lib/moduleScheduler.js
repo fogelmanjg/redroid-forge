@@ -22,8 +22,10 @@ function setPaused(instanceId, moduleId, paused) {
   const instance = store.get(instanceId);
   if (!instance) throw Object.assign(new Error('Instance not found'), { httpStatus: 404 });
   const watchdogPaused = { ...(instance.watchdogPaused || {}) };
-  if (paused) watchdogPaused[moduleId] = true;
-  else delete watchdogPaused[moduleId];
+  // false, not a deleted key (21/11/2026): defaultPauseForNewModules treats a module with NO key
+  // as "never seen", and would re-pause a watchdog the user had explicitly turned on the next
+  // time the instance's modules were recomputed (e.g. any recreate through /display).
+  watchdogPaused[moduleId] = !!paused;
   return store.upsert({ ...instance, watchdogPaused });
 }
 
@@ -42,6 +44,21 @@ async function tick(instanceId, containerId, manifest, entry) {
 // get a timer. Called right after a container starts (same point as
 // scheduleRuntimeFixups, stage 6) -- never awaited by the caller, scheduling
 // itself is synchronous and the first tick only fires after intervalMs.
+function newEntry(instanceId, containerId, manifest) {
+  const entry = {
+    containerId, intervalMs: manifest.schedule.intervalMs, lastRunAt: null, lastOk: null, lastError: null,
+  };
+  entry.timer = setInterval(() => {
+    tick(instanceId, containerId, manifest, entry).catch((e) => {
+      // tick() itself does not throw (moduleRunner.runTick already catches), this is
+      // only a last-resort net for a bug in tick()'s own bookkeeping -- a module
+      // misbehaving is already reflected in entry.lastError without reaching here.
+      log(`unexpected error ticking "${manifest.id}" for ${instanceId}: ${e.message}`);
+    });
+  }, manifest.schedule.intervalMs);
+  return entry;
+}
+
 function start(instanceId, containerId, requiredModuleIds) {
   const modules = moduleRunner.watchdogModules(requiredModuleIds);
   if (modules.length === 0) return;
@@ -64,18 +81,7 @@ function start(instanceId, containerId, requiredModuleIds) {
         log(`"${manifest.id}" for ${instanceId} was scheduled against container ${String(existing.containerId).slice(0, 12)}; rescheduling against ${String(containerId).slice(0, 12)}`);
       }
     }
-    const entry = {
-      containerId, intervalMs: manifest.schedule.intervalMs, lastRunAt: null, lastOk: null, lastError: null,
-    };
-    entry.timer = setInterval(() => {
-      tick(instanceId, containerId, manifest, entry).catch((e) => {
-        // tick() itself does not throw (moduleRunner.runTick already catches), this is
-        // only a last-resort net for a bug in tick()'s own bookkeeping -- a module
-        // misbehaving is already reflected in entry.lastError without reaching here.
-        log(`unexpected error ticking "${manifest.id}" for ${instanceId}: ${e.message}`);
-      });
-    }, manifest.schedule.intervalMs);
-    perInstance.set(manifest.id, entry);
+    perInstance.set(manifest.id, newEntry(instanceId, containerId, manifest));
     log(`scheduled "${manifest.id}" for ${instanceId} every ${manifest.schedule.intervalMs}ms`);
   }
 }
@@ -115,6 +121,28 @@ function status(instanceId, requiredModuleIds) {
 function pause(instanceId, moduleId) { return setPaused(instanceId, moduleId, true); }
 function resume(instanceId, moduleId) { return setPaused(instanceId, moduleId, false); }
 
+// Turning a watchdog ON from the UI (21/11/2026, asked by the user): resume, restart its timer
+// from zero, and run one pass right away instead of waiting a whole interval to find out whether
+// it works. The immediate pass is not awaited (a cifi pass can take several seconds: am start +
+// taps); its result shows up in status() as soon as it finishes. If the instance is not running
+// there is no timer to restart -- the resume alone is persisted and applies on the next start.
+function resumeNow(instanceId, moduleId) {
+  resume(instanceId, moduleId);
+  const perInstance = scheduled.get(instanceId);
+  const old = perInstance && perInstance.get(moduleId);
+  if (!old) return false;
+  const manifest = moduleRunner.watchdogModules([moduleId]).find((m) => m.id === moduleId);
+  if (!manifest) return false;
+  clearInterval(old.timer);
+  const entry = newEntry(instanceId, old.containerId, manifest);
+  perInstance.set(moduleId, entry);
+  tick(instanceId, old.containerId, manifest, entry).catch((e) => {
+    log(`immediate pass of "${moduleId}" for ${instanceId} failed unexpectedly: ${e.message}`);
+  });
+  log(`"${moduleId}" for ${instanceId} turned on: timer restarted, immediate pass running`);
+  return true;
+}
+
 // A watchdog's own tap sequence (e.g. cifi's startGame/automation/continueBtn) assumes a
 // KNOWN state after reopening the app -- it has no way to recognize a screen it has never seen
 // before. A brand new install can hit a one-time first-run gate (e.g. a ToS/Privacy Policy
@@ -152,5 +180,5 @@ function defaultPauseForNewModules(existingPaused, requiredModuleIds) {
 function _resetForTests() { for (const id of Array.from(scheduled.keys())) stop(id); }
 
 module.exports = {
-  start, stop, status, pause, resume, isPaused, defaultPauseForNewModules, _resetForTests,
+  start, stop, status, pause, resume, resumeNow, isPaused, defaultPauseForNewModules, _resetForTests,
 };
