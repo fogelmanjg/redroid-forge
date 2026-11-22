@@ -48,7 +48,27 @@ const ScrcpyLauncher = (() => {
     a.click();
     a.remove();
   }
-  function open(inst) { handOff(linkFor(inst)); }
+  // A short note on the page: it cannot know whether scrcpy connected (that happens between this
+  // computer and the instance), so it says what is happening and where an error would show up.
+  let toastTimer = null;
+  function toast(text) {
+    let el = document.getElementById('scrcpy-launcher-toast');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'scrcpy-launcher-toast';
+      el.className = 'scrcpy-launcher-toast';
+      el.setAttribute('role', 'status');
+      document.body.appendChild(el);
+    }
+    el.textContent = text;
+    el.hidden = false;
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => { el.hidden = true; }, 6000);
+  }
+  function open(inst) {
+    handOff(linkFor(inst));
+    toast(t('scrcpyLauncher.opening', { name: inst.name }));
+  }
 
   function guideUrl() { return GUIDE[I18n.lang] || GUIDE.en; }
 

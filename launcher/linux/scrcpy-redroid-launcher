@@ -16,7 +16,7 @@
 
 set -uo pipefail
 
-LAUNCHER_VERSION=1
+LAUNCHER_VERSION=2
 SCHEME=scrcpy-redroid
 
 CONFIG="${XDG_CONFIG_HOME:-$HOME/.config}/redroid-forge-launcher/config"
@@ -42,7 +42,23 @@ notify() {   # $1 = title, $2 = body, $3 = icon (optional)
     fi
 }
 
-fail() { notify "redroid-forge scrcpy launcher" "$1" dialog-error; exit 1; }
+# Errors get a real dialog you have to close (22/11/2026: a desktop notification lasts a few seconds and
+# was easy to miss -- and the page cannot tell whether scrcpy connected). Falls back to a notification
+# when there is no dialog tool. Runs in the background so it never holds the launcher open.
+fail() {
+    log "ERROR: $1"
+    local title="redroid-forge scrcpy launcher" body="$1
+
+Log: $LOG"
+    if command -v kdialog >/dev/null 2>&1; then
+        kdialog --title "$title" --error "$body" >/dev/null 2>&1 &
+    elif command -v zenity >/dev/null 2>&1; then
+        zenity --error --title="$title" --text="$body" --no-markup >/dev/null 2>&1 &
+    else
+        notify "$title" "$1" dialog-error
+    fi
+    exit 1
+}
 
 # %XX decoding, for the title only (it is shown as the window title, nothing else).
 urldecode() { local s="${1//+/ }"; printf '%b' "${s//%/\\x}"; }
