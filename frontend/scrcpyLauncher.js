@@ -39,6 +39,17 @@ const ScrcpyLauncher = (() => {
     return `scrcpy-redroid://connect/${location.hostname}:${inst.adbPort}/${encodeURIComponent(inst.name || '')}`;
   }
 
+  // Gives a scrcpy-redroid:// URL to the OS's handler without navigating this page.
+  function handOff(url) {
+    const a = document.createElement('a');
+    a.href = url;
+    a.style.display = 'none';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  }
+  function open(inst) { handOff(linkFor(inst)); }
+
   function guideUrl() { return GUIDE[I18n.lang] || GUIDE.en; }
 
   // --- toolbar button + dialog ---
@@ -108,11 +119,7 @@ const ScrcpyLauncher = (() => {
     detailEl.textContent = t('scrcpyLauncher.result.waitingDetail');
     // A link click, not location.assign: if no handler exists most browsers just do nothing (or show
     // their own "no application" notice) instead of navigating away from the page.
-    const a = document.createElement('a');
-    a.href = `scrcpy-redroid://test/${location.hostname}:${started.port}/${started.code}`;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
+    handOff(`scrcpy-redroid://test/${location.hostname}:${started.port}/${started.code}`);
 
     const deadline = Date.now() + Math.min(WAIT_MS, started.expiresInMs || WAIT_MS);
     let r = { state: 'pending' };
@@ -182,5 +189,5 @@ const ScrcpyLauncher = (() => {
     renderButton();
   }
 
-  return { init, isEnabled, linkFor };
+  return { init, isEnabled, linkFor, open };
 })();

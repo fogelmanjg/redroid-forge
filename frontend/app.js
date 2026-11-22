@@ -1861,12 +1861,24 @@ async function loadInstances({ silent = false } = {}) {
       // the browser hands scrcpy-redroid:// to the local launcher.
       const buildScrcpyBtn = () => {
         if (!ScrcpyLauncher.isEnabled() || inst.status !== 'running') return null;
-        const a = document.createElement('a');
-        a.className = 'icon-button scrcpy-link';
-        a.href = ScrcpyLauncher.linkFor(inst);
-        a.textContent = '\u{1F4F2}'; // 📲
-        a.title = t('instances.viewer.scrcpyHint');
-        return a;
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'icon-button scrcpy-link';
+        btn.textContent = '\u{1F4F2}'; // 📲
+        // Found live 22/11/2026: an instance published only on 127.0.0.1 (no network interface turned
+        // on) cannot be reached from any other computer -- the launcher could only fail. Shown
+        // disabled with the reason instead of hidden, so it is clear why.
+        const exposed = (inst.bindHosts || []).some((h) => h !== '127.0.0.1' && h !== '::1' && h !== 'localhost');
+        if (!exposed) {
+          btn.disabled = true;
+          btn.title = t('instances.viewer.scrcpyNotExposed');
+          return btn;
+        }
+        btn.title = t('instances.viewer.scrcpyHint');
+        // Same hand-off as the launcher test (a programmatic link click), not a visible <a>: a real
+        // link click opened an empty tab showing the scrcpy-redroid:// URL in Firefox.
+        btn.addEventListener('click', () => ScrcpyLauncher.open(inst));
+        return btn;
       };
       const buildAddressSpan = (className) => {
         const address = `${location.hostname}:${inst.adbPort}`;
