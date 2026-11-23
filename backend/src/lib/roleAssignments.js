@@ -98,11 +98,21 @@ function deleteAssignment(externalId, file = STORE_FILE) {
 // -> 'admin' | 'operator' | 'viewer' | null (null = no access yet, pending admin approval).
 // Pure lookup, no side effect -- upsertSeen is the only thing that creates/refreshes a row, kept
 // as a separate call so that merely checking a role never has the side effect of creating one.
+// 1.0.0-beta.8: same as userStore.revokeSessions, for an OIDC identity.
+function revokeSessions(externalId, file = STORE_FILE) {
+  const all = readJsonArray(file);
+  const a = all.find((x) => x.externalId === externalId);
+  if (!a) return;
+  a.sessionsValidAfter = Date.now();
+  writeJsonArray(file, all);
+}
+
 function resolveRole(externalId, file = STORE_FILE) {
   const existing = findByExternalId(externalId, file);
   return existing ? existing.role : null;
 }
 
 module.exports = {
+  revokeSessions,
   STORE_FILE, listAssignments, findByExternalId, upsertSeen, setRole, deleteAssignment, resolveRole,
 };

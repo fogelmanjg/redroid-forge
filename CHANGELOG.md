@@ -27,6 +27,21 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
 
 ## [Unreleased]
 
+### Security
+- **The login page no longer gives away account names.** `GET /api/auth/setup/status` answers
+  before login and returned every local username plus the repo path. Now those only go to "none"
+  mode (the first-run wizard) or a logged-in admin.
+- **Sessions follow the account.** The role used to travel inside the 7-day session cookie, so
+  deleting an account, lowering its role or changing its password left its open sessions working as
+  before, and a stolen cookie could not be cut off. Now every request reads the account's current
+  role; a deleted account or an OIDC identity without a role ends its sessions at once; a password
+  change ends every older session of that account. New **Log out everywhere** button in the header.
+- **Backups belong to their instance's owners.** Any operator could list, restore (into their own
+  instance -- taking someone else's Google accounts and app data with it) and delete every backup.
+  Now a backup records the instance and its owners, and a non-admin only sees, restores and deletes
+  backups of instances they own or owned when the backup was made. Backups made before this version
+  have no owners recorded: admin only.
+
 ## [1.0.0-beta.7] - 2026-11-23
 
 ### Added

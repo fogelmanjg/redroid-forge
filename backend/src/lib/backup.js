@@ -32,10 +32,15 @@ function metaFileFor(backupPath) {
 // Snapshot of exactly what the known-combinations resolver would also look at (see
 // instanceSupport.buildInput) -- minus hostGpuVendor, which is a property of whatever host
 // happens to restore this later, not of the backup itself.
-async function captureMeta(instance) {
+async function captureMeta(instance, createdBy = null) {
   const baseDigest = await runtime.getImageDigest(instance.dockerImage).catch(() => null);
+  const owners = [].concat(instance.ownerId ?? []).filter((o) => o != null); // "none"-mode instances record [null]
   return {
     instanceName: instance.name,
+    // 1.0.0-beta.8: whose data this is (permissions.canAccessBackup).
+    instanceId: instance.id || null,
+    ownerIds: owners,
+    createdBy,
     createdAt: new Date().toISOString(),
     dockerImage: instance.dockerImage,
     baseDigest,
@@ -46,12 +51,12 @@ async function captureMeta(instance) {
 
 // Mounts the volume read-only -- safe to run against an instance that is currently running
 // (same characteristic jg-dashboard's own backup() already has; not a regression).
-async function createBackup(instance, backupDir) {
+async function createBackup(instance, backupDir, { createdBy = null } = {}) {
   if (!instance.volumeName) throw httpError('This instance has no volume to back up.', 409);
   fs.mkdirSync(backupDir, { recursive: true });
   const file = backupFileName(instance.name);
   const dest = path.join(backupDir, file);
-  const meta = await captureMeta(instance);
+  const meta = await captureMeta(instance, createdBy);
   await runtime.runEphemeral(
     'alpine',
     ['tar', 'czf', `/backup/${file}`, '-C', '/data', '.'],
@@ -87,6 +92,13 @@ function resolveBackupPath(backupDir, file) {
   const full = path.join(backupDir, file);
   if (!fs.existsSync(full)) throw httpError(`Backup "${file}" not found.`, 404);
   return full;
+}
+
+// The sidecar of one backup (null when missing or unreadable). Throws like restore/delete for a
+// bad or missing file name.
+function readMeta(backupDir, file) {
+  const full = resolveBackupPath(backupDir, file);
+  try { return JSON.parse(fs.readFileSync(metaFileFor(full), 'utf-8')); } catch { return null; }
 }
 
 function deleteBackup(backupDir, file) {
@@ -154,5 +166,5 @@ async function restoreBackup(instance, backupDir, file, { resetIdentity = false 
 }
 
 module.exports = {
-  createBackup, listBackups, restoreBackup, deleteBackup, backupFileName, compatibilityWarnings,
+  createBackup, listBackups, restoreBackup, deleteBackup, readMeta, backupFileName, compatibilityWarnings,
 };

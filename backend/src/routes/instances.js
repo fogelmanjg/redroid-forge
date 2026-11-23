@@ -1083,7 +1083,7 @@ router.post('/:id/backup', async (req, res) => {
   if (!instance) return res.status(404).json({ error: 'Instancia no encontrada' });
   try {
     permissions.assertCan(req.user, 'backup-restore', instance);
-    res.status(201).json(await backup.createBackup(instance, settings.get().backupDir));
+    res.status(201).json(await backup.createBackup(instance, settings.get().backupDir, { createdBy: req.user?.id || null }));
   } catch (e) {
     sendError(res, e);
   }
@@ -1097,6 +1097,10 @@ router.post('/:id/restore', async (req, res) => {
   try {
     permissions.assertCan(req.user, 'backup-restore', instance);
     const { file, resetIdentity } = req.body || {};
+    // 1.0.0-beta.8: owning the TARGET is not enough -- the backup has to be yours too.
+    if (!permissions.canAccessBackup(req.user, backup.readMeta(settings.get().backupDir, file), store.readAll())) {
+      throw Object.assign(new Error('Not allowed: this backup belongs to an instance you do not own'), { httpStatus: 403 });
+    }
     res.json(await backup.restoreBackup(instance, settings.get().backupDir, file, { resetIdentity: !!resetIdentity }));
   } catch (e) {
     sendError(res, e);

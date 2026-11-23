@@ -36,6 +36,16 @@ router.post('/logout', (req, res) => {
   res.json({ ok: true });
 });
 
+// 1.0.0-beta.8: "log out everywhere" -- every session of this account, on every device, this one
+// included (lib/auth.js currentAccount rejects cookies issued before now).
+router.post('/logout-all', (req, res) => {
+  if (!req.user || !req.user.id) return res.status(401).json({ error: 'Not logged in' });
+  if (userStore.findById(req.user.id)) userStore.revokeSessions(req.user.id);
+  else roleAssignments.revokeSessions(req.user.id);
+  auth.clearSessionCookie(req, res);
+  res.json({ ok: true });
+});
+
 // Minimal id+username directory (docs/ROADMAP.md Phase 7, 25/10/2026) -- any logged-in user, not
 // just admin, unlike /users and /identities below. Needed so an operator sharing an instance
 // (PUT /api/instances/:id/owners, "transfer-ownership") has a way to find who to share it WITH
@@ -72,14 +82,19 @@ router.get('/directory', (req, res) => {
 // reach this app has full admin capability over every instance (see docker-compose.yml's own
 // comment on REDROID_FORGE_BIND_HOST) -- being able to also pre-create a pending local admin row
 // is not a new hole, it is the same posture.
+// 1.0.0-beta.8: this route answers before login, so the account names and the repo path only go
+// to whoever already has admin capability -- "none" mode (everyone is admin there, the wizard) or a
+// logged-in admin (the auth-mode change notice). Before, the login page handed any visitor the exact
+// username to guess a password for.
 router.get('/setup/status', (req, res) => {
+  const privileged = auth.AUTH_MODE === 'none' || permissions.canManageSettings(req.user);
   res.json({
     authMode: auth.AUTH_MODE,
-    localUsernames: userStore.listUsers().map((u) => u.username),
+    localUsernames: privileged ? userStore.listUsers().map((u) => u.username) : [],
     // See docker-compose.yml's own comment on REDROID_FORGE_REPO_DIR -- null if whoever runs
     // this container did not pass it through (e.g. a hand-rolled `docker run`, not this repo's
     // compose file), the wizard just falls back to a vaguer instruction in that case.
-    repoDir: process.env.REDROID_FORGE_REPO_DIR || null,
+    repoDir: privileged ? (process.env.REDROID_FORGE_REPO_DIR || null) : null,
   });
 });
 

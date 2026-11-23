@@ -7,6 +7,7 @@
 
 const session = require('./session');
 const userStore = require('./userStore');
+const roleAssignments = require('./roleAssignments');
 const oidc = require('./oidc');
 const settings = require('./settings');
 
@@ -139,10 +140,30 @@ function isTrustedLocalTool(req) {
 // middleware at all, so attachUser itself never runs for it; duplicating this logic instead of
 // sharing it would be exactly the kind of two-places-to-keep-in-sync this project avoids
 // elsewhere (see dockerRuntime.js's writeFile comment on mirroring readFile's own mechanism).
+// 1.0.0-beta.8: the cookie only proves WHO (and when it was issued); the role and whether the
+// account still exists are read from the stores on every request. Before, the role travelled in
+// the cookie for its 7 days: deleting an account, lowering its role or changing its password left
+// its open sessions working as before, and a stolen cookie could not be cut off. An account's
+// `sessionsValidAfter` (set by a password change or "log out everywhere") rejects older cookies.
+// Local accounts first (also the ones logged in through a linked OIDC identity, whose cookie
+// carries the local id), then OIDC identities with an assigned role.
+function currentAccount(payload) {
+  let account = null;
+  const local = userStore.findById(payload.uid);
+  if (local) {
+    account = { id: local.id, role: local.role, username: local.username, validAfter: local.sessionsValidAfter || 0 };
+  } else {
+    const a = roleAssignments.findByExternalId(payload.uid);
+    if (a && a.role) account = { id: a.externalId, role: a.role, username: a.username, validAfter: a.sessionsValidAfter || 0 };
+  }
+  if (!account || payload.iat < account.validAfter) return undefined;
+  return { id: account.id, role: account.role, username: account.username };
+}
+
 function resolveUser(req) {
   if (AUTH_MODE === 'none' || isTrustedLocalTool(req)) return NONE_MODE_USER;
   const payload = session.verify(readCookie(req, session.COOKIE_NAME));
-  return payload ? { id: payload.uid, role: payload.role, username: payload.username } : undefined;
+  return payload ? currentAccount(payload) : undefined;
 }
 
 // Sets req.user from the session cookie (local/oidc), the fixed bypass user (none), or the same

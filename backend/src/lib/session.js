@@ -36,12 +36,13 @@ function fromBase64url(str) {
 }
 
 function sign(payload, file = SECRET_FILE) {
-  const body = base64url(Buffer.from(JSON.stringify({ ...payload, exp: Date.now() + SESSION_TTL_MS })));
+  const now = Date.now();
+  const body = base64url(Buffer.from(JSON.stringify({ ...payload, iat: now, exp: now + SESSION_TTL_MS })));
   const mac = crypto.createHmac('sha256', getSecret(file)).update(body).digest();
   return `${body}.${base64url(mac)}`;
 }
 
-// -> the payload object (without `exp`, already validated as not expired), or null for
+// -> the payload object (with `iat`, without `exp`, already validated as not expired), or null for
 // anything invalid, expired, or tampered with. Never throws -- a malformed/missing cookie is
 // an expected case (not logged in), not an error.
 function verify(cookieValue, file = SECRET_FILE) {
@@ -60,6 +61,9 @@ function verify(cookieValue, file = SECRET_FILE) {
   }
   if (!payload.exp || Date.now() > payload.exp) return null;
   const { exp, ...rest } = payload;
+  // `iat` (1.0.0-beta.8) lets an account invalidate every session issued before a point in time
+  // (lib/auth.js resolveUser). Cookies signed before beta.8 have none: derived from exp.
+  if (typeof rest.iat !== 'number') rest.iat = exp - SESSION_TTL_MS;
   return rest;
 }
 

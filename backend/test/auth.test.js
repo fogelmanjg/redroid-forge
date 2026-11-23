@@ -95,8 +95,10 @@ test('mode "local": attachUser with no cookie -> no req.user set, requireAuth re
   assert.equal(res._calls.status, 401);
 });
 
-test('mode "local": a valid session cookie round-trips into req.user, requireAuth then passes', () => {
+test('mode "local": a valid session cookie round-trips into req.user, requireAuth then passes', (t) => {
   const auth = freshAuth('local');
+  // 1.0.0-beta.8: the account is looked up on every request -- here it exists, with that role.
+  t.mock.method(require('../src/lib/userStore'), 'findById', (id) => (id === 'u1' ? { id: 'u1', role: 'operator', username: 'alice' } : undefined));
   const res = mockRes();
   auth.setSessionCookie({ headers: {} }, res, { id: 'u1', role: 'operator', username: 'alice' });
   const cookieHeader = `${res._calls.cookieSet.name}=${res._calls.cookieSet.value}`;

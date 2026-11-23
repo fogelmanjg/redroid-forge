@@ -134,6 +134,7 @@ function resetPassword(id, password, file = STORE_FILE) {
   const all = readJsonArray(file);
   const user = requireUser(all, id);
   user.passwordHash = hashPassword(password);
+  user.sessionsValidAfter = Date.now(); // 1.0.0-beta.8: a new password logs out every existing session
   writeJsonArray(file, all);
   const { passwordHash, ...safe } = user;
   return safe;
@@ -150,6 +151,15 @@ function setEmail(id, email, file = STORE_FILE) {
 
 // -> {id, username, role} on success, null on a wrong username/password. Never throws for
 // bad credentials -- that is an expected outcome of a login attempt, not an error.
+// 1.0.0-beta.8: every session cookie of this account issued before now stops working
+// (lib/auth.js resolveUser compares the cookie's iat). Used by "log out everywhere".
+function revokeSessions(id, file = STORE_FILE) {
+  const all = readJsonArray(file);
+  const user = requireUser(all, id);
+  user.sessionsValidAfter = Date.now();
+  writeJsonArray(file, all);
+}
+
 function verifyCredentials(username, password, file = STORE_FILE) {
   const user = findByUsername(username, file);
   if (!user || !verifyPasswordHash(password, user.passwordHash)) return null;
@@ -188,6 +198,7 @@ function ensureBootstrapAdmin(file = STORE_FILE) {
 }
 
 module.exports = {
+  revokeSessions,
   listUsers, findByUsername, findById, createUser, deleteUser, verifyCredentials, ensureBootstrapAdmin,
   setRole, resetPassword, setEmail,
   hashPassword, verifyPasswordHash, verifyPasswordHashAsync, verifyCredentialsAsync, USERNAME_RE,

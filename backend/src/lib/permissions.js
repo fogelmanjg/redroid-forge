@@ -97,6 +97,21 @@ function assertCan(user, capability, instance) {
   }
 }
 
+// 1.0.0-beta.8: who may see, restore or delete a backup. A backup holds the whole /data of an
+// instance (accounts, sessions, app data), so it belongs to the people who owned that instance:
+// the owners recorded in its sidecar when it was made, or whoever owns that same instance now.
+// Admin: everything. A backup made before beta.8 (no owners recorded) or without a sidecar: admin
+// only. `instances` = the current instance list, to resolve "owns it now".
+function canAccessBackup(user, meta, instances = []) {
+  if (!user || !isValidRole(user.role)) return false;
+  if (OWNERSHIP_BYPASS_ROLES.has(user.role)) return true;
+  if (!meta || !Array.isArray(meta.ownerIds)) return false;
+  if (meta.ownerIds.includes(user.id)) return true;
+  const source = meta.instanceId ? instances.find((i) => i.id === meta.instanceId) : null;
+  return !!source && ownerIds(source).includes(user.id);
+}
+
 module.exports = {
+  canAccessBackup,
   ROLES, CAPABILITIES, ROLE_CAPABILITIES, isValidRole, can, canManageSettings, visibleInstances, assertCan, ownerIds,
 };

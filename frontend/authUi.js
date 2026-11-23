@@ -117,6 +117,12 @@ const AuthUi = (() => {
       await fetch('/api/auth/logout', { method: 'POST' });
       window.location.reload();
     });
+    // 1.0.0-beta.8: every session of this account, on every device (a lost phone, a shared PC).
+    document.querySelector('#btn-logout-all').addEventListener('click', async () => {
+      if (!window.confirm(I18n.t('auth.logoutAllConfirm'))) return;
+      await fetch('/api/auth/logout-all', { method: 'POST' });
+      window.location.reload();
+    });
   }
 
   // Header chrome (username/role, logout button, Identities nav tab) -- only meaningful once
@@ -125,14 +131,17 @@ const AuthUi = (() => {
   function renderHeaderChrome() {
     const info = document.querySelector('#current-user-info');
     const logoutBtn = document.querySelector('#btn-logout');
+    const logoutAllBtn = document.querySelector('#btn-logout-all');
     const identitiesNavBtn = document.querySelector('#nav-identities-btn');
     if (state.authMode === 'none') {
       info.hidden = true;
       logoutBtn.hidden = true;
+      logoutAllBtn.hidden = true;
     } else {
       info.hidden = false;
       info.textContent = `${state.user.username || state.user.id} (${state.user.role})`;
       logoutBtn.hidden = false;
+      logoutAllBtn.hidden = false;
     }
     // One unified "Identities" tab (26/10/2026) covers local accounts and OIDC identities alike
     // -- see routes/auth.js's GET /identities. Shown to any admin, in ANY mode including "none"

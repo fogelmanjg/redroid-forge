@@ -15,7 +15,9 @@ function tmpFile() {
 test('sign/verify: round-trips a payload', () => {
   const file = tmpFile();
   const cookie = session.sign({ uid: 'u1', role: 'admin' }, file);
-  assert.deepEqual(session.verify(cookie, file), { uid: 'u1', role: 'admin' });
+  const { iat, ...rest } = session.verify(cookie, file);
+  assert.deepEqual(rest, { uid: 'u1', role: 'admin' });
+  assert.ok(Math.abs(iat - Date.now()) < 5000, 'carries when it was issued (1.0.0-beta.8)');
 });
 
 test('verify: a cookie signed with a different secret (different file) fails', () => {
@@ -59,7 +61,7 @@ test('sign: secret is generated once and persisted (same file -> same secret acr
   const cookieB = session.sign({ uid: 'b' }, file);
   // Both verify against the SAME persisted secret (a fresh module-level cache per process, but
   // the file on disk is what actually matters across restarts).
-  assert.deepEqual(session.verify(cookieA, file), { uid: 'a' });
-  assert.deepEqual(session.verify(cookieB, file), { uid: 'b' });
+  assert.equal(session.verify(cookieA, file).uid, 'a');
+  assert.equal(session.verify(cookieB, file).uid, 'b');
   assert.equal(fs.existsSync(file), true);
 });
