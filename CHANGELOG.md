@@ -27,6 +27,24 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
 
 ## [Unreleased]
 
+### Security
+
+- **Cross-site requests are refused.** Over HTTPS the session cookie is `SameSite=None` (needed
+  for the Plenum iframe embed), so a browser attached it to requests another site's page fired at
+  redroid-forge: a page visited by a logged-in admin could POST body-less actions (restart the
+  hwenc daemon, apply the known-combinations database, start/stop/lock an instance whose id it
+  knew) or open a viewer WebSocket. Every state-changing `/api` request and every WebSocket
+  handshake whose `Origin` is not redroid-forge's own now gets 403. Requests with no `Origin`
+  (curl, scripts, local tools) and the Plenum embed (same origin) are unaffected; extra trusted
+  origins go in `REDROID_FORGE_ALLOWED_ORIGINS`.
+- **Login attempts are limited**: 10 wrong passwords within 15 minutes from the same client and
+  further attempts get 429 until the window passes (behind a reverse proxy on the same host, the
+  client is the address the proxy reports). The password check no longer blocks the server while
+  it runs, and a wrong username takes as long as a wrong password.
+- **Accepting a module contract records who accepted** -- the logged-in user. It used to record
+  `local` for everyone (and took the user from the request body), and any logged-in account could
+  accept; it now needs the `create` or `configure` permission.
+
 ## [1.0.0-beta.6] - 2026-11-22
 
 ### Fixed

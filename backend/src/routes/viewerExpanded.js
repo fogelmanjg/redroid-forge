@@ -18,6 +18,7 @@
 const store = require('../lib/store');
 const permissions = require('../lib/permissions');
 const auth = require('../lib/auth');
+const originCheck = require('../lib/originCheck');
 const httpListeners = require('../lib/httpListeners');
 const wsServer = require('../lib/wsServer');
 const viewerSession = require('../lib/scrcpy/viewerSession');
@@ -76,6 +77,9 @@ async function handleUpgrade(req, socket, head) {
   // /viewer (no trailing /full), which runs as a separate onUpgrade handler and claims it.
   const instanceId = match[1];
 
+  // 1.0.0-beta.7: a browser sends Origin on every WebSocket handshake; another site's page must not
+  // be able to open this with the visitor's cookie (lib/originCheck.js).
+  if (!originCheck.isAllowedOrigin(req)) { rejectUpgrade(socket, 403, 'Cross-site WebSocket refused'); return; }
   const user = auth.resolveUser(req);
   if (!user) { rejectUpgrade(socket, 401, 'Not logged in'); return; }
 

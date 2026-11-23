@@ -1,6 +1,7 @@
 const express = require('express');
 const auth = require('../lib/auth');
 const userStore = require('../lib/userStore');
+const loginThrottle = require('../lib/loginThrottle');
 const oidc = require('../lib/oidc');
 const roleAssignments = require('../lib/roleAssignments');
 const accountLinks = require('../lib/accountLinks');
@@ -95,14 +96,31 @@ router.post('/setup/admin', (req, res) => {
   }
 });
 
-router.post('/login', (req, res) => {
+// 1.0.0-beta.7: attempts limited per client (lib/loginThrottle.js) and the password check no longer
+// blocks the event loop.
+router.post('/login', async (req, res) => {
   if (!auth.LOCAL_ENABLED) return res.status(404).json({ error: 'REDROID_FORGE_AUTH has local accounts disabled' });
   const { username, password } = req.body || {};
   if (typeof username !== 'string' || typeof password !== 'string') {
     return res.status(400).json({ error: '"username" and "password" are required' });
   }
-  const user = userStore.verifyCredentials(username, password);
-  if (!user) return res.status(401).json({ error: 'Wrong username or password' });
+  const key = loginThrottle.clientKey(req);
+  const gate = loginThrottle.shared.check(key);
+  if (!gate.allowed) {
+    res.set('Retry-After', String(gate.retryAfterS));
+    return res.status(429).json({ error: `Too many failed logins. Try again in ${Math.ceil(gate.retryAfterS / 60)} min.` });
+  }
+  let user;
+  try {
+    user = await userStore.verifyCredentialsAsync(username, password);
+  } catch (e) {
+    return res.status(500).json({ error: 'Could not check the password' });
+  }
+  if (!user) {
+    loginThrottle.shared.fail(key);
+    return res.status(401).json({ error: 'Wrong username or password' });
+  }
+  loginThrottle.shared.succeed(key);
   auth.setSessionCookie(req, res, user);
   res.json({ user });
 });

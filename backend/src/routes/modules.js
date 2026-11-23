@@ -3,6 +3,8 @@ const manifests = require('../lib/moduleManifests');
 const acceptance = require('../lib/moduleAcceptance');
 const catalog = require('../../images.json');
 const hwAccel = require('../lib/hwAccel');
+const permissions = require('../lib/permissions');
+const store = require('../lib/store');
 
 const router = express.Router();
 
@@ -110,7 +112,16 @@ router.post('/:id/accept', (req, res) => {
   const manifest = manifests.get(req.params.id);
   if (!manifest) return res.status(404).json({ error: `Unknown module: ${req.params.id}` });
 
-  const { version, instanceId, instanceName, userId } = req.body || {};
+  const { version, instanceId } = req.body || {};
+  // 1.0.0-beta.7: who accepted is the logged-in user, never a field of the request (it used to take
+  // `userId` from the body and record "local" when absent -- i.e. always, with the real UI), and
+  // accepting needs the right to create or configure instances: a viewer-only account cannot
+  // consent on anyone's behalf.
+  const instance = instanceId ? store.get(instanceId) : null;
+  if (instanceId && !instance) return res.status(404).json({ error: `Unknown instance: ${instanceId}` });
+  if (!(permissions.can(req.user, 'create') || permissions.can(req.user, 'configure', instance || undefined))) {
+    return res.status(403).json({ error: 'Not allowed: accepting a module contract needs the "create" or "configure" permission' });
+  }
   // Only the manifest's current version can be accepted -- it prevents an old
   // frontend (with an outdated cached manifest) from recording an acceptance
   // that no longer corresponds to the current contract.
@@ -121,7 +132,11 @@ router.post('/:id/accept', (req, res) => {
   }
 
   const entry = acceptance.record({
-    moduleId: manifest.id, version, userId, instanceId, instanceName,
+    moduleId: manifest.id,
+    version,
+    userId: req.user?.username || req.user?.id || 'unknown',
+    instanceId: instance ? instance.id : null,
+    instanceName: instance ? instance.name : null,
   });
   res.status(201).json(entry);
 });

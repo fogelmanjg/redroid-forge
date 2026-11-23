@@ -45,6 +45,9 @@ app.use('/launcher', express.static(path.join(__dirname, '..', '..', 'launcher')
 // Phase 7). /api/auth/* stays reachable with no login required (it IS the login surface); every
 // other /api/* route requires one, in whichever mode is active (a no-op check in "none" mode).
 app.use(auth.attachUser);
+// Cross-site request protection for every state-changing /api call, login included (1.0.0-beta.7,
+// see lib/originCheck.js). WebSocket upgrades check it in their own handlers.
+app.use('/api', require('./lib/originCheck').middleware);
 app.use('/api/auth', require('./routes/auth'));
 app.use('/api', auth.requireAuth);
 

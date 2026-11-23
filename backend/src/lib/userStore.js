@@ -28,6 +28,22 @@ function verifyPasswordHash(password, stored) {
   return actual.length === expected.length && crypto.timingSafeEqual(actual, expected);
 }
 
+// Async variant for the login path (1.0.0-beta.7): scryptSync blocks the whole event loop for each
+// attempt, so a burst of logins froze every other request (viewers, API) meanwhile.
+const scryptAsync = (password, salt) => new Promise((resolve, reject) => {
+  crypto.scrypt(password, salt, SCRYPT_PARAMS.keylen, SCRYPT_PARAMS, (err, key) => (err ? reject(err) : resolve(key)));
+});
+async function verifyPasswordHashAsync(password, stored) {
+  const [saltHex, hashHex] = String(stored).split(':');
+  if (!saltHex || !hashHex) return false;
+  const expected = Buffer.from(hashHex, 'hex');
+  const actual = await scryptAsync(password, Buffer.from(saltHex, 'hex'));
+  return actual.length === expected.length && crypto.timingSafeEqual(actual, expected);
+}
+// Stands in for a stored hash when the username does not exist, so a wrong username takes as long
+// as a wrong password (no telling which usernames exist from the response time).
+const DUMMY_HASH = hashPassword(crypto.randomBytes(16).toString('hex'));
+
 function httpError(message, httpStatus) {
   return Object.assign(new Error(message), { httpStatus });
 }
@@ -141,6 +157,15 @@ function verifyCredentials(username, password, file = STORE_FILE) {
   return safe;
 }
 
+// Same as verifyCredentials, without blocking the event loop (used by POST /api/auth/login).
+async function verifyCredentialsAsync(username, password, file = STORE_FILE) {
+  const user = findByUsername(username, file);
+  const ok = await verifyPasswordHashAsync(password, user ? user.passwordHash : DUMMY_HASH);
+  if (!user || !ok) return null;
+  const { passwordHash, ...safe } = user;
+  return safe;
+}
+
 // Seeds the very first admin account from REDROID_FORGE_LOCAL_ADMIN_USER/_PASSWORD when the
 // store is empty -- otherwise "local" mode has no way to log in at all on a fresh install (no
 // setup UI exists before the first login). No-op once any user exists, so it never resets an
@@ -165,5 +190,5 @@ function ensureBootstrapAdmin(file = STORE_FILE) {
 module.exports = {
   listUsers, findByUsername, findById, createUser, deleteUser, verifyCredentials, ensureBootstrapAdmin,
   setRole, resetPassword, setEmail,
-  hashPassword, verifyPasswordHash, USERNAME_RE,
+  hashPassword, verifyPasswordHash, verifyPasswordHashAsync, verifyCredentialsAsync, USERNAME_RE,
 };
