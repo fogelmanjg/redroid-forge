@@ -27,6 +27,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
 
 ## [Unreleased]
 
+## [1.0.0-beta.8] - 2026-11-23
+
 ### Added
 - **Backups: "Back up (stops it, starts it again)".** A backup of a running instance copies /data
   while Android keeps writing to its databases, and can catch one half written -- which only shows
