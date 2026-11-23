@@ -5,6 +5,7 @@ const loginThrottle = require('../lib/loginThrottle');
 const oidc = require('../lib/oidc');
 const roleAssignments = require('../lib/roleAssignments');
 const accountLinks = require('../lib/accountLinks');
+const authPages = require('../lib/authPages');
 const permissions = require('../lib/permissions');
 const settings = require('../lib/settings');
 
@@ -161,6 +162,12 @@ router.get('/oidc/:providerId/login', async (req, res) => {
 
 router.get('/oidc/:providerId/callback', async (req, res) => {
   if (!auth.OIDC_ENABLED) return res.status(404).json({ error: 'REDROID_FORGE_AUTH has OIDC disabled' });
+  // Every answer below that is not a redirect is a page for a person (1.0.0-beta.9, see
+  // lib/authPages.js) -- never a bare res.send(text): Express serves a string as text/html, and
+  // some of these messages carry what the provider says the username is.
+  const lang = authPages.pickLang(req.headers['accept-language']);
+  const providerLabel = (oidc.listProviders().find((p) => p.id === req.params.providerId) || {}).label || req.params.providerId;
+  const fail = (status, message) => res.status(status).type('html').send(authPages.loginFailedPage({ lang, providerLabel, message }));
   try {
     // handleCallback only ever proves IDENTITY (see oidc.js's own comment on why) -- the role,
     // if any, comes from this project's own table, never from whichever provider the person
@@ -175,17 +182,16 @@ router.get('/oidc/:providerId/callback', async (req, res) => {
     if (identity.linkLocalUserId) {
       const localUser = userStore.findById(identity.linkLocalUserId);
       if (!localUser) {
-        return res.status(400).send('Cannot link: the local account this was started from no longer exists.');
+        return fail(400, 'Cannot link: the local account this was started from no longer exists.');
       }
       // An externalId that already has its OWN assigned role (not just a pending, never-
       // approved one) is a separate identity an admin deliberately granted access to -- absorb
       // it into a link only with an explicit unlink-then-relink, never silently here.
       const existingAssignment = roleAssignments.findByExternalId(identity.id);
       if (existingAssignment && existingAssignment.role) {
-        return res.status(409).send(
+        return fail(409,
           `"${identity.username}" already has its own role ("${existingAssignment.role}") as a separate identity -- `
-          + 'remove that role first (Identities panel) before linking it to a local account.',
-        );
+          + 'remove that role first (Identities panel) before linking it to a local account.');
       }
       try {
         accountLinks.link({
@@ -193,7 +199,7 @@ router.get('/oidc/:providerId/callback', async (req, res) => {
           providerId: identity.providerId, providerLabel: identity.providerLabel,
         });
       } catch (e) {
-        return res.status(e.httpStatus || 400).send(e.message);
+        return fail(e.httpStatus || 400, e.message);
       }
       // Superseded by the link now -- an unlinked, never-approved pending row left behind would
       // just be confusing clutter in the Identities panel.
@@ -234,14 +240,14 @@ router.get('/oidc/:providerId/callback', async (req, res) => {
       providerLabel: identity.providerLabel,
     });
     if (!seen.role) {
-      return res.status(403).send(
-        'Login succeeded, but no role has been assigned to this account yet -- ask a redroid-forge admin to approve it.',
-      );
+      return res.status(403).type('html').send(authPages.noRolePage({
+        lang, username: identity.username, providerLabel: identity.providerLabel || providerLabel,
+      }));
     }
     auth.setSessionCookie(req, res, { id: identity.id, username: identity.username, role: seen.role });
     res.redirect('/');
   } catch (e) {
-    res.status(e.httpStatus || 400).send(`Login failed: ${e.message}`);
+    fail(e.httpStatus || 400, e.message);
   }
 });
 

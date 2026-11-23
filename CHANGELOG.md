@@ -41,6 +41,16 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
 - **Viewers view: stopped instances as small cards.** An instance that is not running has no image:
   instead of an empty tile it gets a small card under the previews, with its state and the start
   button. Previews hidden by the filter close their capture session.
+- **OIDC login: a real page when it cannot log you in.** Logging in with a Google/Plenum account
+  that is not linked to a user and has no role ended on one line of plain English text with no way
+  back. Now a page in the browser's language (es/en) says which account came in and the two ways
+  forward -- log in with your own user and link it from your profile, or ask an admin (it already
+  shows up as pending) -- with a link back to the login. The other callback errors get the same page.
+
+### Security
+- **OIDC callback: no HTML from the provider.** Its error answers were sent as text/html and one
+  included the username the provider returned without escaping. All of them now go through the
+  new page, which escapes everything.
 
 ## [1.0.0-beta.8] - 2026-11-23
 
