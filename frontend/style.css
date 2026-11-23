@@ -363,6 +363,23 @@ tr.instance-row-secondary > td { padding-top: 0.2rem; }
 .instances-grid-columns .viewer-preview-img { width: 100%; }
 #viewers-size-slider:disabled { opacity: 0.4; }
 
+/* State filter + name search + "hide locked" (1.0.0-beta.9), shared by the three views. */
+.instances-filterbar { display: flex; flex-wrap: wrap; align-items: center; gap: 0.6rem; margin: -0.4rem 0 1rem; }
+.instance-filter-switch { margin-left: 0; }
+.filter-count { opacity: 0.75; font-variant-numeric: tabular-nums; }
+.filter-count:not(:empty)::before { content: '('; }
+.filter-count:not(:empty)::after { content: ')'; }
+.instances-search { flex: 1 1 12rem; max-width: 20rem; padding: 0.35rem 0.6rem; }
+.instances-hide-locked { display: inline-flex; align-items: center; gap: 0.3rem; font-size: 0.85rem; cursor: pointer; }
+.instances-filter-empty { opacity: 0.85; }
+.instances-filter-empty[hidden] { display: none; }
+/* Viewers view: an instance that is not running has no image to show -- a small card with its
+   name, state and the start button, in a strip under the previews, instead of an empty tile. */
+.instances-grid-stopped { display: flex; flex-wrap: wrap; gap: 0.6rem; margin-top: 1rem; }
+.instances-grid-stopped[hidden] { display: none; }
+.instance-card-stopped { flex-direction: row; flex-wrap: wrap; align-items: center; gap: 0.5rem; padding: 0.4rem 0.6rem; opacity: 0.9; }
+.instance-card-stopped .instance-status { font-size: 0.8rem; }
+
 /* "Mínimo" -- a single compact row per instance (vs. the full view's row-pair), no chips, no
    viewer, no edit panels: just name, address, and whichever of start/stop/restart/delete apply. */
 .instance-minimal { display: flex; align-items: center; gap: 0.9rem; flex-wrap: wrap; }

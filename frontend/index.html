@@ -54,10 +54,21 @@
           </select>
         </span>
       </div>
+      <div class="instances-filterbar">
+        <span class="view-mode-switch instance-filter-switch">
+          <button type="button" class="view-mode-btn" data-instance-filter="all" data-i18n-title="instances.filter.allHint"><span data-i18n="instances.filter.all">All</span> <span class="filter-count"></span></button>
+          <button type="button" class="view-mode-btn" data-instance-filter="active" data-i18n-title="instances.filter.activeHint"><span data-i18n="instances.filter.active">Active</span> <span class="filter-count"></span></button>
+          <button type="button" class="view-mode-btn" data-instance-filter="stopped" data-i18n-title="instances.filter.stoppedHint"><span data-i18n="instances.filter.stopped">Stopped</span> <span class="filter-count"></span></button>
+        </span>
+        <input type="search" id="instances-search" class="instances-search" data-i18n-placeholder="instances.filter.searchPlaceholder" autocomplete="off" />
+        <label class="instances-hide-locked" data-i18n-title="instances.filter.hideLockedHint"><input type="checkbox" id="instances-hide-locked" /> <span data-i18n="instances.filter.hideLocked">Hide locked</span></label>
+      </div>
+      <p id="instances-filter-empty" class="instances-filter-empty" hidden><span data-i18n="instances.filter.noMatch">No instance matches the filter.</span> <button type="button" id="instances-filter-reset" class="link-btn" data-i18n="instances.filter.showAll">Show all</button></p>
       <table id="instances-table">
         <tbody></tbody>
       </table>
       <div id="instances-grid" class="instances-grid" hidden></div>
+      <div id="instances-grid-stopped" class="instances-grid-stopped" hidden></div>
     </section>
 
     <section id="tab-modules" class="tab">
@@ -340,6 +351,7 @@ gunzip -c image.tar.gz | docker load</pre>
   <script src="i18n.js"></script>
   <script src="contracts.js"></script>
   <script src="instanceState.js"></script>
+  <script src="instanceFilter.js"></script>
   <script src="authUi.js"></script>
   <script src="viewer.js"></script>
   <script src="viewerExpanded.js"></script>

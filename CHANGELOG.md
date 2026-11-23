@@ -27,6 +27,21 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
 
 ## [Unreleased]
 
+## [1.0.0-beta.9] - 2026-11-23
+
+### Added
+- **Instances tab: filter, search and order, in the three views (Full, Minimal, Viewers).** With many
+  instances the one you want was hard to find. Above the list: All / Active / Stopped, each with
+  how many it would show; a search by name; and "Hide locked". Active means running, restarting or
+  paused (still using CPU/RAM). An instance in trouble (dead, container missing) or with a
+  backup/restore in progress is shown whatever the filter, so it cannot go unnoticed. Every view
+  now lists the active ones first, then alphabetically. When the filter leaves nothing, a "Show
+  all" link says so instead of an empty page. The filter and the checkbox are remembered per
+  browser; the search is not.
+- **Viewers view: stopped instances as small cards.** An instance that is not running has no image:
+  instead of an empty tile it gets a small card under the previews, with its state and the start
+  button. Previews hidden by the filter close their capture session.
+
 ## [1.0.0-beta.8] - 2026-11-23
 
 ### Added

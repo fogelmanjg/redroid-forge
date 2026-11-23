@@ -273,13 +273,15 @@ function saveViewersSize(px) {
 }
 let viewersSize = loadViewersSize();
 
-$$('.view-mode-btn').forEach((btn) => {
+// `[data-view-mode]`, not `.view-mode-btn`: the state filter buttons (1.0.0-beta.9) share that
+// class for their look, and must not be caught by this switch.
+$$('[data-view-mode]').forEach((btn) => {
   btn.classList.toggle('active', btn.dataset.viewMode === instanceViewMode);
   btn.addEventListener('click', () => {
     if (btn.dataset.viewMode === instanceViewMode) return;
     instanceViewMode = btn.dataset.viewMode;
     saveInstanceViewMode(instanceViewMode);
-    $$('.view-mode-btn').forEach((b) => b.classList.toggle('active', b === btn));
+    $$('[data-view-mode]').forEach((b) => b.classList.toggle('active', b === btn));
     loadInstances({ silent: true });
   });
 });
@@ -348,6 +350,50 @@ if (window.ResizeObserver) {
     viewersResizeTimer = setTimeout(() => Viewer.setSizeAll(effectiveViewersSize()), 300);
   }).observe($('#instances-grid'));
 }
+
+// State filter, name search and "hide locked" (1.0.0-beta.9), the same for the three views --
+// see instanceFilter.js for what each one shows and why some instances are always shown. The
+// state filter and the checkbox are remembered per browser like the view mode; the search is not
+// (an old search left in the box would look like missing instances after a reload).
+// Changing any of them redraws from the last list fetched instead of asking the backend again.
+let lastInstances = null;
+function loadInstanceFilter() {
+  let v = null;
+  try { v = localStorage.getItem('instanceFilter'); } catch (e) { /* no storage */ }
+  return InstanceFilter.FILTERS.includes(v) ? v : 'all';
+}
+let instanceFilter = loadInstanceFilter();
+let hideLockedInstances = false;
+try { hideLockedInstances = localStorage.getItem('instanceHideLocked') === '1'; } catch (e) { /* no storage */ }
+
+const redrawInstances = () => loadInstances({ silent: true, fromCache: true });
+$$('[data-instance-filter]').forEach((btn) => {
+  btn.classList.toggle('active', btn.dataset.instanceFilter === instanceFilter);
+  btn.addEventListener('click', () => {
+    instanceFilter = btn.dataset.instanceFilter;
+    try { localStorage.setItem('instanceFilter', instanceFilter); } catch (e) { /* no storage */ }
+    $$('[data-instance-filter]').forEach((b) => b.classList.toggle('active', b === btn));
+    redrawInstances();
+  });
+});
+const hideLockedBox = $('#instances-hide-locked');
+hideLockedBox.checked = hideLockedInstances;
+hideLockedBox.addEventListener('change', () => {
+  hideLockedInstances = hideLockedBox.checked;
+  try { localStorage.setItem('instanceHideLocked', hideLockedInstances ? '1' : '0'); } catch (e) { /* no storage */ }
+  redrawInstances();
+});
+$('#instances-search').addEventListener('input', redrawInstances);
+$('#instances-filter-reset').addEventListener('click', () => {
+  instanceFilter = 'all';
+  try { localStorage.setItem('instanceFilter', 'all'); } catch (e) { /* no storage */ }
+  $$('[data-instance-filter]').forEach((b) => b.classList.toggle('active', b.dataset.instanceFilter === 'all'));
+  $('#instances-search').value = '';
+  hideLockedInstances = false;
+  hideLockedBox.checked = false;
+  try { localStorage.setItem('instanceHideLocked', '0'); } catch (e) { /* no storage */ }
+  redrawInstances();
+});
 
 async function loadDirectoryCache() {
   try {
@@ -1828,10 +1874,12 @@ function buildAdbAccessEditRow(inst) {
 // font) is "I already know how this is set up, just let me connect": name, status, address.
 // Row 2 (smaller) is everything else -- info chips AND every button, including the ones that
 // used to sit in their own always-visible column (device profile, register/mark-registered).
-async function loadInstances({ silent = false } = {}) {
+async function loadInstances({ silent = false, fromCache = false } = {}) {
   const table = $('#instances-table');
   const tbody = $('#instances-table tbody');
   const grid = $('#instances-grid');
+  const stoppedGrid = $('#instances-grid-stopped');
+  const filterEmpty = $('#instances-filter-empty');
   const isViewers = instanceViewMode === 'viewers';
   table.hidden = isViewers;
   grid.hidden = !isViewers;
@@ -1842,15 +1890,32 @@ async function loadInstances({ silent = false } = {}) {
   const target = isViewers ? grid : tbody;
   if (!silent) target.innerHTML = isViewers ? `<p>${t('common.loading')}</p>` : `<tr><td>${t('common.loading')}</td></tr>`;
   try {
-    const instances = await api('/instances');
-    if (instances.length === 0) {
-      target.innerHTML = isViewers ? `<p>${t('instances.none')}</p>` : `<tr><td>${t('instances.none')}</td></tr>`;
+    const instances = (fromCache && lastInstances) ? lastInstances : await api('/instances');
+    lastInstances = instances;
+    // Which previews have to stay open after this draw: only the ones actually drawn below (an
+    // instance hidden by the filter, or deleted, gets its session closed by the sweep at the end).
+    const keepMounted = new Set();
+    const mountPreview = (container, id, size) => { keepMounted.add(id); Viewer.mountPreview(container, id, size); };
+    const busyIds = new Set(Object.keys(backupJobs).filter((id) => backupJobs[id] && backupJobs[id].state === 'running'));
+    const { visible, counts } = InstanceFilter.apply(instances, {
+      filter: instanceFilter, query: $('#instances-search').value, hideLocked: hideLockedInstances, busyIds,
+    });
+    $$('[data-instance-filter]').forEach((b) => { b.querySelector('.filter-count').textContent = String(counts[b.dataset.instanceFilter]); });
+    filterEmpty.hidden = !(instances.length > 0 && visible.length === 0);
+    if (visible.length === 0) {
+      target.innerHTML = instances.length === 0
+        ? (isViewers ? `<p>${t('instances.none')}</p>` : `<tr><td>${t('instances.none')}</td></tr>`)
+        : '';
+      stoppedGrid.replaceChildren();
+      stoppedGrid.hidden = true;
+      for (const id of Viewer.mountedIds()) Viewer.unmountPreview(id);
       return;
     }
     // Built off-screen and swapped in one go, so a refresh never leaves the table/grid half drawn.
     const rows = document.createDocumentFragment();
     const cards = document.createDocumentFragment();
-    for (const inst of instances) {
+    const stoppedCards = document.createDocumentFragment();
+    for (const inst of visible) {
       const state = InstanceState.describe(inst.status);
 
       // Shared across all three view modes -- "mínimo" and "visores" need exactly the same
@@ -2019,6 +2084,27 @@ async function loadInstances({ silent = false } = {}) {
         // live preview (always mounted here, independent of the "completo" tab's per-row 👁
         // toggle -- showing the preview IS this view's whole point), and the same action
         // buttons as every other mode.
+        if (inst.status !== 'running') {
+          // Not running: no image to show (1.0.0-beta.9) -- a small card in the strip under the
+          // previews, with its state and the start button, instead of an empty tile.
+          const small = document.createElement('div');
+          small.className = 'instance-card instance-card-stopped';
+          const smallName = document.createElement('span');
+          smallName.className = 'instance-card-name';
+          smallName.textContent = inst.name;
+          small.appendChild(smallName);
+          const smallStatus = document.createElement('span');
+          smallStatus.className = 'instance-status';
+          smallStatus.innerHTML = `<span class="status-dot ${state.tone}"></span>${t('instances.status.' + state.key)}`;
+          small.appendChild(smallStatus);
+          if (inst.locked) small.appendChild(buildLockChip());
+          const smallButtons = document.createElement('div');
+          smallButtons.className = 'instance-card-buttons';
+          appendActionButtons(smallButtons);
+          small.appendChild(smallButtons);
+          stoppedCards.appendChild(small);
+          continue;
+        }
         const card = document.createElement('div');
         card.className = 'instance-card';
 
@@ -2032,7 +2118,7 @@ async function loadInstances({ silent = false } = {}) {
         if (AuthUi.can('view')) {
           const viewerWrap = document.createElement('div');
           viewerWrap.className = 'instance-card-viewer';
-          Viewer.mountPreview(viewerWrap, inst.id, effectiveViewersSize());
+          mountPreview(viewerWrap, inst.id, effectiveViewersSize());
           card.appendChild(viewerWrap);
         }
 
@@ -2183,7 +2269,7 @@ async function loadInstances({ silent = false } = {}) {
         // to be full-size.
         const previewWrap = document.createElement('div');
         previewWrap.className = 'viewer-preview-wrap';
-        if (isOn) Viewer.mountPreview(previewWrap, inst.id);
+        if (isOn) mountPreview(previewWrap, inst.id);
         viewerCol.appendChild(previewWrap);
 
         tdViewer.appendChild(viewerCol);
@@ -2350,17 +2436,14 @@ async function loadInstances({ silent = false } = {}) {
       if (openAdbAccessId === inst.id) rows.appendChild(buildAdbAccessEditRow(inst));
     }
     if (isViewers) grid.replaceChildren(cards); else tbody.replaceChildren(rows);
-    // Sweep sessions nobody asked to keep any more. Which instances SHOULD have a mounted
-    // viewer right now depends on the active mode: "completo" only the ones whose own 👁 toggle
-    // is on, "visores" every instance (that is the whole point of that mode), "mínimo" none at
-    // all. An instance that got deleted (so its row/card never ran a mount call above this
-    // poll) is the normal way this also fires, not just a mode switch or an explicit toggle-off
-    // (that already unmounts inline, see the click handler above).
-    const instanceIds = new Set(instances.map((i) => i.id));
-    const shouldBeMounted = (id) => instanceIds.has(id)
-      && (instanceViewMode === 'viewers' || (instanceViewMode === 'full' && previewIds.has(id)));
+    stoppedGrid.replaceChildren(isViewers ? stoppedCards : document.createDocumentFragment());
+    stoppedGrid.hidden = !isViewers || stoppedGrid.childElementCount === 0;
+    // Sweep sessions nobody asked to keep any more: every preview not mounted by this draw --
+    // "viewers" mounts the running instances shown, "full" only the shown ones whose own 👁
+    // toggle is on, "minimal" none. A deleted instance, one hidden by the filter, a mode switch
+    // or an explicit toggle-off (that one already unmounts inline) all end up here.
     for (const id of Viewer.mountedIds()) {
-      if (!shouldBeMounted(id)) Viewer.unmountPreview(id);
+      if (!keepMounted.has(id)) Viewer.unmountPreview(id);
     }
   } catch (e) {
     target.innerHTML = isViewers ? `<p>${t('common.error', { msg: e.message })}</p>` : `<tr><td>${t('common.error', { msg: e.message })}</td></tr>`;
