@@ -366,6 +366,7 @@ async function ensureHostInfraReady() {
 //   is not enough to tell.
 // Either way, GetServiceNames()/MediaCodecList is cached once per process, so mediaserver
 // (already started with the old value) needs restarting to pick up the new one.
+const { isContainerGone } = require('./androidExec');
 const RUNTIME_READY_MAX_ATTEMPTS = 8;
 const RUNTIME_READY_RETRY_DELAY_MS = 3000;
 
@@ -380,7 +381,7 @@ async function execAndroidWithRetry(containerId, argv, { noRetryCodes = [] } = {
       return;
     } catch (e) {
       lastErr = e;
-      if (noRetryCodes.includes(e.code)) throw e;
+      if (noRetryCodes.includes(e.code) || isContainerGone(e)) throw e; // beta.8: stopped -> stop retrying
       // eslint-disable-next-line no-await-in-loop
       await new Promise((r) => setTimeout(r, RUNTIME_READY_RETRY_DELAY_MS));
     }

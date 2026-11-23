@@ -15,5 +15,6 @@ backend/data/aurora-store/
 backend/data/db/
 backend/data/backups/
 backend/data/meminfo-fix/
+backend/data/logs/
 backend/data/fwknop/
 __pycache__/

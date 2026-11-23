@@ -111,6 +111,10 @@ gunzip -c image.tar.gz | docker load</pre>
           <input type="text" name="backupDir" id="settings-backup-dir" />
         </label>
         <p class="muted" data-i18n="settings.backupDir.hint"></p>
+        <label><span data-i18n="settings.backupKeep">Backups to keep per instance</span>
+          <input type="number" min="0" max="1000" step="1" id="settings-backup-keep" />
+        </label>
+        <p class="muted" data-i18n="settings.backupKeep.hint"></p>
         <fieldset class="display-fields" style="grid-template-columns: 1fr;">
           <legend data-i18n="settings.appBindHost.legend">This app's own network (not any instance's)</legend>
           <p class="muted" data-i18n="settings.appBindHost.hint"></p>

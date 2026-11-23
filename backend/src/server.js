@@ -2,6 +2,8 @@ const net = require('net');
 const fs = require('fs');
 const express = require('express');
 const path = require('path');
+// First, so the persistent log (lib/logFile.js) also gets what the requires below print.
+require('./lib/logFile').install();
 const auth = require('./lib/auth');
 
 // Every host in the fleet has a global-scope IPv6 address from Tailscale (the ULA

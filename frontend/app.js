@@ -1403,11 +1403,61 @@ function formatBytes(n) {
   return `${v.toFixed(1)} ${units[u]}`;
 }
 
-async function createBackupNow(inst, btn) {
+// 1.0.0-beta.8: backup and restore are background jobs (backend lib/backupJobs.js) -- the request
+// answers right away and the panel follows GET /instances/:id/backup-job until it ends.
+const backupJobs = {}; // instanceId -> last job seen
+const backupJobPollers = {};
+
+function followBackupJob(inst) {
+  if (backupJobPollers[inst.id]) return;
+  backupJobPollers[inst.id] = setInterval(async () => {
+    let job;
+    try { job = await api(`/instances/${inst.id}/backup-job`); } catch (e) { job = null; }
+    const before = backupJobs[inst.id];
+    backupJobs[inst.id] = job;
+    if (!job || job.state !== 'running') {
+      clearInterval(backupJobPollers[inst.id]);
+      delete backupJobPollers[inst.id];
+      backupsCache = null;
+      if (openStorageId === inst.id) backupsCache = await api('/backups').catch(() => []);
+      if (job && before && before.state === 'running') reportBackupJobEnd(inst, job);
+    }
+    loadInstances({ silent: true });
+  }, 1500);
+}
+
+function reportBackupJobEnd(inst, job) {
+  if (job.state === 'error') { alert(t('instances.storage.jobFailed', { kind: job.kind, name: inst.name, msg: job.error })); return; }
+  const r = job.result || {};
+  if (job.kind === 'restore') {
+    alert(r.warnings && r.warnings.length ? r.warnings.join('\n\n') : t('instances.storage.restoreNoWarnings'));
+    return;
+  }
+  const lines = [t('instances.storage.backupDone', { file: r.file })];
+  if (r.live) lines.push(t('instances.storage.backupWasLive'));
+  if (r.restartError) lines.push(t('instances.storage.backupRestartError', { msg: r.restartError }));
+  if (r.pruned && r.pruned.length) lines.push(t('instances.storage.backupPruned', { n: r.pruned.length }));
+  alert(lines.join('\n\n'));
+}
+
+function backupJobText(job) {
+  const secs = Math.round((job.elapsedMs || 0) / 1000);
+  const elapsed = secs >= 60 ? `${Math.floor(secs / 60)}m ${secs % 60}s` : `${secs}s`;
+  const phase = t(`instances.storage.phase.${job.phase || job.kind}`);
+  if (job.phase === 'archiving') {
+    const done = formatBytes(job.bytesDone || 0);
+    return job.bytesTotal
+      ? t('instances.storage.progressOf', { phase, done, total: formatBytes(job.bytesTotal), elapsed })
+      : t('instances.storage.progress', { phase, done, elapsed });
+  }
+  return t('instances.storage.progressPhase', { phase, elapsed });
+}
+
+async function createBackupNow(inst, btn, stopFirst) {
   btn.disabled = true;
   try {
-    await api(`/instances/${inst.id}/backup`, { method: 'POST' });
-    backupsCache = null;
+    backupJobs[inst.id] = await api(`/instances/${inst.id}/backup`, { method: 'POST', body: JSON.stringify({ stopFirst }) });
+    followBackupJob(inst);
   } catch (e) {
     alert(e.message);
   } finally {
@@ -1420,10 +1470,10 @@ async function restoreBackupOnto(inst, file, resetIdentity, btn) {
   if (!confirm(t('instances.storage.restoreConfirm', { file, name: inst.name }))) return;
   btn.disabled = true;
   try {
-    const { warnings } = await api(`/instances/${inst.id}/restore`, {
+    backupJobs[inst.id] = await api(`/instances/${inst.id}/restore`, {
       method: 'POST', body: JSON.stringify({ file, resetIdentity }),
     });
-    alert(warnings.length ? warnings.join('\n\n') : t('instances.storage.restoreNoWarnings'));
+    followBackupJob(inst);
   } catch (e) {
     alert(e.message);
   } finally {
@@ -1460,13 +1510,37 @@ function buildBackupsSection(inst) {
   // Backup/restore/delete are gated on "backup-restore" (docs/ROADMAP.md Phase 7) -- the
   // volume info and the list of what exists above/below stay visible to anyone who can see the
   // instance at all (read-only, not sensitive), only the actions that change something disappear.
-  if (AuthUi.can('backup-restore')) {
+  const job = backupJobs[inst.id];
+  const jobRunning = !!job && job.state === 'running';
+  if (jobRunning) {
+    const p = document.createElement('p');
+    p.className = 'backup-progress';
+    p.textContent = backupJobText(job);
+    wrap.appendChild(p);
+  } else if (AuthUi.can('backup-restore')) {
+    // 1.0.0-beta.8: a running instance gets two choices -- stop it for the backup (consistent) or
+    // copy it live (its databases may be caught half written; the restore is where that shows up).
+    const running = inst.status === 'running';
     const createBtn = document.createElement('button');
     createBtn.type = 'button';
     createBtn.className = 'secondary';
-    createBtn.textContent = t('instances.storage.createBackup');
-    createBtn.addEventListener('click', () => createBackupNow(inst, createBtn));
+    createBtn.textContent = t(running ? 'instances.storage.createBackupStopFirst' : 'instances.storage.createBackup');
+    createBtn.addEventListener('click', () => createBackupNow(inst, createBtn, running));
     wrap.appendChild(createBtn);
+    if (running) {
+      const liveBtn = document.createElement('button');
+      liveBtn.type = 'button';
+      liveBtn.className = 'secondary';
+      liveBtn.textContent = t('instances.storage.createBackupLive');
+      liveBtn.addEventListener('click', () => {
+        if (confirm(t('instances.storage.liveConfirm'))) createBackupNow(inst, liveBtn, false);
+      });
+      wrap.appendChild(liveBtn);
+      const hint = document.createElement('p');
+      hint.className = 'muted';
+      hint.textContent = t('instances.storage.liveHint');
+      wrap.appendChild(hint);
+    }
   }
 
   if (backupsCache === null) {
@@ -1494,8 +1568,13 @@ function buildBackupsSection(inst) {
     const li = document.createElement('li');
     const when = b.meta?.createdAt ? new Date(b.meta.createdAt).toLocaleString() : '?';
     const fromImage = b.meta?.dockerImage ? ` · ${b.meta.dockerImage}` : '';
-    li.innerHTML = `<code>${b.file}</code> <span class="muted">(${formatBytes(b.sizeBytes)}, ${when}${fromImage})</span> `;
-    if (AuthUi.can('backup-restore')) {
+    const code = document.createElement('code');
+    code.textContent = b.file;
+    const info = document.createElement('span');
+    info.className = 'muted';
+    info.textContent = ` (${formatBytes(b.sizeBytes)}, ${when}${fromImage}) `;
+    li.append(code, ' ', info);
+    if (AuthUi.can('backup-restore') && !jobRunning) {
       const restoreBtn = document.createElement('button');
       restoreBtn.type = 'button';
       restoreBtn.className = 'secondary';
@@ -2235,6 +2314,11 @@ async function loadInstances({ silent = false } = {}) {
           }
           if (backupsCache === null) backupsCache = await api('/backups').catch(() => []);
         }
+        if (opening) {
+          // A backup/restore started earlier (another tab, before a reload) is picked up here.
+          backupJobs[inst.id] = await api(`/instances/${inst.id}/backup-job`).catch(() => null);
+          if (backupJobs[inst.id] && backupJobs[inst.id].state === 'running') followBackupJob(inst);
+        }
         loadInstances({ silent: true });
       });
       buttons.appendChild(storageBtn);
@@ -2527,6 +2611,7 @@ async function loadSettings() {
   try {
     const settings = await api('/settings');
     $('#settings-backup-dir').value = settings.backupDir;
+    $('#settings-backup-keep').value = settings.backupKeepPerInstance || 0;
     renderNetIfacesSettings(await api('/network/interfaces/all'));
     renderAppBindHostsList(settings.appBindHosts || [], await loadNetworkInterfacesCache());
     // Operator quotas (docs/ROADMAP.md Phase 7, 25/10/2026) only mean anything once there is
@@ -2605,6 +2690,7 @@ $('#settings-form').addEventListener('submit', async (ev) => {
       method: 'PUT',
       body: JSON.stringify({
         backupDir, networkInterfaceOverrides, appBindHosts,
+        backupKeepPerInstance: Math.max(0, Math.floor(Number($('#settings-backup-keep').value) || 0)),
         operatorPoolMaxVcpus: vcpusVal ? Number(vcpusVal) : null,
         operatorPoolMaxMemoryMb: memVal ? Number(memVal) : null,
         encodeBackend: $('#settings-encode-backend').value || null,
@@ -2614,6 +2700,7 @@ $('#settings-form').addEventListener('submit', async (ev) => {
       }),
     });
     $('#settings-backup-dir').value = settings.backupDir;
+    $('#settings-backup-keep').value = settings.backupKeepPerInstance || 0;
     $('#settings-encode-backend').value = settings.encodeBackend || '';
     $('#settings-adb-port-start').value = settings.adbPortStart || '';
     $('#settings-adb-host').value = settings.adbHost || '';

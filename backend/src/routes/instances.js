@@ -15,6 +15,7 @@ const moduleScheduler = require('../lib/moduleScheduler');
 const instanceSupport = require('../lib/instanceSupport');
 const instanceParams = require('../lib/instanceParams');
 const backup = require('../lib/backup');
+const backupJobs = require('../lib/backupJobs');
 const fwknop = require('../lib/fwknop');
 const settings = require('../lib/settings');
 const permissions = require('../lib/permissions');
@@ -480,31 +481,54 @@ router.post('/', async (req, res) => {
   }
 });
 
+// The app's own start / stop, shared by their routes and by the "stop, back up, start again" backup
+// (1.0.0-beta.8). Callers check permissions and the lock first.
+async function startInstanceRuntime(instance) {
+  // It revalidates the contract on every start, not only at creation: if the
+  // manifest of a module this instance uses went up a version since it was
+  // created, the next start stays blocked until it is accepted again.
+  await revalidateModulesIfImageKnown(instance);
+  const requiredModuleIds = requiredModuleIdsFor(instance);
+  await moduleRunner.ensureHostInfraReady(requiredModuleIds);
+  await runtime.start(instance.containerId);
+  const reconciled = await reconcileDeviceProfile(instance);
+  scheduleWifiFixes(reconciled);
+  meminfoFix.scheduleRefresh(reconciled);
+  // Same catalog lookup as reconcileDeviceProfile/requiredModuleIdsFor -- androidVersion for
+  // hwenc/hwdec's AIDL/HIDL branching (codec2Service.js). undefined if the image is no
+  // longer in the catalog, which codec2Service treats as "assume AIDL" (today's only
+  // behaviour, unchanged).
+  const startedImg = catalog.find((i) => i.id === reconciled.imageId);
+  moduleRunner.scheduleRuntimeFixups(requiredModuleIds, reconciled.containerId, { androidVersion: startedImg?.androidVersion });
+  moduleScheduler.start(reconciled.id, reconciled.containerId, requiredModuleIds);
+  await applyKnockGuards(reconciled);
+  return reconciled;
+}
+
+async function stopInstanceRuntime(instance) {
+  moduleScheduler.stop(instance.id);
+  meminfoFix.release(instance.id);
+  await releaseWifiFixes(instance);
+  await releaseKnockGuards(instance);
+  await runtime.stop(instance.containerId);
+}
+
+// A restore, or a backup that stopped the instance, owns it until it finishes (1.0.0-beta.8).
+function assertNoBlockingJob(instance, action) {
+  const job = backupJobs.current(instance.id);
+  if (job && job.state === 'running' && job.blocksStart) {
+    throw httpError(`A ${job.kind} of "${instance.name}" is in progress -- wait for it to finish before you ${action} it.`, 409);
+  }
+}
+
 router.post('/:id/start', async (req, res) => {
   const instance = store.get(req.params.id);
   if (!instance) return res.status(404).json({ error: 'Instance not found' });
   try {
     permissions.assertCan(req.user, 'start-stop', instance);
     assertNotLocked(instance, 'start');
-    // It revalidates the contract on every start, not only at creation: if the
-    // manifest of a module this instance uses went up a version since it was
-    // created, the next start stays blocked until it is accepted again.
-    await revalidateModulesIfImageKnown(instance);
-    const requiredModuleIds = requiredModuleIdsFor(instance);
-    await moduleRunner.ensureHostInfraReady(requiredModuleIds);
-    await runtime.start(instance.containerId);
-    const reconciled = await reconcileDeviceProfile(instance);
-    scheduleWifiFixes(reconciled);
-    meminfoFix.scheduleRefresh(reconciled);
-    // Same catalog lookup as reconcileDeviceProfile/requiredModuleIdsFor -- androidVersion for
-    // hwenc/hwdec's AIDL/HIDL branching (codec2Service.js). undefined if the image is no
-    // longer in the catalog, which codec2Service treats as "assume AIDL" (today's only
-    // behaviour, unchanged).
-    const startedImg = catalog.find((i) => i.id === reconciled.imageId);
-    moduleRunner.scheduleRuntimeFixups(requiredModuleIds, reconciled.containerId, { androidVersion: startedImg?.androidVersion });
-    moduleScheduler.start(reconciled.id, reconciled.containerId, requiredModuleIds);
-    await applyKnockGuards(reconciled);
-    res.json(await withRuntimeStatus(reconciled));
+    assertNoBlockingJob(instance, 'start');
+    res.json(await withRuntimeStatus(await startInstanceRuntime(instance)));
   } catch (e) {
     sendError(res, e);
   }
@@ -515,11 +539,7 @@ router.post('/:id/stop', async (req, res) => {
   if (!instance) return res.status(404).json({ error: 'Instancia no encontrada' });
   try {
     permissions.assertCan(req.user, 'start-stop', instance);
-    moduleScheduler.stop(instance.id);
-    meminfoFix.release(instance.id);
-    await releaseWifiFixes(instance);
-    await releaseKnockGuards(instance);
-    await runtime.stop(instance.containerId);
+    await stopInstanceRuntime(instance);
     res.json(await withRuntimeStatus(instance));
   } catch (e) {
     sendError(res, e);
@@ -532,6 +552,7 @@ router.post('/:id/restart', async (req, res) => {
   try {
     permissions.assertCan(req.user, 'start-stop', instance);
     assertNotLocked(instance, 'restart');
+    assertNoBlockingJob(instance, 'restart');
     await revalidateModulesIfImageKnown(instance);
     const requiredModuleIds = requiredModuleIdsFor(instance);
     await moduleRunner.ensureHostInfraReady(requiredModuleIds);
@@ -1078,12 +1099,54 @@ router.get('/:id/storage', async (req, res) => {
 // against a running instance (mounts the volume read-only). The list of existing backups
 // is NOT instance-scoped (GET /api/backups): restoring onto a different instance than the
 // one that made the backup is a supported use case, not a special case.
+// 1.0.0-beta.8: background jobs (lib/backupJobs.js) -- both answer 202 with the job right away;
+// GET /:id/backup-job follows it. Body: { stopFirst? }.
+//
+// A backup of a RUNNING instance copies /data while Android keeps writing to it: its SQLite
+// databases (accounts, Play services, the apps' own) can be caught half written, and that only
+// shows up when the backup is restored. stopFirst: true stops the instance, backs it up and starts
+// it again (unless it is locked) -- the consistent option; without it the backup is taken live,
+// as before, and the page warns about it.
 router.post('/:id/backup', async (req, res) => {
   const instance = store.get(req.params.id);
   if (!instance) return res.status(404).json({ error: 'Instancia no encontrada' });
   try {
     permissions.assertCan(req.user, 'backup-restore', instance);
-    res.status(201).json(await backup.createBackup(instance, settings.get().backupDir, { createdBy: req.user?.id || null }));
+    const stopFirst = !!(req.body && req.body.stopFirst);
+    if (stopFirst) permissions.assertCan(req.user, 'start-stop', instance);
+    if (!instance.volumeName) throw httpError('This instance has no volume to back up.', 409);
+    const info = await runtime.inspect(instance.containerId).catch(() => null);
+    const wasRunning = info?.State?.Status === 'running';
+    const createdBy = req.user?.id || null;
+    const job = backupJobs.start(instance.id, 'backup', async (j) => {
+      let restartError = null;
+      let backupResult;
+      try {
+        if (stopFirst && wasRunning) {
+          j.phase = 'stopping';
+          await stopInstanceRuntime(instance);
+        }
+        j.phase = 'archiving';
+        backupResult = await backup.createBackup(instance, settings.get().backupDir, {
+          createdBy,
+          onProgress: ({ bytesTotal, bytesDone }) => { j.bytesTotal = bytesTotal; j.bytesDone = bytesDone; },
+        });
+      } finally {
+        if (stopFirst && wasRunning) {
+          const fresh = store.get(instance.id) || instance;
+          if (fresh.locked) {
+            restartError = 'not started again: the instance is locked';
+          } else {
+            j.phase = 'starting';
+            try { await startInstanceRuntime(fresh); } catch (e) { restartError = `could not start it again: ${e.message}`; }
+          }
+        }
+      }
+      const pruned = backup.pruneBackups(settings.get().backupDir, instance.id, settings.get().backupKeepPerInstance);
+      return { file: backupResult.file, live: wasRunning && !stopFirst, pruned, restartError };
+    });
+    if (stopFirst && wasRunning) backupJobs.markBlocking(instance.id);
+    res.status(202).json(job);
   } catch (e) {
     sendError(res, e);
   }
@@ -1099,9 +1162,29 @@ router.post('/:id/restore', async (req, res) => {
     const { file, resetIdentity } = req.body || {};
     // 1.0.0-beta.8: owning the TARGET is not enough -- the backup has to be yours too.
     if (!permissions.canAccessBackup(req.user, backup.readMeta(settings.get().backupDir, file), store.readAll())) {
-      throw Object.assign(new Error('Not allowed: this backup belongs to an instance you do not own'), { httpStatus: 403 });
+      throw httpError('Not allowed: this backup belongs to an instance you do not own', 403);
     }
-    res.json(await backup.restoreBackup(instance, settings.get().backupDir, file, { resetIdentity: !!resetIdentity }));
+    const info = await runtime.inspect(instance.containerId).catch(() => null);
+    if (info?.State?.Status === 'running') {
+      throw httpError('Stop the instance before restoring a backup -- its /data cannot be safely replaced while it is running.', 409);
+    }
+    const job = backupJobs.start(instance.id, 'restore', async (j) => {
+      j.phase = 'restoring';
+      return backup.restoreBackup(instance, settings.get().backupDir, file, { resetIdentity: !!resetIdentity });
+    });
+    backupJobs.markBlocking(instance.id);
+    res.status(202).json(job);
+  } catch (e) {
+    sendError(res, e);
+  }
+});
+
+router.get('/:id/backup-job', (req, res) => {
+  const instance = store.get(req.params.id);
+  if (!instance) return res.status(404).json({ error: 'Instancia no encontrada' });
+  try {
+    permissions.assertCan(req.user, 'view', instance);
+    res.json(backupJobs.current(instance.id));
   } catch (e) {
     sendError(res, e);
   }

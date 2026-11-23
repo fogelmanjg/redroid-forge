@@ -22,8 +22,14 @@ test('backupFileName: instance name + timestamp, no characters Docker/the filesy
 test('createBackup: runs tar through alpine mounted read-only, writes a sidecar with the real digest/modules', async (t) => {
   t.mock.method(runtime, 'getImageDigest', async () => DIGEST_A);
   let ephemeralArgs;
-  t.mock.method(runtime, 'runEphemeral', async (...args) => { ephemeralArgs = args; return ''; });
   const dir = tmpDir();
+  // Fakes what the real alpine run leaves behind: the du size file and the .partial archive.
+  t.mock.method(runtime, 'runEphemeral', async (...args) => {
+    ephemeralArgs = args;
+    const f = /\.partial'/.test(args[1][2]) ? args[1][2].match(/'\/backup\/(\.[^']+\.partial)'/)[1] : null;
+    fs.writeFileSync(path.join(dir, f), 'tgz');
+    return '';
+  });
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
 
   const instance = {
@@ -34,7 +40,10 @@ test('createBackup: runs tar through alpine mounted read-only, writes a sidecar 
 
   const [image, cmd, binds] = ephemeralArgs;
   assert.strictEqual(image, 'alpine');
-  assert.deepStrictEqual(cmd, ['tar', 'czf', `/backup/${result.file}`, '-C', '/data', '.']);
+  // 1.0.0-beta.8: du first (progress), tar into a hidden .partial renamed only on success.
+  assert.deepStrictEqual(cmd, ['sh', '-c', `du -sk /data | cut -f1 > '/backup/.${result.file}.srckb' && tar czf '/backup/.${result.file}.partial' -C /data .`]);
+  assert.ok(fs.existsSync(result.path), 'renamed to its final name');
+  assert.ok(!fs.existsSync(path.join(dir, `.${result.file}.partial`)));
   assert.deepStrictEqual(binds, ['redroid-forge-aurora-host-test:/data:ro', `${dir}:/backup`]);
 
   assert.strictEqual(result.meta.dockerImage, 'redroid/redroid:15.0.0-latest');

@@ -21,6 +21,10 @@ function httpError(message, httpStatus) {
   return Object.assign(new Error(message), { httpStatus });
 }
 
+// tar of a whole /data (18 GB on a real instance) takes far longer than the 5 minutes this used to
+// allow -- a big backup was being cut off, and a big restore left the volume half extracted.
+const BIG_JOB_TIMEOUT_MS = 6 * 60 * 60 * 1000;
+
 function backupFileName(instanceName, when = new Date()) {
   return `${instanceName}-${when.toISOString().replace(/[:.]/g, '-')}.tar.gz`;
 }
@@ -51,20 +55,59 @@ async function captureMeta(instance, createdBy = null) {
 
 // Mounts the volume read-only -- safe to run against an instance that is currently running
 // (same characteristic jg-dashboard's own backup() already has; not a regression).
-async function createBackup(instance, backupDir, { createdBy = null } = {}) {
+async function createBackup(instance, backupDir, { createdBy = null, onProgress = () => {}, pollMs = 1000 } = {}) {
   if (!instance.volumeName) throw httpError('This instance has no volume to back up.', 409);
   fs.mkdirSync(backupDir, { recursive: true });
   const file = backupFileName(instance.name);
   const dest = path.join(backupDir, file);
+  // 1.0.0-beta.8: written under a hidden ".partial" name and renamed only once tar finished OK --
+  // before, a backup that failed or timed out half way stayed in the list looking like a good one.
+  // The size of what is being archived is measured first (du), so the page can show progress.
+  const partial = path.join(backupDir, `.${file}.partial`);
+  const sizeFile = path.join(backupDir, `.${file}.srckb`);
   const meta = await captureMeta(instance, createdBy);
-  await runtime.runEphemeral(
-    'alpine',
-    ['tar', 'czf', `/backup/${file}`, '-C', '/data', '.'],
-    [`${instance.volumeName}:/data:ro`, `${backupDir}:/backup`],
-    300000,
-  );
+  let bytesTotal = null;
+  const timer = setInterval(() => {
+    try {
+      if (bytesTotal === null) {
+        const kb = Number(fs.readFileSync(sizeFile, 'utf-8').trim());
+        if (Number.isFinite(kb) && kb > 0) bytesTotal = kb * 1024;
+      }
+    } catch { /* du still running */ }
+    let bytesDone = 0;
+    try { bytesDone = fs.statSync(partial).size; } catch { /* tar not started yet */ }
+    onProgress({ bytesTotal, bytesDone });
+  }, pollMs);
+  try {
+    await runtime.runEphemeral(
+      'alpine',
+      ['sh', '-c', `du -sk /data | cut -f1 > '/backup/.${file}.srckb' && tar czf '/backup/.${file}.partial' -C /data .`],
+      [`${instance.volumeName}:/data:ro`, `${backupDir}:/backup`],
+      BIG_JOB_TIMEOUT_MS,
+    );
+    fs.renameSync(partial, dest);
+  } catch (e) {
+    try { fs.unlinkSync(partial); } catch { /* never created */ }
+    throw e;
+  } finally {
+    clearInterval(timer);
+    try { fs.unlinkSync(sizeFile); } catch { /* never created */ }
+  }
+  meta.sourceBytes = bytesTotal;
   fs.writeFileSync(metaFileFor(dest), JSON.stringify(meta, null, 2));
   return { file, path: dest, meta };
+}
+
+// 1.0.0-beta.8: keep only the newest `keep` backups of this instance (0 = keep all). Only backups
+// whose sidecar says they come from this instance id -- never someone else's, never pre-beta.8 ones.
+function pruneBackups(backupDir, instanceId, keep) {
+  if (!keep || keep < 1 || !instanceId) return [];
+  const mine = listBackups(backupDir).filter((b) => b.meta && b.meta.instanceId === instanceId);
+  const removed = [];
+  for (const b of mine.slice(keep)) {
+    try { deleteBackup(backupDir, b.file); removed.push(b.file); } catch { /* already gone */ }
+  }
+  return removed;
 }
 
 // Every backup in backupDir, not filtered by instance -- restoring a backup onto a
@@ -150,7 +193,7 @@ async function restoreBackup(instance, backupDir, file, { resetIdentity = false 
     'alpine',
     ['sh', '-c', 'find /data -mindepth 1 -delete && tar xzf /backup.tar.gz -C /data'],
     [`${instance.volumeName}:/data`, `${backupPath}:/backup.tar.gz:ro`],
-    300000,
+    BIG_JOB_TIMEOUT_MS,
   );
   if (resetIdentity) {
     await runtime.runEphemeral(
@@ -166,5 +209,5 @@ async function restoreBackup(instance, backupDir, file, { resetIdentity = false 
 }
 
 module.exports = {
-  createBackup, listBackups, restoreBackup, deleteBackup, readMeta, backupFileName, compatibilityWarnings,
+  createBackup, listBackups, restoreBackup, deleteBackup, readMeta, pruneBackups, BIG_JOB_TIMEOUT_MS, backupFileName, compatibilityWarnings,
 };

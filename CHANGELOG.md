@@ -27,6 +27,31 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
 
 ## [Unreleased]
 
+### Added
+- **Backups: "Back up (stops it, starts it again)".** A backup of a running instance copies /data
+  while Android keeps writing to its databases, and can catch one half written -- which only shows
+  when it is restored. On a running instance the Storage panel now offers stopping it for the
+  backup (and starting it again, unless it is locked) or a live backup with that warning.
+- **Backups and restores run in the background, with progress.** They used to run inside the HTTP
+  request: minutes with no feedback for a big /data. Now the panel shows the phase, how much has been
+  written out of how much data, and how long it has been; it picks a running one up again after a
+  reload. Starting or restarting an instance is refused while a restore or a stop-first backup owns
+  it.
+- **Settings > Backups to keep per instance.** After each new backup, older backups of that same
+  instance beyond the number are deleted (0 = keep all, the default). Never touches another
+  instance's backups or ones made before this version.
+- **Persistent log** at `backend/data/logs/forge.log` (rotated by size), because Docker's own log
+  of the container is deleted on every update. Docker's log is now capped too (it had no limit).
+
+### Fixed
+- **A big backup or restore was cut off after 5 minutes** (a whole /data of several GB takes
+  longer). The limit is now 6 hours. A backup that fails or is cut off no longer stays in the list
+  looking like a good one: it is written under a hidden temporary name and only renamed when tar
+  finished.
+- **Post-start steps kept `docker exec`-ing an instance that had already stopped**, every few
+  seconds for minutes (seen live: an instance locked 22 s after starting got ~60 execs over 2.5
+  minutes). They now stop at the first "container is not running".
+
 ### Security
 - **The login page no longer gives away account names.** `GET /api/auth/setup/status` answers
   before login and returned every local username plus the repo path. Now those only go to "none"

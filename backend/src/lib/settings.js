@@ -27,6 +27,9 @@ const DEFAULTS = {
   // own judgment with nothing to configure; an admin only needs this once a specific interface
   // on their own host is mis-classified either way.
   networkInterfaceOverrides: {},
+  // 1.0.0-beta.8: after each new backup of an instance, keep only its newest N backups (0 = keep
+  // every one, as before). Only that instance's own backups (by id), never pre-beta.8 ones.
+  backupKeepPerInstance: 0,
   // Which addresses THIS APP's own server listens on, IN ADDITION to 127.0.0.1 (not any
   // instance's) -- same shape as an instance's own bindHosts, except localhost is implicit and
   // can never be left out (see routes/settings.js), since nothing else can reach this app at all

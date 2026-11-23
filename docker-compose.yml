@@ -150,3 +150,11 @@ services:
       - ${REDROID_FORGE_BACKUPS_DIR:-${PWD}/backend/data/backups}:${REDROID_FORGE_BACKUPS_DIR:-${PWD}/backend/data/backups}
       - ${REDROID_FORGE_MEMINFO_FIX_DIR:-${PWD}/backend/data/meminfo-fix}:${REDROID_FORGE_MEMINFO_FIX_DIR:-${PWD}/backend/data/meminfo-fix}
     restart: unless-stopped
+    # 1.0.0-beta.8: Docker's own log of this container is capped (it had no limit) -- and it is
+    # deleted on every update anyway, when the container is recreated. The history that survives
+    # updates is backend/data/logs/forge.log (backend/src/lib/logFile.js).
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "3"

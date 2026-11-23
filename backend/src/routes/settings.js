@@ -89,8 +89,11 @@ router.put('/', async (req, res) => {
   if (!permissions.canManageSettings(req.user)) return res.status(403).json({ error: 'Admin only' });
   const {
     backupDir, networkInterfaceOverrides, appBindHosts, operatorPoolMaxVcpus, operatorPoolMaxMemoryMb, encodeBackend,
-    adbPortStart, adbPortEnd, adbHost,
+    adbPortStart, adbPortEnd, adbHost, backupKeepPerInstance,
   } = req.body || {};
+  if (backupKeepPerInstance !== undefined && !(Number.isInteger(backupKeepPerInstance) && backupKeepPerInstance >= 0 && backupKeepPerInstance <= 1000)) {
+    return res.status(400).json({ error: 'backupKeepPerInstance must be an integer from 0 (keep all) to 1000' });
+  }
   if (adbHost !== undefined && adbHost !== null && adbHost !== ''
     && (typeof adbHost !== 'string' || !ADB_HOST_RE.test(adbHost.trim()))) {
     return res.status(400).json({ error: 'adbHost must be a host name or an IP address (no port, no scheme), or empty' });
@@ -161,6 +164,7 @@ router.put('/', async (req, res) => {
   if (adbPortStart !== undefined) patch.adbPortStart = adbPortStart === '' ? null : adbPortStart;
   if (adbPortEnd !== undefined) patch.adbPortEnd = adbPortEnd === '' ? null : adbPortEnd;
   if (adbHost !== undefined) patch.adbHost = adbHost ? adbHost.trim() : null;
+  if (backupKeepPerInstance !== undefined) patch.backupKeepPerInstance = backupKeepPerInstance;
   const updated = settings.update(patch);
   // Unlike authMode (needs a full app restart, never automated -- see auth.js's own comment),
   // this one can be hot-applied: hwAccel.restartDaemonWithCurrentSettings() waits for the old

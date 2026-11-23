@@ -3,6 +3,7 @@ const path = require('path');
 const cp = require('child_process');
 const runtime = require('./dockerRuntime');
 const store = require('./store');
+const { isContainerGone } = require('./androidExec');
 
 // This is deliberately NOT `promisify(execFile)` (as before, neither resolved
 // once at import time nor per call): `child_process.execFile` carries its own
@@ -105,6 +106,7 @@ async function ensureNetfixDaemon(containerId) {
       await runtime.exec(containerId, ['sh', '-c', NETFIX_SCRIPT]);
       return;
     } catch (e) {
+      if (isContainerGone(e)) return; // beta.8: stopped meanwhile -- nothing left to fix
       if (attempt === NETFIX_MAX_ATTEMPTS) {
         warn(`could not ensure jg_netfix.sh is running in ${containerId} after ${attempt} attempts: ${e.message || e}`);
         return;
@@ -443,7 +445,10 @@ async function ensureWifiConnected(instanceId, containerId, timing = WIFI_TIMING
     // ("\u0001\u0000...\u0002" before the "1"): strip control characters before comparing.
     try {
       booted = String(await execMaybeSu(containerId, 'getprop sys.boot_completed')).replace(/[\x00-\x08\x0e-\x1f]/g, '').trim();
-    } catch (e) { /* not up yet */ }
+    } catch (e) {
+      if (isContainerGone(e)) { log(`${instanceId} stopped before finishing boot; wifi left alone`); return; }
+      /* not up yet */
+    }
     if (booted === '1') break;
     if (Date.now() > bootDeadline) { warn(`${instanceId} did not finish booting in time; trying wifi anyway`); break; }
     await sleep(timing.pollMs);
@@ -465,6 +470,7 @@ async function ensureWifiConnected(instanceId, containerId, timing = WIFI_TIMING
       await sleep(timing.enableWaitMs);
       await execMaybeSu(containerId, 'cmd wifi connect-network jg-wifi open');
     } catch (e) {
+      if (isContainerGone(e)) { log(`${instanceId} stopped; wifi left alone`); return; }
       warn(`attempt ${i + 1} failed for ${instanceId}: ${e}`);
     }
     await sleep(timing.afterConnectMs);
@@ -491,6 +497,7 @@ async function ensureEth0Routing(instanceId, containerId) {
     try {
       await execMaybeSu(containerId, script);
     } catch (e) {
+      if (isContainerGone(e)) return; // beta.8: stopped meanwhile
       warn(`ip rule add failed for ${instanceId} (attempt ${attempt}): ${e}`);
       await new Promise((r) => setTimeout(r, RETRY_DELAY_MS));
       continue;
