@@ -577,8 +577,8 @@ async function checkImagesPresent() {
 // registered by hand at https://www.google.com/android/uncertified within 48
 // hours of the first boot with GApps. This is a human step, not something the
 // code can do on its own — this check only prevents it from being overlooked.
-function checkAndroidIdRegistration() {
-  const pending = store.readAll().filter((i) => i.hasGapps && !i.androidIdRegisteredAt);
+function checkAndroidIdRegistration({ list = () => store.readAll() } = {}) {
+  const pending = list().filter((i) => i.hasGapps && !i.androidIdRegisteredAt);
   if (pending.length === 0) {
     return [{
       id: 'android-id-registration',
@@ -796,4 +796,31 @@ async function runAll() {
   return checks;
 }
 
-module.exports = { runAll, checkKnownDb, checkGrallocFix, checkActiveVideoSessions, classifyScrcpyServers, checkAdbPortRange, checkLockedInstances };
+// What a non-admin sees (1.0.0-beta.11): only the checks about THEIR OWN instances, plus a yes/no
+// "the host has a problem" -- never the host details themselves (hardware, firewall, GPU stack) nor
+// anything about other people's instances. Only "fail" counts as a host problem: some host checks
+// sit at "warn" by design on a healthy install (fwknop on a host that does not use it), and a
+// permanent "ask your admin" nobody can clear would teach people to ignore it.
+const INSTANCE_CHECK = /^(active-video-sessions|locked-instances|redroid-gralloc-fix|android-id-)/;
+
+async function runForUser(instances, { all = runAll } = {}) {
+  const list = () => instances;
+  const [full, video, gralloc] = await Promise.all([
+    all(),
+    checkActiveVideoSessions({ list }).catch((e) => ({ status: 'warn', detail: `could not be checked: ${e.message}` })),
+    checkGrallocFix({ list }).catch((e) => [{ id: 'redroid-gralloc-fix', label: 'Known redroid bug: gralloc crash on 10-bit formats', status: 'warn', detail: `could not be checked: ${e.message}` }]),
+  ]);
+  const hostProblem = full.some((c) => !INSTANCE_CHECK.test(c.id) && c.status === 'fail');
+  return {
+    scope: 'user',
+    hostProblem,
+    checks: [
+      { id: 'active-video-sessions', label: 'Active video sessions (scrcpy)', ...video },
+      { id: 'locked-instances', label: 'Locked instances', ...checkLockedInstances({ list }) },
+      ...gralloc,
+      ...checkAndroidIdRegistration({ list }),
+    ],
+  };
+}
+
+module.exports = { runAll, runForUser, checkKnownDb, checkGrallocFix, checkActiveVideoSessions, classifyScrcpyServers, checkAdbPortRange, checkLockedInstances };

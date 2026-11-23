@@ -163,9 +163,8 @@ async function applyResources(instanceId, { memoryMb, cpusetCpus }) {
 let hostCoreCount = null;
 async function loadHostCoreCount() {
   try {
-    const checks = await api('/doctor');
-    const cpu = checks.find((c) => c.id === 'cpu-count');
-    hostCoreCount = cpu && typeof cpu.cores === 'number' ? cpu.cores : null;
+    const { cores } = await api('/doctor/cores');
+    hostCoreCount = typeof cores === 'number' ? cores : null;
   } catch { hostCoreCount = null; }
 }
 
@@ -3507,13 +3506,26 @@ async function loadDoctor() {
   const list = $('#doctor-list');
   list.innerHTML = `<li>${t('doctor.running')}</li>`;
   try {
-    const checks = await api('/doctor');
+    const result = await api('/doctor');
+    // A non-admin gets { scope: 'user', hostProblem, checks } (1.0.0-beta.11, routes/doctor.js):
+    // only their own instances' checks, and a plain notice instead of the host's details.
+    const checks = Array.isArray(result) ? result : result.checks;
     // Worst first (15/11/2026, explicit ask): what needs attention should never be buried below
     // a page of green checks. A stable sort, so checks that tie on status keep the backend's own
     // order among themselves (whatever sequence doctor.js runs them in) rather than reshuffling
     // for no reason -- Array.prototype.sort is spec-guaranteed stable since ES2019.
     const sorted = checks.slice().sort((a, b) => (DOCTOR_STATUS_ORDER[a.status] ?? 1) - (DOCTOR_STATUS_ORDER[b.status] ?? 1));
     list.innerHTML = '';
+    if (!Array.isArray(result) && result.hostProblem) {
+      const li = document.createElement('li');
+      li.className = 'doctor-item';
+      const label = document.createElement('div');
+      label.className = 'label';
+      label.innerHTML = '<span class="status-dot fail"></span> ';
+      label.appendChild(document.createTextNode(t('doctor.hostProblem')));
+      li.appendChild(label);
+      list.appendChild(li);
+    }
     for (const c of sorted) {
       const li = document.createElement('li');
       li.className = 'doctor-item';

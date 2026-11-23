@@ -27,6 +27,16 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
 
 ## [Unreleased]
 
+## [1.0.0-beta.11] - 2026-11-23
+
+### Security
+- Doctor no longer shows a non-admin user the whole host: they get only the checks about their own
+  instances (video sessions, locks, gralloc bug, Android ID registration), plus a plain "the server
+  has a problem, ask your administrator" when a host check fails -- never the host details
+  (hardware, firewall, GPU stack) nor anything about other people's instances. Admins see the full
+  list as before. The core count the CPU picker needs moved to `GET /api/doctor/cores`.
+- `GET /api/network/interfaces/all` (the admin Settings panel's full interface list) is admin only.
+
 ## [1.0.0-beta.10] - 2026-11-23
 
 ### Added

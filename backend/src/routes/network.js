@@ -1,6 +1,7 @@
 const express = require('express');
 const os = require('os');
 const settings = require('../lib/settings');
+const permissions = require('../lib/permissions');
 const { isVisible, isNoisyByDefault } = require('../lib/networkInterfaceFilter');
 
 const router = express.Router();
@@ -39,6 +40,8 @@ router.get('/interfaces', (req, res) => {
 // Settings "Network interfaces" panel renders so an admin can correct the heuristic's default,
 // not what the per-instance picker above uses.
 router.get('/interfaces/all', (req, res) => {
+  // Admin only (1.0.0-beta.11): it feeds the admin Settings panel and lists every host interface.
+  if (!permissions.canManageSettings(req.user)) return res.status(403).json({ error: 'Admin only' });
   const overrides = settings.get().networkInterfaceOverrides;
   const byIface = new Map();
   for (const a of rawAddresses()) {
