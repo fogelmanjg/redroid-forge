@@ -20,6 +20,9 @@ const ScrcpyLauncher = (() => {
   const t = (k, p) => I18n.t(k, p);
   const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
 
+  // The ADB host (app.js adbHost(): Settings > ADB address for clients, or the page's host name). The
+  // test uses it too, so it proves exactly the address the 📲 links will use.
+  let host = () => location.hostname;
   let saved = load();
   let onChange = () => {};
   let testing = false;
@@ -36,7 +39,7 @@ const ScrcpyLauncher = (() => {
 
   // The link carries host:port only -- the launcher validates it and never takes free arguments.
   function linkFor(inst) {
-    return `scrcpy-redroid://connect/${location.hostname}:${inst.adbPort}/${encodeURIComponent(inst.name || '')}`;
+    return `scrcpy-redroid://connect/${host()}:${inst.adbPort}/${encodeURIComponent(inst.name || '')}`;
   }
 
   // Gives a scrcpy-redroid:// URL to the OS's handler. A top-level navigation to an external scheme
@@ -138,7 +141,7 @@ const ScrcpyLauncher = (() => {
     detailEl.textContent = t('scrcpyLauncher.result.waitingDetail');
     // A link click, not location.assign: if no handler exists most browsers just do nothing (or show
     // their own "no application" notice) instead of navigating away from the page.
-    handOff(`scrcpy-redroid://test/${location.hostname}:${started.port}/${started.code}`);
+    handOff(`scrcpy-redroid://test/${host()}:${started.port}/${started.code}`);
 
     const deadline = Date.now() + Math.min(WAIT_MS, started.expiresInMs || WAIT_MS);
     let r = { state: 'pending' };
@@ -186,7 +189,8 @@ const ScrcpyLauncher = (() => {
     onChange();
   }
 
-  function init({ button, dialogEl, changed }) {
+  function init({ button, dialogEl, changed, adbHost }) {
+    if (adbHost) host = adbHost;
     btn = button;
     dialog = dialogEl;
     onChange = changed || onChange;

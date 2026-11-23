@@ -130,6 +130,10 @@ async function restoreBackup(instance, backupDir, file, { resetIdentity = false 
   try { meta = JSON.parse(fs.readFileSync(metaFileFor(backupPath), 'utf-8')); } catch { /* no/invalid sidecar */ }
   const warnings = compatibilityWarnings(meta, instance);
 
+  // Hostile archive paths were checked (22/11/2026, 1.0.0-beta.7 security review): alpine's busybox
+  // tar strips leading "../" and "/" from member names and refuses a symlink to "/", so nothing lands
+  // outside /data -- and this runs in a throwaway container whose only mounts are the volume and the
+  // read-only archive anyway.
   await runtime.runEphemeral(
     'alpine',
     ['sh', '-c', 'find /data -mindepth 1 -delete && tar xzf /backup.tar.gz -C /data'],

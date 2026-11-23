@@ -9,8 +9,33 @@ const { IP_SHAPE_RE } = require('../lib/instanceParams');
 
 const router = express.Router();
 
+// Admin only, and OIDC client secrets never leave the server (1.0.0-beta.7 security review): this
+// used to answer any logged-in account -- a "viewer" too -- with the whole settings file, including
+// the clientSecret of every OIDC provider added from the UI. The Settings tab is admin-only anyway,
+// and the providers' own editor (GET /api/auth/oidc-providers) already keeps secrets out.
+// Host name, IPv4, or a bracket-less IPv6 -- what goes before ":<port>" in an address.
+const ADB_HOST_RE = /^([A-Za-z0-9]([A-Za-z0-9.-]{0,251}[A-Za-z0-9])?|[0-9A-Fa-f:.]{2,45})$/;
+
+// What any logged-in page needs from the settings, nothing else (GET / above is admin only).
+function clientSettings(all, env = process.env) {
+  return { adbHost: all.adbHost || env.REDROID_FORGE_ADB_HOST || null };
+}
+
+function redactSettings(all) {
+  const out = { ...all };
+  if (Array.isArray(out.oidcProviders)) {
+    out.oidcProviders = out.oidcProviders.map(({ clientSecret, ...p }) => ({ ...p, hasClientSecret: !!clientSecret }));
+  }
+  return out;
+}
+
+router.get('/client', (req, res) => {
+  res.json(clientSettings(settings.get()));
+});
+
 router.get('/', (req, res) => {
-  res.json(settings.get());
+  if (!permissions.canManageSettings(req.user)) return res.status(403).json({ error: 'Admin only' });
+  res.json(redactSettings(settings.get()));
 });
 
 // Live check while the admin is still typing a range in Settings, before saving it -- same
@@ -64,8 +89,12 @@ router.put('/', async (req, res) => {
   if (!permissions.canManageSettings(req.user)) return res.status(403).json({ error: 'Admin only' });
   const {
     backupDir, networkInterfaceOverrides, appBindHosts, operatorPoolMaxVcpus, operatorPoolMaxMemoryMb, encodeBackend,
-    adbPortStart, adbPortEnd,
+    adbPortStart, adbPortEnd, adbHost,
   } = req.body || {};
+  if (adbHost !== undefined && adbHost !== null && adbHost !== ''
+    && (typeof adbHost !== 'string' || !ADB_HOST_RE.test(adbHost.trim()))) {
+    return res.status(400).json({ error: 'adbHost must be a host name or an IP address (no port, no scheme), or empty' });
+  }
   if (backupDir !== undefined && (typeof backupDir !== 'string' || backupDir.trim() === '')) {
     return res.status(400).json({ error: 'backupDir must be a non-empty string' });
   }
@@ -131,6 +160,7 @@ router.put('/', async (req, res) => {
   const beforeAdbPorts = { start: settings.get().adbPortStart, end: settings.get().adbPortEnd };
   if (adbPortStart !== undefined) patch.adbPortStart = adbPortStart === '' ? null : adbPortStart;
   if (adbPortEnd !== undefined) patch.adbPortEnd = adbPortEnd === '' ? null : adbPortEnd;
+  if (adbHost !== undefined) patch.adbHost = adbHost ? adbHost.trim() : null;
   const updated = settings.update(patch);
   // Unlike authMode (needs a full app restart, never automated -- see auth.js's own comment),
   // this one can be hot-applied: hwAccel.restartDaemonWithCurrentSettings() waits for the old
@@ -176,7 +206,7 @@ router.put('/', async (req, res) => {
   // timeout) for that connection to end -- awaiting it before res.json() would deadlock the
   // request against its own response. The setting is already saved either way (settings.update()
   // ran above), so there's nothing wrong with the client getting its answer first.
-  res.json(updated);
+  res.json(redactSettings(updated));
   if (appBindHostsChanged) {
     try {
       await httpListeners.restart();
@@ -187,3 +217,6 @@ router.put('/', async (req, res) => {
 });
 
 module.exports = router;
+module.exports.redactSettings = redactSettings;
+module.exports.clientSettings = clientSettings;
+module.exports.ADB_HOST_RE = ADB_HOST_RE;

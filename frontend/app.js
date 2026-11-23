@@ -38,6 +38,16 @@ async function api(path, opts) {
   return res.json();
 }
 
+// The host clients use for ADB (Settings > ADB address for clients, 1.0.0-beta.7); the page's own
+// host name when not set. Loaded once at startup (and after saving Settings) from
+// GET /api/settings/client, which any logged-in account may read.
+let clientSettings = { adbHost: null };
+function adbHost() { return clientSettings.adbHost || location.hostname; }
+async function loadClientSettings() {
+  try { clientSettings = await api('/settings/client'); } catch (e) { /* keep the page host */ }
+}
+
+
 // Live "is this ADB port free?" check shared by the create dialog, the Configure panel and
 // Settings' own range field -- all three talk to the same backend source of truth
 // (portAllocator.js) through two thin endpoints (GET /instances/adb-port-check,
@@ -308,8 +318,8 @@ function effectiveViewersSize() {
   const gapPx = 16;   // .instances-grid gap: 1rem
   const cardPadPx = 24; // .instance-card padding 0.7rem on both sides + its 1px borders
   const colPx = (grid.clientWidth - gapPx * (n - 1)) / n - cardPadPx;
-  // Same [60,480] range the backend clamps to anyway (screenshotCapture.js's clampSize).
-  return Math.max(60, Math.min(480, Math.round(colPx)));
+  // Same [60,1080] range the backend clamps to anyway (screenshotCapture.js's clampSize).
+  return Math.max(60, Math.min(1080, Math.round(colPx)));
 }
 
 function applyViewersLayout() {
@@ -1884,7 +1894,7 @@ async function loadInstances({ silent = false } = {}) {
         return btn;
       };
       const buildAddressSpan = (className) => {
-        const address = `${location.hostname}:${inst.adbPort}`;
+        const address = `${adbHost()}:${inst.adbPort}`;
         const addrSpan = document.createElement('span');
         addrSpan.className = className;
         addrSpan.textContent = address;
@@ -2528,6 +2538,7 @@ async function loadSettings() {
     $('#settings-pool-max-memory-mb').value = settings.operatorPoolMaxMemoryMb || '';
     $('#settings-encode-backend').value = settings.encodeBackend || '';
     $('#settings-adb-port-start').value = settings.adbPortStart || '';
+    $('#settings-adb-host').value = settings.adbHost || '';
     $('#settings-adb-port-end').value = settings.adbPortEnd || '';
     loadHwencDaemonStatus();
   } catch (e) {
@@ -2598,16 +2609,19 @@ $('#settings-form').addEventListener('submit', async (ev) => {
         operatorPoolMaxMemoryMb: memVal ? Number(memVal) : null,
         encodeBackend: $('#settings-encode-backend').value || null,
         adbPortStart: adbStartVal ? Number(adbStartVal) : null,
+        adbHost: $('#settings-adb-host').value.trim() || null,
         adbPortEnd: adbEndVal ? Number(adbEndVal) : null,
       }),
     });
     $('#settings-backup-dir').value = settings.backupDir;
     $('#settings-encode-backend').value = settings.encodeBackend || '';
     $('#settings-adb-port-start').value = settings.adbPortStart || '';
+    $('#settings-adb-host').value = settings.adbHost || '';
     $('#settings-adb-port-end').value = settings.adbPortEnd || '';
     networkInterfacesCache = null; // the new filter (if changed above) applies to this list too, and to the per-instance Configure panel next time it opens
     renderAppBindHostsList(settings.appBindHosts || [], await loadNetworkInterfacesCache());
     saved.hidden = false;
+    loadClientSettings();
   } catch (e) {
     alert(e.message);
   }
@@ -3263,6 +3277,7 @@ ScrcpyLauncher.init({
   button: $('#btn-scrcpy-launcher'),
   dialogEl: $('#scrcpy-launcher-dialog'),
   changed: () => loadInstances({ silent: true }),
+  adbHost,
 });
 $('#btn-refresh-modules').addEventListener('click', loadModules);
 $('#btn-refresh-user-modules').addEventListener('click', loadUserModulesTab);
@@ -3682,7 +3697,8 @@ AuthUi.ready.then(() => {
 
   loadHostCoreCount();
   loadInstalledVersion();
-  loadInstances();
+  // The ADB host first, so the very first render already shows the right instance addresses.
+  loadClientSettings().finally(() => loadInstances());
 
   // The state of an instance changes by itself (it boots, it crashes, someone uses adb/docker): refresh
   // every few seconds while the Instances tab is the one on screen. It does not run while a dialog is

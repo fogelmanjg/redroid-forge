@@ -70,6 +70,12 @@ const DEFAULTS = {
   // routes/settings.js right after this is saved (fwknop.restart()) -- see that route's comment.
   adbPortStart: null,
   adbPortEnd: null,
+  // The host name/IP clients should use to reach the instances' ADB ports (1.0.0-beta.7): shown in
+  // each instance's address, used by the local-scrcpy links and their test. null = the host name the
+  // page was opened with (location.hostname), the old behaviour -- right whenever that name reaches
+  // ADB too, wrong when the page goes through a name ADB cannot (a public domain behind a reverse
+  // proxy, while ADB is only on the LAN/VPN address). Falls back to REDROID_FORGE_ADB_HOST.
+  adbHost: null,
 };
 
 function get(file = settingsFile()) {

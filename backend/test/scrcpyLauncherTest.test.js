@@ -69,7 +69,7 @@ test('a valid code is confirmed with the reported versions; the port and the fir
     if (args[0] === '-C') throw new Error('no such rule');
     return { stdout: '' };
   };
-  const t = createTester({ port, exec });
+  const t = createTester({ port, exec, sources: ['10.0.0.0/8'] });
   const { code, firewall } = await t.start();
   assert.strictEqual(firewall, 'opened');
   assert.ok(t.isOpen());
@@ -106,4 +106,24 @@ test('the port is in use -> a 409 that names the setting to change', async () =>
     const t = createTester({ port, exec: async () => ({ stdout: '' }) });
     await assert.rejects(t.start(), (e) => e.httpStatus === 409 && /REDROID_FORGE_LAUNCHER_TEST_PORT/.test(e.message));
   } finally { blocker.close(); }
+});
+
+test('the temporary firewall rule only admits private/CGNAT sources by default, configurable', () => {
+  const { testSources } = require('../src/lib/scrcpyLauncherTest');
+  assert.deepStrictEqual(testSources({}), ['10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16', '100.64.0.0/10']);
+  assert.deepStrictEqual(testSources({ REDROID_FORGE_LAUNCHER_TEST_SOURCES: '192.168.1.0/24, junk;rm, 100.64.0.0/10' }), ['192.168.1.0/24', '100.64.0.0/10']);
+});
+
+test('leftover rules with our comment are found and deleted, whatever their source', async () => {
+  const deleted = [];
+  const exec = async (cmd, args) => {
+    if (args[0] === '-S') {
+      return { stdout: '-P INPUT DROP\n-A INPUT -s 10.0.0.0/8 -p tcp -m tcp --dport 15599 -m comment --comment redroid-forge-launcher-test -j ACCEPT\n-A INPUT -p tcp -m tcp --dport 15599 -m comment --comment redroid-forge-launcher-test -j ACCEPT\n-A INPUT -p tcp --dport 22 -j ACCEPT\n' };
+    }
+    if (args[0] === '-D') deleted.push(args.join(' '));
+    return { stdout: '' };
+  };
+  await createTester({ port: 1, exec }).removeLeftoverRule();
+  assert.strictEqual(deleted.length, 2);
+  assert.ok(deleted.every((d) => d.includes('redroid-forge-launcher-test')));
 });

@@ -96,3 +96,43 @@ test('module contract acceptance: records the logged-in user, ignores a userId i
     assert.strictEqual(recorded.length, 1, 'nothing recorded for the viewer');
   } finally { viewer.close(); }
 });
+
+// --- GET /api/settings (admin only, secrets redacted) and GET /api/settings/client ---
+test('settings: redaction keeps OIDC client secrets out; the client view only carries adbHost', () => {
+  const routes = require('../src/routes/settings');
+  const red = routes.redactSettings({ backupDir: '/b', oidcProviders: [{ id: 'kc', clientId: 'x', clientSecret: 's3cret' }, { id: 'pub', clientId: 'y' }] });
+  assert.deepStrictEqual(red.oidcProviders, [{ id: 'kc', clientId: 'x', hasClientSecret: true }, { id: 'pub', clientId: 'y', hasClientSecret: false }]);
+  assert.ok(!JSON.stringify(red).includes('s3cret'));
+  assert.deepStrictEqual(routes.clientSettings({ adbHost: 'forge.lan', backupDir: '/b' }, {}), { adbHost: 'forge.lan' });
+  assert.deepStrictEqual(routes.clientSettings({ adbHost: null }, { REDROID_FORGE_ADB_HOST: '100.64.0.5' }), { adbHost: '100.64.0.5' });
+  assert.deepStrictEqual(routes.clientSettings({ adbHost: null }, {}), { adbHost: null });
+});
+
+test('settings: adbHost accepts a host name or IP, nothing with a port, scheme or spaces', () => {
+  const { ADB_HOST_RE } = require('../src/routes/settings');
+  for (const ok of ['forge.lan', '100.73.0.50', 'jgustavo-server01', 'fd7a:115c::1']) assert.ok(ADB_HOST_RE.test(ok), ok);
+  for (const bad of ['forge.lan:5555', 'http://forge', 'a b', 'x;rm', '-lead', '']) assert.ok(!ADB_HOST_RE.test(bad), bad);
+});
+
+test('settings: GET /api/settings is admin only; /client answers any logged-in account', async () => {
+  const get = (server, path) => new Promise((resolve, reject) => {
+    http.get({ port: server.address().port, path }, (res) => { let b = ''; res.on('data', (c) => { b += c; }); res.on('end', () => resolve({ status: res.statusCode, body: b })); }).on('error', reject);
+  });
+  const mk = (user) => {
+    const app = express();
+    app.use((rq, rs, next) => { rq.user = user; next(); });
+    app.use('/api/settings', require('../src/routes/settings'));
+    return new Promise((resolve) => { const s = app.listen(0, () => resolve(s)); });
+  };
+  const viewer = await mk({ id: 'v', username: 'vic', role: 'viewer' });
+  try {
+    assert.strictEqual((await get(viewer, '/api/settings')).status, 403);
+    const c = await get(viewer, '/api/settings/client');
+    assert.strictEqual(c.status, 200);
+    assert.deepStrictEqual(Object.keys(JSON.parse(c.body)), ['adbHost']);
+  } finally { viewer.close(); }
+  const admin = await mk({ id: 'a', username: 'ana', role: 'admin' });
+  try {
+    assert.strictEqual((await get(admin, '/api/settings')).status, 200);
+  } finally { admin.close(); }
+});

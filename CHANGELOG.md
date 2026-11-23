@@ -27,6 +27,20 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
 
 ## [Unreleased]
 
+### Added
+
+- **Settings > ADB address for clients.** The host name or IP other computers use for the
+  instances' ADB ports -- shown in every instance's address and used by the 📲 links and their
+  test. Empty = the name the page was opened with (as before); set it when the page goes through a
+  name ADB cannot reach, e.g. a public domain behind a reverse proxy while ADB is only on the LAN
+  or VPN address. `REDROID_FORGE_ADB_HOST` is the fallback.
+
+### Changed
+
+- Live previews can be captured up to 1080px (was 480): the "Viewers" grid now uses the whole
+  window, and with 1-2 per row the previews were stretched and blurry. Each grid still asks for
+  its real column width, so small previews stay small.
+
 ### Security
 
 - **Cross-site requests are refused.** Over HTTPS the session cookie is `SameSite=None` (needed
@@ -41,6 +55,17 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
   further attempts get 429 until the window passes (behind a reverse proxy on the same host, the
   client is the address the proxy reports). The password check no longer blocks the server while
   it runs, and a wrong username takes as long as a wrong password.
+- **`GET /api/settings` is admin only, and never returns OIDC client secrets.** It answered any
+  logged-in account (a viewer too) with the whole settings file, including the `clientSecret` of
+  every OIDC provider added from the UI. A new `GET /api/settings/client` gives any logged-in page
+  the one setting it needs (`adbHost`, below).
+- The "Test local scrcpy" temporary firewall rule only admits private and CGNAT/Tailscale source
+  ranges (10/8, 172.16/12, 192.168/16, 100.64/10) instead of any address;
+  `REDROID_FORGE_LAUNCHER_TEST_SOURCES` overrides them. A leftover rule from a crashed process is
+  found by its comment whatever its source.
+- Checked, no change needed: restoring a backup cannot write outside the instance's `/data` --
+  alpine's tar strips `../` and `/` from member names and refuses a symlink to `/`, and it runs in
+  a throwaway container anyway (tested with a hostile archive).
 - **Accepting a module contract records who accepted** -- the logged-in user. It used to record
   `local` for everyone (and took the user from the request body), and any logged-in account could
   accept; it now needs the `create` or `configure` permission.

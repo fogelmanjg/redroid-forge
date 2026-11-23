@@ -40,13 +40,23 @@ function cleanVersion(s) {
   return String(s || '').replace(/[^\w.+-]/g, '').slice(0, 40) || null;
 }
 
-function fwRuleArgs(port) {
-  return ['INPUT', '-p', 'tcp', '--dport', String(port), '-m', 'comment', '--comment', FW_COMMENT, '-j', 'ACCEPT'];
+// Who may reach the test port through the temporary rule (1.0.0-beta.7): private and CGNAT/Tailscale
+// source ranges by default, not the whole internet -- the same networks an instance's ADB is meant
+// for. REDROID_FORGE_LAUNCHER_TEST_SOURCES (comma-separated CIDRs) overrides it.
+const DEFAULT_SOURCES = ['10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16', '100.64.0.0/10'];
+function testSources(env = process.env) {
+  const list = String(env.REDROID_FORGE_LAUNCHER_TEST_SOURCES || '').split(',').map((s) => s.trim()).filter(Boolean);
+  const valid = list.filter((c) => /^\d{1,3}(\.\d{1,3}){3}(\/\d{1,2})?$/.test(c));
+  return valid.length ? valid : DEFAULT_SOURCES;
+}
+
+function fwRuleArgs(port, source) {
+  return ['INPUT', '-s', source, '-p', 'tcp', '--dport', String(port), '-m', 'comment', '--comment', FW_COMMENT, '-j', 'ACCEPT'];
 }
 
 function createTester({
   port = testPort(), exec = execFileAsync, createServer = adbTestDevice.createServer, now = () => Date.now(),
-  ttlMs = TTL_MS, log = console,
+  ttlMs = TTL_MS, log = console, sources = testSources(),
 } = {}) {
   const codes = new Map(); // code -> { state: 'pending'|'ok', createdAt, launcherVersion, scrcpyVersion, adbVersion }
   let server = null;
@@ -74,9 +84,11 @@ function createTester({
 
   async function openFirewall() {
     try {
-      await exec('iptables', ['-C', ...fwRuleArgs(port)]).catch(async () => {
-        await exec('iptables', ['-A', ...fwRuleArgs(port)]);
-      });
+      for (const src of sources) {
+        await exec('iptables', ['-C', ...fwRuleArgs(port, src)]).catch(async () => {
+          await exec('iptables', ['-A', ...fwRuleArgs(port, src)]);
+        });
+      }
       fwOpen = true;
       firewall = 'opened';
     } catch (e) {
@@ -89,7 +101,7 @@ function createTester({
   async function closeFirewall() {
     if (!fwOpen) return;
     fwOpen = false;
-    await exec('iptables', ['-D', ...fwRuleArgs(port)]).catch(() => {});
+    for (const src of sources) await exec('iptables', ['-D', ...fwRuleArgs(port, src)]).catch(() => {});
   }
 
   async function ensureOpen() {
@@ -168,9 +180,15 @@ function createTester({
   }
 
   // At boot: a rule left behind by a previous process that died mid-test.
+  // Any rule with our comment, whatever its source range (a previous version had none, a changed
+  // REDROID_FORGE_LAUNCHER_TEST_SOURCES had others): read them back from iptables -S and delete each.
   async function removeLeftoverRule() {
-    for (let i = 0; i < 5; i++) {
-      try { await exec('iptables', ['-D', ...fwRuleArgs(port)]); } catch (e) { return; }
+    let out;
+    try { ({ stdout: out } = await exec('iptables', ['-S', 'INPUT'])); } catch (e) { return; }
+    for (const line of String(out || '').split('\n')) {
+      if (!line.startsWith('-A INPUT ') || !line.includes(FW_COMMENT)) continue;
+      const args = line.slice('-A '.length).split(' ').filter(Boolean);
+      await exec('iptables', ['-D', ...args]).catch(() => {});
     }
   }
 
@@ -189,4 +207,4 @@ function getShared() {
   return shared;
 }
 
-module.exports = { createTester, getShared, testPort, SHELL_TAG, TTL_MS, MAX_PENDING, DEFAULT_PORT };
+module.exports = { createTester, getShared, testPort, testSources, SHELL_TAG, TTL_MS, MAX_PENDING, DEFAULT_PORT };

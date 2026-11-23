@@ -151,6 +151,13 @@ gunzip -c image.tar.gz | docker load</pre>
           <p id="settings-adb-port-range-warn" class="resources-warn-error" hidden style="grid-column: 1 / -1;"></p>
           <p class="muted" data-i18n="settings.adbPortRange.restartHint" style="grid-column: 1 / -1;"></p>
         </fieldset>
+        <fieldset class="display-fields">
+          <legend data-i18n="settings.adbHost.legend">ADB address for clients</legend>
+          <p class="muted" data-i18n="settings.adbHost.hint"></p>
+          <label><span data-i18n="settings.adbHost.label">Host name or IP</span>
+            <input type="text" id="settings-adb-host" data-i18n-placeholder="settings.adbHost.placeholder" autocomplete="off" spellcheck="false" />
+          </label>
+        </fieldset>
         <fieldset class="display-fields" id="settings-operator-pool-fieldset" hidden>
           <legend data-i18n="settings.operatorPool.legend">Shared quota across every operator (optional)</legend>
           <p class="muted" data-i18n="settings.operatorPool.hint"></p>

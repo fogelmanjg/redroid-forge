@@ -74,7 +74,11 @@ async function captureScreenshot(host, adbPort) {
 const PREVIEW_DEFAULT_SIZE = 160; // unchanged from before this became configurable -- the
 // "completo" tab's per-row 👁 toggle never sends a size, so it keeps today's look exactly.
 const PREVIEW_MIN_SIZE = 60;
-const PREVIEW_MAX_SIZE = 480; // headroom above the "visores" slider's own max (400) on purpose.
+// 1080 since 1.0.0-beta.7 (was 480): the "Viewers" grid now uses the whole window, and with 1-2 per
+// row a column is far wider than 480px, which was stretched up and looked blurry. 1080 = the short
+// side of a typical device screen, beyond which there is nothing more to show. The grid asks for its
+// real column width (frontend effectiveViewersSize), so small previews stay small and cheap.
+const PREVIEW_MAX_SIZE = 1080;
 const PREVIEW_JPEG_QUALITY = 20; // 1-100; low on purpose -- size over fidelity was the explicit ask
 
 function clampSize(size) {
