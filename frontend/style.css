@@ -354,13 +354,21 @@ tr.instance-row-secondary > td { padding-top: 0.2rem; }
 .instance-card-address:hover { border-color: var(--accent); }
 .instance-card-buttons { display: flex; gap: 0.3rem; flex-wrap: wrap; justify-content: center; }
 .instances-grid .viewer-preview-img { max-width: none; max-height: none; width: var(--preview-size, 200px); height: auto; }
-/* "Per row" = a fixed number of columns (1.0.0-beta.2): equal columns sharing the whole width,
-   each preview filling its card instead of using the slider's size. `minmax(0, 1fr)`, not `1fr`,
-   so a long instance name cannot force its column wider than the others. */
-.instances-grid.instances-grid-columns { display: grid; grid-template-columns: repeat(var(--viewer-columns, 3), minmax(0, 1fr)); }
+/* Same height for every preview, width by its own shape (1.0.0-beta.9, frontend/viewersLayout.js):
+   the slider is the HEIGHT now. --ar is the instance's display ratio ("1000 / 600"), set per card
+   by app.js; `auto` lets a real frame's own ratio win once it arrives (an app that rotates). */
+.instances-grid .instance-card .viewer-preview-img { width: auto; height: var(--preview-size, 200px); aspect-ratio: auto var(--ar, 9 / 16); }
+/* "Per row" (1.0.0-beta.2; by shape since 1.0.0-beta.9): rows of N built by app.js that fill the
+   whole width. Each card grows in proportion to its shape (--ar-num = width/height, flex-basis 0),
+   so every preview in a row ends up the same height; a short last row has a filler at the end.
+   min-width 0 so a long name or the buttons cannot force a card wider than its share. */
+.instances-grid.instances-grid-columns { display: flex; flex-direction: column; flex-wrap: nowrap; }
 .instances-grid.instances-grid-columns[hidden] { display: none; }
+.viewers-row { display: flex; gap: 1rem; align-items: flex-start; }
+.instances-grid-columns .instance-card { flex: var(--ar-num, 0.5625) 1 0; min-width: 0; }
+.viewers-row-filler { flex-shrink: 1; flex-basis: 0; min-width: 0; }
 .instances-grid-columns .instance-card-viewer { width: 100%; }
-.instances-grid-columns .viewer-preview-img { width: 100%; }
+.instances-grid-columns .instance-card .viewer-preview-img { width: 100%; height: auto; aspect-ratio: auto var(--ar, 9 / 16); }
 #viewers-size-slider:disabled { opacity: 0.4; }
 
 /* State filter + name search + "hide locked" (1.0.0-beta.9), shared by the three views. */

@@ -27,6 +27,26 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
 
 ## [Unreleased]
 
+## [1.0.0-beta.10] - 2026-11-23
+
+### Added
+- "My account" tab for non-admin users: see your own account and link/unlink your SSO login
+  (Google or any configured provider). The self-service link routes already existed, but their only
+  UI was the admin-only Identities table, so a plain user could never link an account.
+
+### Changed
+- Viewers view: portrait and landscape instances no longer take the same box. In auto mode the
+  slider sets the preview height and each card's width follows the display shape; with N per row,
+  every card in a row shares one height and widths follow the shape (a short last row is not
+  stretched to the full width). The slider is now labelled "Preview height".
+
+### Fixed
+- Binder slot collisions between several redroid-forge installs (or other tools) sharing one host's
+  binderfs: an instance no longer starts on a slot another running container holds (409 naming that
+  container); a display-change recreate moves to a free slot; a container started outside the app
+  on a held slot is stopped. Before, the second Android looped on boot and the first one got an
+  extra BOOT_COMPLETED.
+
 ## [1.0.0-beta.9] - 2026-11-23
 
 ### Added

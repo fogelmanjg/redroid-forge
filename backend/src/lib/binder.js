@@ -143,18 +143,54 @@ function slotsFromBinds(binds) {
   return [...slots];
 }
 
-// The slots in use by the running containers of the host (every one that has a binder bind, not only ours).
-async function slotsInUseOnHost(docker) {
-  const out = new Set();
-  const list = await docker.listContainers();
+// Every container of the host that has a binder bind, running or stopped, whoever created it
+// (another redroid-forge on the same host -- dev and prod --, another orchestrator):
+// -> Map slot -> [{ id, name, running }].
+// Stopped ones count too (1.0.0-beta.9): found live 23/11/2026, prod created an instance on slot 3
+// while dev's own instance on slot 3 happened to be stopped; when dev started it again, both
+// Androids shared binder3 -- the second one boot-looped ("BINDER_SET_CONTEXT_MGR already set")
+// and the first one got a second BOOT_COMPLETED out of nowhere.
+async function slotHolders(docker) {
+  const out = new Map();
+  const list = await docker.listContainers({ all: true });
   for (const c of list) {
     try {
       // eslint-disable-next-line no-await-in-loop
       const info = await docker.getContainer(c.Id).inspect();
-      for (const s of slotsFromBinds(info.HostConfig && info.HostConfig.Binds)) out.add(s);
+      const holder = { id: info.Id, name: String(info.Name || '').replace(/^\//, ''), running: !!(info.State && info.State.Running) };
+      for (const s of slotsFromBinds(info.HostConfig && info.HostConfig.Binds)) {
+        if (!out.has(s)) out.set(s, []);
+        out.get(s).push(holder);
+      }
     } catch { /* it went away while we looked */ }
   }
-  return [...out];
+  return out;
+}
+
+// The slots any container of the host already claims (running or stopped) -- never to be handed to a
+// new instance.
+async function slotsInUseOnHost(docker) {
+  return [...(await slotHolders(docker)).keys()];
+}
+
+// A RUNNING container other than `ownContainerId` that has `slot` bound, or null. Pure.
+function runningHolder(holders, slot, ownContainerId) {
+  const list = (holders && holders.get(slot)) || [];
+  return list.find((h) => h.running && h.id !== ownContainerId) || null;
+}
+
+// Before starting an instance: its binder nodes must not be in use by another running Android.
+// Throws a 409 naming the one that has them.
+async function assertSlotFreeToStart(docker, slot, ownContainerId) {
+  // If Docker cannot be listed, this check is skipped: it is a guard, never a reason a start fails.
+  const holders = await slotHolders(docker).catch(() => new Map());
+  const holder = runningHolder(holders, slot, ownContainerId);
+  if (holder) {
+    throw Object.assign(new Error(
+      `binder slot ${slot} is in use by the running container "${holder.name}" (another redroid-forge or orchestrator on this host): `
+      + 'two Androids on the same binder break each other. Stop that one first, or recreate this instance (e.g. change its display) so it gets a free slot.',
+    ), { httpStatus: 409 });
+  }
 }
 
 function useLegacyBinder(exists = fs.existsSync) {
@@ -190,5 +226,5 @@ function binderBinds(slot, { legacy = useLegacyBinder(), exists = hostExistsSync
 }
 
 module.exports = {
-  nextFreeSlot, slotsFromBinds, slotsInUseOnHost, binderBinds, useLegacyBinder, reservedSlots, legacyDevicesParam, legacyNodeNames, restrictedNodes, worldAccessible, hostExistsSync, hostWorldAccessible, BINDERFS_ROOT,
+  nextFreeSlot, slotsFromBinds, slotsInUseOnHost, slotHolders, runningHolder, assertSlotFreeToStart, binderBinds, useLegacyBinder, reservedSlots, legacyDevicesParam, legacyNodeNames, restrictedNodes, worldAccessible, hostExistsSync, hostWorldAccessible, BINDERFS_ROOT,
 };

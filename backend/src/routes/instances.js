@@ -490,6 +490,9 @@ async function startInstanceRuntime(instance) {
   await revalidateModulesIfImageKnown(instance);
   const requiredModuleIds = requiredModuleIdsFor(instance);
   await moduleRunner.ensureHostInfraReady(requiredModuleIds);
+  // Another Android already on this instance's binder nodes (another forge on the same host): refuse,
+  // instead of letting both break (see binder.js slotHolders).
+  if (instance.binderSlot != null) await binder.assertSlotFreeToStart(runtime.docker, instance.binderSlot, instance.containerId);
   await runtime.start(instance.containerId);
   const reconciled = await reconcileDeviceProfile(instance);
   scheduleWifiFixes(reconciled);
@@ -879,6 +882,15 @@ router.post('/:id/display', async (req, res) => {
       store.upsert({ ...instance });
     }
 
+    // The stored slot is taken by another container of the host (another forge created an instance on
+    // it while this one was stopped): this recreate is the chance to move to a free one.
+    const holders = await binder.slotHolders(runtime.docker).catch(() => new Map());
+    if ((holders.get(instance.binderSlot) || []).length > 0) {
+      const newSlot = binder.nextFreeSlot({ inUse: [...holders.keys()] });
+      console.warn(`[instances] "${instance.name}": binder slot ${instance.binderSlot} is taken by "${holders.get(instance.binderSlot).map((h) => h.name).join('", "')}" -- moving to slot ${newSlot}`);
+      instance.binderSlot = newSlot;
+      store.upsert({ ...instance });
+    }
     const binds = [
       ...binder.binderBinds(instance.binderSlot),
       `${instance.volumeName}:/data`,
@@ -1333,6 +1345,16 @@ async function handleExternalStart(instance) {
     // Android running with an identity that is supposed to stay offline.
     await runtime.stop(current.containerId, { graceSeconds: 2 });
     return;
+  }
+  // Started by Docker (restart policy) or by hand on binder nodes another running Android already has:
+  // it would break both -- stop it right away, same as a locked one.
+  if (current.binderSlot != null) {
+    const holder = binder.runningHolder(await binder.slotHolders(runtime.docker).catch(() => new Map()), current.binderSlot, current.containerId);
+    if (holder) {
+      console.warn(`[instances] "${current.name}" was started outside the app on binder slot ${current.binderSlot}, which the running container "${holder.name}" already has: stopping it`);
+      await runtime.stop(current.containerId, { graceSeconds: 2 });
+      return;
+    }
   }
   const requiredModuleIds = requiredModuleIdsFor(current);
   await moduleRunner.ensureHostInfraReady(requiredModuleIds);

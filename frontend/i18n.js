@@ -5,7 +5,7 @@
 const I18n = (() => {
   const strings = {
     en: {
-      'nav.instances': 'Instances', 'nav.modules': 'Modules', 'nav.userModules': 'User modules', 'nav.doctor': 'Doctor', 'nav.help': 'Help', 'nav.identities': 'Identities',
+      'nav.instances': 'Instances', 'nav.modules': 'Modules', 'nav.userModules': 'User modules', 'nav.doctor': 'Doctor', 'nav.help': 'Help', 'nav.identities': 'Identities', 'nav.myAccount': 'My account',
       'version.check': 'Check for updates', 'version.checking': 'Checking…',
       'version.upToDate': 'Up to date ({version})', 'version.newer': '{latest} available (installed: {installed})',
       'version.error': 'Could not check: {error}',
@@ -17,7 +17,7 @@ const I18n = (() => {
       'identities.resetPassword': 'Reset password', 'identities.resetPasswordPrompt': 'New password for "{username}" (at least 8 characters):',
       'identities.source.local': 'Local', 'identities.none': 'No identities yet.', 'identities.pending': 'Pending',
       'identities.delete': 'Remove', 'identities.deleteConfirm': 'Remove identity "{username}"? A local account is gone for good; an SSO identity starts over as a brand new, unrecognized identity next time they log in.',
-      'identities.linkProvider': '+ Link {provider}', 'identities.unlink': 'Unlink', 'identities.noLinks': 'No other login methods linked.',
+      'identities.linkProvider': '+ Link {provider}', 'identities.unlink': 'Unlink', 'identities.noLinks': 'No other login methods linked.', 'identities.myIntro': 'Link your Google account (or another configured provider) to log in with it instead of your password. You will be asked to log in to that provider once.', 'identities.myOnlyLocal': 'Linking starts from a local account: log in with your username and password, then come back here.',
       'setup.intro': 'No security is on yet -- anyone who can reach this URL can manage everything. Create an admin account, then follow the steps below to turn security on.',
       'setup.username': 'Username', 'setup.password': 'Password', 'setup.createAdmin': 'Create admin account',
       'setup.adminCreated': 'Admin account(s) ready: {username}.',
@@ -77,7 +77,7 @@ const I18n = (() => {
       'instances.viewMode.full': 'Full', 'instances.viewMode.fullHint': 'Every detail, one instance per row',
       'instances.viewMode.minimal': 'Minimal', 'instances.viewMode.minimalHint': 'Name, address and the start/stop/restart/delete buttons only -- no viewer, no extra detail',
       'instances.viewMode.viewers': 'Viewers', 'instances.viewMode.viewersHint': 'A grid of live previews, one per instance',
-      'instances.viewMode.size': 'Preview size',
+      'instances.viewMode.size': 'Preview height',
       'instances.viewMode.columns': 'Per row',
       'instances.filter.all': 'All', 'instances.filter.allHint': 'Every instance: running first, then alphabetical',
       'instances.filter.active': 'Active', 'instances.filter.activeHint': 'Running, restarting or paused (still using CPU/RAM). An instance in trouble or with a backup/restore in progress is always shown.',
@@ -330,7 +330,7 @@ const I18n = (() => {
       'contract.failed': 'Could not record the module acceptance',
     },
     es: {
-      'nav.instances': 'Instancias', 'nav.modules': 'Módulos', 'nav.userModules': 'Módulos de usuario', 'nav.doctor': 'Doctor', 'nav.help': 'Ayuda', 'nav.identities': 'Identidades',
+      'nav.instances': 'Instancias', 'nav.modules': 'Módulos', 'nav.userModules': 'Módulos de usuario', 'nav.doctor': 'Doctor', 'nav.help': 'Ayuda', 'nav.identities': 'Identidades', 'nav.myAccount': 'Mi cuenta',
       'version.check': 'Chequear actualizaciones', 'version.checking': 'Chequeando…',
       'version.upToDate': 'Actualizado ({version})', 'version.newer': 'Hay {latest} disponible (instalado: {installed})',
       'version.error': 'No se pudo chequear: {error}',
@@ -342,7 +342,7 @@ const I18n = (() => {
       'identities.resetPassword': 'Resetear contraseña', 'identities.resetPasswordPrompt': 'Nueva contraseña para "{username}" (al menos 8 caracteres):',
       'identities.source.local': 'Local', 'identities.none': 'Todavía no hay identidades.', 'identities.pending': 'Pendiente',
       'identities.delete': 'Quitar', 'identities.deleteConfirm': 'Quitar la identidad "{username}"? Una cuenta local se borra para siempre; una identidad SSO arranca de nuevo como una identidad desconocida la próxima vez que se loguee.',
-      'identities.linkProvider': '+ Vincular {provider}', 'identities.unlink': 'Desvincular', 'identities.noLinks': 'No hay otros métodos de login vinculados.',
+      'identities.linkProvider': '+ Vincular {provider}', 'identities.unlink': 'Desvincular', 'identities.noLinks': 'No hay otros métodos de login vinculados.', 'identities.myIntro': 'Vinculá tu cuenta de Google (u otro proveedor configurado) para entrar con ella en vez de con tu contraseña. Te va a pedir entrar una vez a ese proveedor.', 'identities.myOnlyLocal': 'La vinculación se hace desde una cuenta local: entrá con tu usuario y contraseña y volvé acá.',
       'setup.intro': 'Todavía no hay seguridad activada: cualquiera que llegue a esta URL puede administrar todo. Creá una cuenta de administrador y después seguí los pasos para activarla.',
       'setup.username': 'Usuario', 'setup.password': 'Contraseña', 'setup.createAdmin': 'Crear cuenta de administrador',
       'setup.adminCreated': 'Cuenta(s) de admin lista(s): {username}.',
@@ -402,7 +402,7 @@ const I18n = (() => {
       'instances.viewMode.full': 'Completo', 'instances.viewMode.fullHint': 'Todo el detalle, una instancia por fila',
       'instances.viewMode.minimal': 'Mínimo', 'instances.viewMode.minimalHint': 'Nombre, dirección y los botones de iniciar/detener/reiniciar/borrar únicamente -- sin visor, sin ningún otro detalle',
       'instances.viewMode.viewers': 'Visores', 'instances.viewMode.viewersHint': 'Una grilla de vistas previas en vivo, una por instancia',
-      'instances.viewMode.size': 'Tamaño de vista previa',
+      'instances.viewMode.size': 'Altura de vista previa',
       'instances.viewMode.columns': 'Por fila',
       'instances.filter.all': 'Todas', 'instances.filter.allHint': 'Todas las instancias: primero las que están corriendo, después en orden alfabético',
       'instances.filter.active': 'Activas', 'instances.filter.activeHint': 'En ejecución, reiniciándose o en pausa (siguen usando CPU/RAM). Una instancia con problemas o con un backup/restauración en curso se muestra siempre.',

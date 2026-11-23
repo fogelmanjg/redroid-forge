@@ -294,7 +294,7 @@ viewersSizeSlider.addEventListener('input', () => {
   $('#instances-grid').style.setProperty('--preview-size', `${viewersSize}px`);
   // Live, while dragging -- every card's own session gets the new capture size right away
   // (next tick, see screenshotCapture.js's own comment), not just on the next full reload.
-  if (instanceViewMode === 'viewers') Viewer.setSizeAll(effectiveViewersSize());
+  if (instanceViewMode === 'viewers') resizeViewerCaptures();
 });
 
 // Per-row layout of the "viewers" grid (21/11/2026, 1.0.0-beta.2 -- the beta1 pending item "how
@@ -312,16 +312,20 @@ function loadViewersColumns() {
 }
 let viewersColumns = loadViewersColumns();
 
-// The capture size (short side, px) every live preview in the grid should ask the backend for.
-function effectiveViewersSize() {
-  if (viewersColumns === 'auto') return viewersSize;
-  const grid = $('#instances-grid');
-  const n = Number(viewersColumns);
-  const gapPx = 16;   // .instances-grid gap: 1rem
-  const cardPadPx = 24; // .instance-card padding 0.7rem on both sides + its 1px borders
-  const colPx = (grid.clientWidth - gapPx * (n - 1)) / n - cardPadPx;
-  // Same [60,1080] range the backend clamps to anyway (screenshotCapture.js's clampSize).
-  return Math.max(60, Math.min(1080, Math.round(colPx)));
+// Every preview in a row has the same height, its width follows its own shape (1.0.0-beta.10, see
+// viewersLayout.js) -- so each one is captured at its own size (short side, px). `viewerItems` is
+// the last draw's running cards, in order: [{ id, ar }].
+let viewerItems = [];
+function viewerCaptureSizes() {
+  return ViewersLayout.captureSizes(viewerItems, {
+    columns: viewersColumns, size: viewersSize, gridWidth: $('#instances-grid').clientWidth,
+    gap: 16,  // .viewers-row / .instances-grid gap: 1rem
+    pad: 24,  // .instance-card padding 0.7rem on both sides + its 1px borders
+  });
+}
+function resizeViewerCaptures() {
+  const sizes = viewerCaptureSizes();
+  for (const id of Object.keys(sizes)) Viewer.setSize(id, sizes[id]);
 }
 
 function applyViewersLayout() {
@@ -338,7 +342,8 @@ viewersColumnsSelect.addEventListener('change', () => {
   viewersColumns = VIEWERS_COLUMN_CHOICES.includes(viewersColumnsSelect.value) ? viewersColumnsSelect.value : 'auto';
   try { localStorage.setItem('viewersColumns', viewersColumns); } catch (e) { /* no storage */ }
   applyViewersLayout();
-  if (instanceViewMode === 'viewers') Viewer.setSizeAll(effectiveViewersSize());
+  // Rows of N are built while drawing: redraw (from the last list, no new request).
+  if (instanceViewMode === 'viewers') loadInstances({ silent: true, fromCache: true });
 });
 // In column mode a window/panel resize changes every column's width: ask for the new capture
 // size, debounced so dragging the window edge does not send a resize per pixel.
@@ -347,7 +352,7 @@ if (window.ResizeObserver) {
   new ResizeObserver(() => {
     if (viewersColumns === 'auto' || instanceViewMode !== 'viewers') return;
     clearTimeout(viewersResizeTimer);
-    viewersResizeTimer = setTimeout(() => Viewer.setSizeAll(effectiveViewersSize()), 300);
+    viewersResizeTimer = setTimeout(resizeViewerCaptures, 300);
   }).observe($('#instances-grid'));
 }
 
@@ -1915,6 +1920,7 @@ async function loadInstances({ silent = false, fromCache = false } = {}) {
     const rows = document.createDocumentFragment();
     const cards = document.createDocumentFragment();
     const stoppedCards = document.createDocumentFragment();
+    const viewerCards = []; // running cards of the viewers grid: laid out after the loop
     for (const inst of visible) {
       const state = InstanceState.describe(inst.status);
 
@@ -2107,6 +2113,10 @@ async function loadInstances({ silent = false, fromCache = false } = {}) {
         }
         const card = document.createElement('div');
         card.className = 'instance-card';
+        const ar = ViewersLayout.aspect(inst.display);
+        card.style.setProperty('--ar', inst.display ? `${inst.display.width} / ${inst.display.height}` : '9 / 16');
+        card.style.setProperty('--ar-num', String(ar));
+        let viewerWrap = null;
 
         const nameDiv = document.createElement('div');
         nameDiv.className = 'instance-card-name';
@@ -2116,10 +2126,9 @@ async function loadInstances({ silent = false, fromCache = false } = {}) {
         card.appendChild(buildAddressSpan('instance-card-address'));
 
         if (AuthUi.can('view')) {
-          const viewerWrap = document.createElement('div');
+          viewerWrap = document.createElement('div');
           viewerWrap.className = 'instance-card-viewer';
-          mountPreview(viewerWrap, inst.id, effectiveViewersSize());
-          card.appendChild(viewerWrap);
+          card.appendChild(viewerWrap); // the preview is mounted after the loop, at its own size
         }
 
         // ⛶ and 📲 in the same row as start/stop/restart/delete/lock (1.0.0-beta.6), not a row of
@@ -2134,7 +2143,7 @@ async function loadInstances({ silent = false, fromCache = false } = {}) {
         appendActionButtons(cardButtons);
         card.appendChild(cardButtons);
 
-        cards.appendChild(card);
+        viewerCards.push({ id: inst.id, ar, card, viewerWrap });
         continue;
       }
 
@@ -2435,7 +2444,34 @@ async function loadInstances({ silent = false, fromCache = false } = {}) {
       if (openStorageId === inst.id) rows.appendChild(buildStorageEditRow(inst));
       if (openAdbAccessId === inst.id) rows.appendChild(buildAdbAccessEditRow(inst));
     }
-    if (isViewers) grid.replaceChildren(cards); else tbody.replaceChildren(rows);
+    if (isViewers) {
+      // "N per row": rows of N that fill the width, same height inside each row; a short last row
+      // gets an empty filler so it keeps about that height (viewersLayout.js).
+      viewerItems = viewerCards.map(({ id, ar }) => ({ id, ar }));
+      if (viewersColumns === 'auto') {
+        for (const vc of viewerCards) cards.appendChild(vc.card);
+      } else {
+        const n = Number(viewersColumns);
+        for (const row of ViewersLayout.rowsOf(viewerCards, n)) {
+          const rowDiv = document.createElement('div');
+          rowDiv.className = 'viewers-row';
+          for (const vc of row) rowDiv.appendChild(vc.card);
+          const grow = ViewersLayout.fillerGrow(viewerItems, row, n);
+          if (grow > 0) {
+            const filler = document.createElement('div');
+            filler.className = 'viewers-row-filler';
+            filler.style.flexGrow = String(grow);
+            rowDiv.appendChild(filler);
+          }
+          cards.appendChild(rowDiv);
+        }
+      }
+      const sizes = viewerCaptureSizes();
+      for (const vc of viewerCards) if (vc.viewerWrap) mountPreview(vc.viewerWrap, vc.id, sizes[vc.id]);
+      grid.replaceChildren(cards);
+    } else {
+      tbody.replaceChildren(rows);
+    }
     stoppedGrid.replaceChildren(isViewers ? stoppedCards : document.createDocumentFragment());
     stoppedGrid.hidden = !isViewers || stoppedGrid.childElementCount === 0;
     // Sweep sessions nobody asked to keep any more: every preview not mounted by this draw --
@@ -3207,9 +3243,81 @@ async function renderAuthModePanel() {
   panel.appendChild(await buildOidcProvidersSection());
 }
 
+// Non-admin "My account" view of the same tab (1.0.0-beta.10) -- the self-service link routes
+// (routes/auth.js /me/links) were always open to any local account, but the only UI for them sat
+// in the admin-only identities table, so a plain user had no way to link their SSO account.
+async function renderMyAccount(list) {
+  $('#btn-new-user').hidden = true;
+  $('#auth-mode-panel').hidden = true;
+  $('#tab-identities .tab-intro').textContent = t('identities.myIntro');
+  try {
+    const [linksRes, providers] = await Promise.all([
+      fetch('/api/auth/me/links'),
+      fetch('/api/auth/oidc/providers').then((r) => (r.ok ? r.json() : [])),
+    ]);
+    list.innerHTML = '';
+    const me = AuthUi.currentUser();
+    const head = document.createElement('li');
+    head.textContent = `${me.username || me.id} (${me.role})`;
+    list.appendChild(head);
+    if (linksRes.status === 403) {
+      const note = document.createElement('li');
+      note.className = 'muted';
+      note.textContent = t('identities.myOnlyLocal');
+      list.appendChild(note);
+      return;
+    }
+    if (!linksRes.ok) throw new Error(`HTTP ${linksRes.status}`);
+    const links = await linksRes.json();
+    const linksLi = document.createElement('li');
+    linksLi.className = 'identity-links';
+    for (const lnk of links) {
+      const tag = document.createElement('span');
+      tag.className = 'muted';
+      tag.textContent = `↳ ${lnk.username} [${lnk.providerLabel || lnk.providerId}]`;
+      linksLi.appendChild(tag);
+      const unlinkBtn = document.createElement('button');
+      unlinkBtn.type = 'button';
+      unlinkBtn.className = 'secondary';
+      unlinkBtn.textContent = t('identities.unlink');
+      unlinkBtn.addEventListener('click', async () => {
+        try {
+          await api(`/auth/me/links/${encodeURIComponent(lnk.externalId)}`, { method: 'DELETE' });
+          loadIdentities();
+        } catch (e) {
+          alert(e.message);
+        }
+      });
+      linksLi.appendChild(unlinkBtn);
+    }
+    for (const p of providers) {
+      if (links.some((lnk) => lnk.providerId === p.id)) continue;
+      const linkA = document.createElement('a');
+      linkA.className = 'link-btn';
+      linkA.href = `/api/auth/me/links/${encodeURIComponent(p.id)}/start`;
+      linkA.textContent = t('identities.linkProvider', { provider: p.label });
+      linksLi.appendChild(linkA);
+    }
+    if (links.length === 0 && providers.length === 0) {
+      const none = document.createElement('span');
+      none.className = 'muted';
+      none.textContent = t('identities.noLinks');
+      linksLi.appendChild(none);
+    }
+    list.appendChild(linksLi);
+  } catch (e) {
+    list.innerHTML = '';
+    const err = document.createElement('li');
+    err.className = 'fail-text';
+    err.textContent = t('common.error', { msg: e.message });
+    list.appendChild(err);
+  }
+}
+
 async function loadIdentities() {
   const list = $('#identities-list');
   list.innerHTML = `<li class="muted">${t('common.loading')}</li>`;
+  if (!AuthUi.isAdmin()) return renderMyAccount(list);
   $('#btn-new-user').hidden = !AuthUi.localEnabled();
   if (AuthUi.authMode() === 'none') {
     renderAuthModePanel(); // mode-switch buttons stay hidden for "none"; OIDC providers CRUD still shows

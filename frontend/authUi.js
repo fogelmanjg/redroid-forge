@@ -150,7 +150,11 @@ const AuthUi = (() => {
     // the audience the setup wizard (app.js's loadIdentities, rendered here instead of an
     // identity list while authMode is "none") needs to reach, since nobody else can turn
     // security on in the first place.
-    identitiesNavBtn.hidden = !isAdmin();
+    // 1.0.0-beta.10: a non-admin gets the same tab as "My account" (link/unlink their own SSO
+    // login, app.js renderMyAccount) -- without it a plain user could never link an account.
+    identitiesNavBtn.hidden = !isAdmin() && !(state.authMode !== 'none' && state.user);
+    identitiesNavBtn.dataset.i18n = isAdmin() ? 'nav.identities' : 'nav.myAccount';
+    identitiesNavBtn.textContent = I18n.t(identitiesNavBtn.dataset.i18n);
   }
 
   wireLoginForm();

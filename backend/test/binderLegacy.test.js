@@ -225,7 +225,7 @@ test('slotsFromBinds reads the slot of the binder binds, legacy and binderfs, an
   assert.deepStrictEqual(binder.slotsFromBinds(undefined), []);
 });
 
-test('slotsInUseOnHost asks Docker for every running container, and a container that disappears does not break it', async () => {
+test('slotsInUseOnHost asks Docker for every container, and a container that disappears does not break it', async () => {
   const info = {
     a: { HostConfig: { Binds: ['/dev/binder1:/dev/binder', '/dev/hwbinder1:/dev/hwbinder', '/dev/vndbinder1:/dev/vndbinder'] } },
     c: { HostConfig: { Binds: ['/dev/binder4:/dev/binder'] } },
@@ -247,4 +247,39 @@ test('nextFreeSlot skips the slots that a running container of the host already 
     assert.strictEqual(free([1]), 2);
     assert.strictEqual(free([1, 2, 4]), 3);
   });
+});
+
+// 1.0.0-beta.9: found live 23/11/2026 -- dev's stopped instance on slot 3, prod created one on slot 3,
+// dev started its own again: two Androids on binder3.
+test('slotHolders counts stopped containers too, and asks Docker for all of them', async () => {
+  let askedAll = null;
+  const info = {
+    dev: { Id: 'dev', Name: '/redroid-test', State: { Running: false }, HostConfig: { Binds: ['/dev/binderfs/binder3:/dev/binder'] } },
+    prod: { Id: 'prod', Name: '/redroid-pvz2', State: { Running: true }, HostConfig: { Binds: ['/dev/binderfs/binder5:/dev/binder'] } },
+  };
+  const docker = {
+    listContainers: async (opts) => { askedAll = !!(opts && opts.all); return [{ Id: 'dev' }, { Id: 'prod' }]; },
+    getContainer: (id) => ({ inspect: async () => info[id] }),
+  };
+  const holders = await binder.slotHolders(docker);
+  assert.strictEqual(askedAll, true);
+  assert.deepStrictEqual(holders.get(3), [{ id: 'dev', name: 'redroid-test', running: false }]);
+  assert.deepStrictEqual((await binder.slotsInUseOnHost(docker)).sort(), [3, 5]);
+});
+
+test('runningHolder: only another RUNNING container blocks a start, never the instance itself', () => {
+  const holders = new Map([[3, [{ id: 'mine', name: 'me', running: true }, { id: 'other', name: 'pvz2', running: false }]],
+    [4, [{ id: 'other', name: 'pvz2', running: true }]]]);
+  assert.strictEqual(binder.runningHolder(holders, 3, 'mine'), null);
+  assert.strictEqual(binder.runningHolder(holders, 4, 'mine').name, 'pvz2');
+  assert.strictEqual(binder.runningHolder(holders, 9, 'mine'), null);
+});
+
+test('assertSlotFreeToStart: 409 naming the container that has the slot', async () => {
+  const docker = {
+    listContainers: async () => [{ Id: 'other' }],
+    getContainer: () => ({ inspect: async () => ({ Id: 'other', Name: '/redroid-pvz2', State: { Running: true }, HostConfig: { Binds: ['/dev/binderfs/binder3:/dev/binder'] } }) }),
+  };
+  await assert.rejects(binder.assertSlotFreeToStart(docker, 3, 'mine'), (e) => e.httpStatus === 409 && /redroid-pvz2/.test(e.message));
+  await binder.assertSlotFreeToStart(docker, 4, 'mine');
 });
