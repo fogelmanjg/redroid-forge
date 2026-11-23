@@ -35,6 +35,19 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
   name ADB cannot reach, e.g. a public domain behind a reverse proxy while ADB is only on the LAN
   or VPN address. `REDROID_FORGE_ADB_HOST` is the fallback.
 
+### Fixed
+
+- **Internal WiFi (fake wifi) never connected on an instance's first boot; a restart fixed it.**
+  Root cause: on connect, the WiFi HAL patch takes its static IP from
+  `/data/local/tmp/.jg-netinfo`, which `jg_netfix.sh` only wrote after the interface swap -- and
+  the swap waited for that very connect. On a first boot the file did not exist yet, so Android
+  fell back to DHCP (there is none on this network), gave up after ~18 s and disconnected; the
+  forge had already seen "connected" and stopped retrying. A restart worked only because the file,
+  in `/data`, survived into the next boot. Now the forge writes that file from eth0's address
+  before every connect attempt (which also corrects a stale address after a recreate), waits for
+  Android's boot to complete before trying, and only counts the connection once it still holds 25
+  s later. Verified on a brand-new instance: connected 36 s after creation and stayed up.
+
 ### Changed
 
 - Live previews can be captured up to 1080px (was 480): the "Viewers" grid now uses the whole

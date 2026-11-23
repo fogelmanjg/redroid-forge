@@ -408,25 +408,66 @@ function scheduleHwsimWifiFix(instanceId, containerId) {
 // The fake wifi HAL only fires when something asks Android to connect.
 // `su 0 sh -c '...'`, not `su -c '...'`: toybox's su (the official redroid image) parses
 // its first argument as a WHO (uid/user), not a getopt flag -- see deviceProfile.js.
-async function ensureWifiConnected(instanceId, containerId) {
+//
+// "Fake wifi never connects on the first boot, a restart fixes it" (root cause found 22/11/2026,
+// 1.0.0-beta.7): on connect the HAL patch builds a STATIC IP config from /data/local/tmp/.jg-netinfo,
+// which jg_netfix.sh only writes AFTER the eth0<->wlan0 swap -- and the swap waits for that very
+// connect's trigger. On a container's first boot the file does not exist yet, so Android falls back
+// to DHCP (there is no DHCP server on this fake network), gives up after ~18 s and disconnects. A
+// restart "fixed" it only because the file, in /data, survives into the next boot. Fixes here:
+//  - NETINFO_SCRIPT writes the file from eth0's current address BEFORE every connect attempt (eth0
+//    has its address from the start; after the swap eth0 no longer exists and jg_netfix.sh keeps the
+//    file up to date). Also corrects a stale file whose address a recreate changed.
+//  - "connected" must still hold CONFIRM_MS later -- past that ~18 s DHCP give-up -- before this
+//    counts as done (it used to return on the first "connected" it saw, seconds before the drop).
+//  - the attempts start once Android reports boot completed (a slow first boot used to burn them).
+const NETINFO_SCRIPT = "IP=$(ip -4 addr show dev eth0 2>/dev/null | awk '/inet /{print $2; exit}'); "
+  + "GW=$(ip route show dev eth0 2>/dev/null | awk '/^default/{print $3; exit}'); "
+  + 'F=/data/local/tmp/.jg-netinfo; '
+  + '[ -n "$IP" ] && echo "$IP ${GW:-172.17.0.1}" > "$F.tmp" && chmod 644 "$F.tmp" && mv "$F.tmp" "$F"; true';
+const WIFI_TIMING = { bootWaitMs: 5 * 60 * 1000, pollMs: 5000, enableWaitMs: 3000, afterConnectMs: 5000, confirmMs: 25000 };
+
+async function wifiStatus(containerId) {
+  try { return await execMaybeSu(containerId, 'cmd wifi status'); } catch (e) { return ''; }
+}
+const isConnected = (status) => /Wifi is connected/.test(status);
+
+async function ensureWifiConnected(instanceId, containerId, timing = WIFI_TIMING) {
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const bootDeadline = Date.now() + timing.bootWaitMs;
+  for (;;) {
+    let booted = '';
+    // Through execMaybeSu like every other Android command here: a bare runtime.exec(['getprop'])
+    // has no /system/bin in its PATH and always failed (found live 22/11/2026, burning the whole wait).
+    // runtime.exec hands back Docker's multiplexed stream, 8-byte frame headers included
+    // ("\u0001\u0000...\u0002" before the "1"): strip control characters before comparing.
+    try {
+      booted = String(await execMaybeSu(containerId, 'getprop sys.boot_completed')).replace(/[\x00-\x08\x0e-\x1f]/g, '').trim();
+    } catch (e) { /* not up yet */ }
+    if (booted === '1') break;
+    if (Date.now() > bootDeadline) { warn(`${instanceId} did not finish booting in time; trying wifi anyway`); break; }
+    await sleep(timing.pollMs);
+  }
+
   const MAX_ATTEMPTS = 6;
   for (let i = 0; i < MAX_ATTEMPTS; i++) {
-    let status = '';
-    try {
-      status = await execMaybeSu(containerId, 'cmd wifi status');
-    } catch (e) {
-      warn(`status check failed for ${instanceId}: ${e}`);
+    if (isConnected(await wifiStatus(containerId))) {
+      await sleep(timing.confirmMs);
+      if (isConnected(await wifiStatus(containerId))) {
+        log(`wifi connected and stable for ${instanceId} (attempt ${i + 1})`);
+        return;
+      }
+      warn(`wifi dropped for ${instanceId} after connecting; retrying`);
     }
-    if (status.includes('Wifi is connected')) return;
-
     try {
+      await execMaybeSu(containerId, NETINFO_SCRIPT);
       await execMaybeSu(containerId, 'svc wifi enable');
-      await new Promise((r) => setTimeout(r, 3000));
+      await sleep(timing.enableWaitMs);
       await execMaybeSu(containerId, 'cmd wifi connect-network jg-wifi open');
     } catch (e) {
       warn(`attempt ${i + 1} failed for ${instanceId}: ${e}`);
     }
-    await new Promise((r) => setTimeout(r, 5000));
+    await sleep(timing.afterConnectMs);
   }
   warn(`attempts exhausted for ${instanceId} — it may need a manual reconnection`);
 }
@@ -488,7 +529,7 @@ function scheduleEth0RoutingFix(instanceId, containerId) {
 
 module.exports = {
   ensureHwsimWifi, scheduleHwsimWifiFix,
-  ensureWifiConnected, scheduleWifiConnectedFix,
+  ensureWifiConnected, scheduleWifiConnectedFix, NETINFO_SCRIPT,
   ensureEth0Routing, scheduleEth0RoutingFix,
   releaseHwsimPhys,
   integrate, ensureRuntimeReady,
