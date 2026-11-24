@@ -15,6 +15,9 @@ const moduleRunner = require('../src/lib/moduleRunner');
 const scheduler = require('../src/lib/moduleScheduler');
 const store = require('../src/lib/store');
 
+// No Docker in the tests: by default Android "never boots", so only the regular interval ticks.
+scheduler._setBootCheckForTests(async () => false);
+
 function watchdogManifestFields(id, intervalMs, startPaused) {
   return {
     id,
@@ -313,4 +316,22 @@ test('defaultPauseForNewModules: merges with unrelated existing keys instead of 
 
 test('defaultPauseForNewModules: a non-watchdog module id is simply ignored, nothing is seeded for it', () => {
   assert.deepEqual(scheduler.defaultPauseForNewModules(null, ['not-a-watchdog-module']), {});
+});
+
+test('first pass: once Android reports booted, one pass runs right away instead of an interval later', async () => {
+  let ran = 0;
+  const entryBody = `module.exports.runTick = async () => { global.__fxFirstPass = (global.__fxFirstPass || 0) + 1; };`;
+  scheduler._setBootCheckForTests(async () => true, { pollMs: 1, maxMs: 1000, graceMs: 1 });
+  try {
+    await withWatchdogFixture({ id: 'fx-first', intervalMs: 3_600_000, startPaused: false, entryBody }, async ({ fakeStore }) => {
+      fakeStore.set('inst-fp', { id: 'inst-fp', watchdogPaused: { 'fx-first': false } });
+      scheduler.start('inst-fp', 'container-fp', ['fx-first']);
+      for (let i = 0; i < 50 && !global.__fxFirstPass; i++) await new Promise((r) => setTimeout(r, 10));
+      ran = global.__fxFirstPass || 0;
+    });
+  } finally {
+    scheduler._setBootCheckForTests(async () => false);
+    delete global.__fxFirstPass;
+  }
+  assert.equal(ran, 1);
 });

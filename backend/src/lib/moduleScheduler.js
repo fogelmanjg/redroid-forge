@@ -43,20 +43,78 @@ async function tick(instanceId, containerId, manifest, entry) {
 // from both start() and a resume() that happens to race with it), only new ones
 // get a timer. Called right after a container starts (same point as
 // scheduleRuntimeFixups, stage 6) -- never awaited by the caller, scheduling
-// itself is synchronous and the first tick only fires after intervalMs.
-function newEntry(instanceId, containerId, manifest) {
+// itself is synchronous; the first pass runs once Android has booted (see newEntry).
+// First pass right after Android boots (1.0.0-rc.3), not one whole interval later: a watchdog that
+// reopens a game (cifi, every 5 min) left it closed for those 5 minutes after every start or
+// restart, for no reason. The scheduler waits for sys.boot_completed (polling, BOOT_POLL_MS, up
+// to BOOT_WAIT_MAX_MS), gives the system FIRST_PASS_GRACE_MS to settle (launcher, Play services),
+// runs one pass and restarts the interval from there. The plain interval stays armed meanwhile as
+// a safety net, so a boot that never reports completed still gets its regular passes. An instance
+// that is already running (reattached when this app restarts) is already booted: its first pass
+// comes after the grace only.
+const BOOT_POLL_MS = 3000;
+const BOOT_WAIT_MAX_MS = 180_000;
+const FIRST_PASS_GRACE_MS = 15_000;
+
+async function defaultBootCheck(containerId) {
+  // eslint-disable-next-line global-require -- lazy: the tests never touch Docker
+  const runtime = require('./dockerRuntime');
+  try {
+    const out = await runtime.exec(containerId, ['getprop', 'sys.boot_completed'], 5000);
+    // The raw exec stream carries Docker's frame header bytes too; an empty answer has no frame.
+    return String(out || '').replace(/[\x00-\x08]/g, '').trim() === '1';
+  } catch {
+    return false;
+  }
+}
+let bootCheck = defaultBootCheck;
+let timing = { pollMs: BOOT_POLL_MS, maxMs: BOOT_WAIT_MAX_MS, graceMs: FIRST_PASS_GRACE_MS };
+
+// unref'd: a pending wait never keeps the process (or a test run) alive.
+const sleep = (ms) => new Promise((r) => { const t = setTimeout(r, ms); if (t.unref) t.unref(); });
+
+async function waitForBoot(containerId, isCancelled) {
+  const deadline = Date.now() + timing.maxMs;
+  while (!isCancelled() && Date.now() < deadline) {
+    if (await bootCheck(containerId)) {
+      await sleep(timing.graceMs);
+      return !isCancelled();
+    }
+    await sleep(timing.pollMs);
+  }
+  return false;
+}
+
+function newEntry(instanceId, containerId, manifest, { firstPass = true } = {}) {
   const entry = {
     containerId, intervalMs: manifest.schedule.intervalMs, lastRunAt: null, lastOk: null, lastError: null,
+    cancelled: false,
   };
-  entry.timer = setInterval(() => {
-    tick(instanceId, containerId, manifest, entry).catch((e) => {
-      // tick() itself does not throw (moduleRunner.runTick already catches), this is
-      // only a last-resort net for a bug in tick()'s own bookkeeping -- a module
-      // misbehaving is already reflected in entry.lastError without reaching here.
-      log(`unexpected error ticking "${manifest.id}" for ${instanceId}: ${e.message}`);
+  const arm = () => {
+    entry.timer = setInterval(() => {
+      tick(instanceId, containerId, manifest, entry).catch((e) => {
+        log(`unexpected error ticking "${manifest.id}" for ${instanceId}: ${e.message}`);
+      });
+    }, manifest.schedule.intervalMs);
+  };
+  arm();
+  if (firstPass) {
+    waitForBoot(containerId, () => entry.cancelled).then((booted) => {
+      if (!booted || entry.cancelled) return;
+      clearInterval(entry.timer);
+      arm();
+      log(`"${manifest.id}" for ${instanceId}: Android booted, first pass now`);
+      return tick(instanceId, containerId, manifest, entry);
+    }).catch((e) => {
+      log(`first pass of "${manifest.id}" for ${instanceId} failed unexpectedly: ${e.message}`);
     });
-  }, manifest.schedule.intervalMs);
+  }
   return entry;
+}
+
+function cancel(entry) {
+  entry.cancelled = true;
+  clearInterval(entry.timer);
 }
 
 function start(instanceId, containerId, requiredModuleIds) {
@@ -76,7 +134,7 @@ function start(instanceId, containerId, requiredModuleIds) {
     // instance's own persisted choice (instance.watchdogPaused), not part of the timer.
     const existing = perInstance.get(manifest.id);
     if (existing) {
-      clearInterval(existing.timer);
+      cancel(existing);
       if (existing.containerId !== containerId) {
         log(`"${manifest.id}" for ${instanceId} was scheduled against container ${String(existing.containerId).slice(0, 12)}; rescheduling against ${String(containerId).slice(0, 12)}`);
       }
@@ -94,7 +152,7 @@ function start(instanceId, containerId, requiredModuleIds) {
 function stop(instanceId) {
   const perInstance = scheduled.get(instanceId);
   if (!perInstance) return;
-  for (const entry of perInstance.values()) clearInterval(entry.timer);
+  for (const entry of perInstance.values()) cancel(entry);
   scheduled.delete(instanceId);
 }
 
@@ -133,8 +191,8 @@ function resumeNow(instanceId, moduleId) {
   if (!old) return false;
   const manifest = moduleRunner.watchdogModules([moduleId]).find((m) => m.id === moduleId);
   if (!manifest) return false;
-  clearInterval(old.timer);
-  const entry = newEntry(instanceId, old.containerId, manifest);
+  cancel(old);
+  const entry = newEntry(instanceId, old.containerId, manifest, { firstPass: false }); // it runs its own pass right below
   perInstance.set(moduleId, entry);
   tick(instanceId, old.containerId, manifest, entry).catch((e) => {
     log(`immediate pass of "${moduleId}" for ${instanceId} failed unexpectedly: ${e.message}`);
@@ -178,7 +236,12 @@ function defaultPauseForNewModules(existingPaused, requiredModuleIds) {
 
 // Only for tests.
 function _resetForTests() { for (const id of Array.from(scheduled.keys())) stop(id); }
+function _setBootCheckForTests(fn, t) {
+  bootCheck = fn || defaultBootCheck;
+  timing = { pollMs: BOOT_POLL_MS, maxMs: BOOT_WAIT_MAX_MS, graceMs: FIRST_PASS_GRACE_MS, ...(t || {}) };
+}
 
 module.exports = {
   start, stop, status, pause, resume, resumeNow, isPaused, defaultPauseForNewModules, _resetForTests,
+  _setBootCheckForTests,
 };

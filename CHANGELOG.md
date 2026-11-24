@@ -28,6 +28,9 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
 ## [Unreleased]
 
 ### Fixed
+- A watchdog (such as cifi's, which reopens the game) waited one whole interval (5 minutes) after
+  every start or restart before its first pass. It now runs one pass as soon as Android has
+  booted (plus 15 s for the system to settle), and keeps its interval from there.
 - An instance pinned to some CPUs still told Android it had all of the host's (16 on a 16-thread
   host for a 4-CPU instance), so apps sized their thread pools for CPUs they cannot use (Unity
   logged "Cores = 16" and started a worker per core). Android now sees only the instance's own
