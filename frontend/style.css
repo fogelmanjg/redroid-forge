@@ -429,6 +429,13 @@ tr.instance-row-secondary > td { padding-top: 0.2rem; }
 .instance-card-address { font-family: monospace; font-size: 0.8rem; opacity: 0.8; cursor: pointer; border: 1px solid var(--border); border-radius: 4px; padding: 0.05rem 0.4rem; }
 .instance-card-address:hover { border-color: var(--accent); }
 .instance-card-buttons { display: flex; gap: 0.3rem; flex-wrap: wrap; justify-content: center; }
+/* In the viewers bands a card is exactly as wide as its preview (1.0.0-rc.2): before, the name,
+   address and buttons set the width, so the slider changed the images but not how many fit in a
+   row. The name and address are cut with "…" (full text in the tooltip/on copy); the buttons wrap. */
+.viewers-band-cards .instance-card { width: var(--pw, 200px); box-sizing: content-box; }
+.viewers-band-cards .instance-card > * { max-width: 100%; box-sizing: border-box; }
+.viewers-band-cards .instance-card-name,
+.viewers-band-cards .instance-card-address { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* "Viewers" (1.0.0-beta.12): two bands, portrait then landscape; every preview at the same scale of
    its real resolution -- --pw/--ph are set per card by app.js (viewersLayout.js). */
 .instances-grid { flex-direction: column; flex-wrap: nowrap; }

@@ -27,6 +27,25 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
 
 ## [Unreleased]
 
+## [1.0.0-rc.2] - 2026-11-23
+
+Release candidate for 1.0.0, published as the stable (Latest) release.
+
+### Changed
+- "Viewers" view: every preview gets the same long side (the slider, 200-600 px) whatever the
+  instance's resolution -- an 800x600 and a 3840x2160 instance come out the same size. Replaces
+  rc.1's single scale of the real resolution. "Fit to width" never goes above 600.
+- "Viewers" view: an instance goes in the portrait or landscape band by the shape actually on
+  screen (the live frames), not the configured one -- a game running in landscape on an instance
+  configured portrait moves to the landscape band by itself.
+- "Viewers" view: each card is exactly as wide as its preview (name and address cut with "…"),
+  so the slider changes how many fit in a row; the buttons are icons, with their words in the
+  tooltip.
+
+### Fixed
+- The background refresh every 4 s no longer scrolls the page back to the top: the new cards are
+  sized before they replace the old ones, and a refresh that still moved the page puts it back.
+
 ## [1.0.0-rc.1] - 2026-11-23
 
 First release candidate: from here on, only fixes until 1.0.0.

@@ -287,16 +287,16 @@ function saveInstanceViewMode(mode) {
 }
 let instanceViewMode = loadInstanceViewMode();
 
-// "Viewers" scale (1.0.0-beta.12): percent of each instance's real resolution, the same for all,
-// so a 600x1000 and a 1000x600 instance take the same room (viewersLayout.js). It drives BOTH the
-// size each preview is drawn at AND the backend capture size (Viewer.mountPreview/setSize), so a
-// small capture is never stretched by CSS. Clamped to the slider's own range.
-function loadViewersScale() {
+// "Viewers" size (1.0.0-rc.2): every preview's LONG side, in px, the same for all whatever the
+// instance's resolution (viewersLayout.js). It drives BOTH the size each preview is drawn at AND
+// the backend capture size (Viewer.mountPreview/setSize), so a small capture is never stretched
+// by CSS. Clamped to the slider's own range.
+function loadViewersLongSide() {
   let v = NaN;
-  try { v = parseInt(localStorage.getItem('viewersScale'), 10); } catch (e) { /* no storage */ }
-  return (Number.isFinite(v) && v >= 5 && v <= 100) ? v : 30;
+  try { v = parseInt(localStorage.getItem('viewersLongSide'), 10); } catch (e) { /* no storage */ }
+  return (Number.isFinite(v) && v >= ViewersLayout.LONG_MIN && v <= ViewersLayout.LONG_MAX) ? v : 300;
 }
-let viewersScale = loadViewersScale();
+let viewersLongSide = loadViewersLongSide();
 
 // A <details class="dropdown">'s summary always shows its active item (1.0.0-beta.12), whatever set
 // it -- a click, a saved preference, the filter counts changing -- so this watches the panel
@@ -334,7 +334,7 @@ try { viewersFit = localStorage.getItem('viewersFit') === '1'; } catch (e) { /* 
 let viewerCardsDrawn = [];
 function viewersLayoutNow() {
   return ViewersLayout.layout(viewerCardsDrawn, {
-    mode: viewersFit ? 'fit' : 'free', scalePercent: viewersScale,
+    mode: viewersFit ? 'fit' : 'free', longSide: viewersLongSide,
     gridWidth: $('#instances-grid').clientWidth,
     gap: 16, // .viewers-band-cards gap: 1rem
     pad: 24, // .instance-card padding 0.7rem on both sides + its 1px borders
@@ -352,13 +352,13 @@ function resizeViewerCaptures() {
 }
 
 const viewersScaleSlider = $('#viewers-size-slider');
-viewersScaleSlider.value = viewersScale;
+viewersScaleSlider.value = viewersLongSide;
 const viewersFitSelect = $('#viewers-columns');
 viewersFitSelect.value = viewersFit ? 'fit' : 'free';
 viewersScaleSlider.disabled = viewersFit;
 viewersScaleSlider.addEventListener('input', () => {
-  viewersScale = parseInt(viewersScaleSlider.value, 10);
-  try { localStorage.setItem('viewersScale', String(viewersScale)); } catch (e) { /* no storage */ }
+  viewersLongSide = parseInt(viewersScaleSlider.value, 10);
+  try { localStorage.setItem('viewersLongSide', String(viewersLongSide)); } catch (e) { /* no storage */ }
   // Live, while dragging -- every card's own session gets the new capture size right away.
   if (instanceViewMode === 'viewers') resizeViewerCaptures();
 });
@@ -368,6 +368,15 @@ viewersFitSelect.addEventListener('change', () => {
   viewersScaleSlider.disabled = viewersFit;
   if (instanceViewMode === 'viewers') resizeViewerCaptures();
 });
+// A preview whose app turned the screen (portrait <-> landscape) belongs to the other band now:
+// redraw from the last list, debounced (several can turn at once).
+let viewersShapeTimer = null;
+Viewer.onShapeChange(() => {
+  if (instanceViewMode !== 'viewers') return;
+  clearTimeout(viewersShapeTimer);
+  viewersShapeTimer = setTimeout(() => loadInstances({ silent: true, fromCache: true }), 300);
+});
+
 // In "fit" a window/panel resize changes the scale: debounced so dragging the window edge does
 // not send a resize per pixel.
 let viewersResizeTimer = null;
@@ -1955,6 +1964,7 @@ async function loadInstances({ silent = false, fromCache = false } = {}) {
         const b = document.createElement('button');
         b.textContent = label;
         b.className = 'secondary';
+        b.dataset.action = action;
         b.addEventListener('click', async () => {
           b.disabled = true;
           try {
@@ -1971,6 +1981,7 @@ async function loadInstances({ silent = false, fromCache = false } = {}) {
       const buildDeleteBtn = () => {
         const del = document.createElement('button');
         del.textContent = t('instances.delete');
+        del.dataset.action = 'delete';
         del.className = 'secondary';
         del.addEventListener('click', async () => {
           if (!confirm(t('instances.confirmDelete', { name: inst.name }))) return;
@@ -1992,6 +2003,7 @@ async function loadInstances({ silent = false, fromCache = false } = {}) {
       const buildLockBtn = () => {
         const b = document.createElement('button');
         b.className = 'secondary';
+        b.dataset.action = inst.locked ? 'unlock' : 'lock';
         if (inst.locked) {
           b.textContent = `🔓 ${t('instances.lock.unlock')}`;
           b.addEventListener('click', async () => {
@@ -2024,6 +2036,19 @@ async function loadInstances({ silent = false, fromCache = false } = {}) {
           }
         }
         if (AuthUi.can('configure')) container.appendChild(buildLockBtn());
+      };
+      // The viewers cards show their buttons as icons only (1.0.0-rc.2): a card is as narrow as its
+      // preview. The words stay in the tooltip, ahead of any reason already there (a lock's).
+      const ACTION_ICONS = { start: '▶', stop: '■', restart: '↻', delete: '🗑', lock: '🔒', unlock: '🔓' };
+      const iconizeButtons = (container) => {
+        for (const b of container.querySelectorAll('button[data-action]')) {
+          const icon = ACTION_ICONS[b.dataset.action];
+          if (!icon) continue;
+          const words = b.textContent.replace(/^[🔒🔓]\s*/u, '');
+          b.title = b.title ? `${words} — ${b.title}` : words;
+          b.textContent = icon;
+          b.classList.add('icon-button');
+        }
       };
       const buildLockChip = () => {
         const chip = document.createElement('span');
@@ -2131,18 +2156,21 @@ async function loadInstances({ silent = false, fromCache = false } = {}) {
           const smallButtons = document.createElement('div');
           smallButtons.className = 'instance-card-buttons';
           appendActionButtons(smallButtons);
+          iconizeButtons(smallButtons);
           small.appendChild(smallButtons);
           stoppedCards.appendChild(small);
           continue;
         }
         const card = document.createElement('div');
         card.className = 'instance-card';
-        const { w, h } = ViewersLayout.dims(inst.display);
+        // The shape on screen right now (the live frames) when known, else the configured one.
+        const { w, h } = Viewer.frameSize(inst.id) || ViewersLayout.dims(inst.display);
         let viewerWrap = null;
 
         const nameDiv = document.createElement('div');
         nameDiv.className = 'instance-card-name';
         nameDiv.textContent = inst.name;
+        nameDiv.title = inst.name; // the card can be narrower than the name (cut with "…")
         card.appendChild(nameDiv);
         if (inst.locked) card.appendChild(buildLockChip());
         card.appendChild(buildAddressSpan('instance-card-address'));
@@ -2163,6 +2191,7 @@ async function loadInstances({ silent = false, fromCache = false } = {}) {
           if (scrcpyBtn) cardButtons.appendChild(scrcpyBtn);
         }
         appendActionButtons(cardButtons);
+        iconizeButtons(cardButtons);
         card.appendChild(cardButtons);
 
         viewerCards.push({ id: inst.id, w, h, card, viewerWrap });
@@ -2518,10 +2547,10 @@ async function loadInstances({ silent = false, fromCache = false } = {}) {
       if (openStorageId === inst.id) rows.appendChild(buildStorageEditRow(inst));
       if (openAdbAccessId === inst.id) rows.appendChild(buildAdbAccessEditRow(inst));
     }
+    const scrollBefore = window.scrollY; // a background refresh must never move the page
     if (isViewers) {
       // Two bands, portrait then landscape, each wrapping on its own (viewersLayout.js); every
       // preview at the same scale of its real resolution.
-      viewerCardsDrawn = viewerCards;
       const split = ViewersLayout.bands(viewerCards);
       for (const [key, band] of [['portrait', split.portrait], ['landscape', split.landscape]]) {
         if (band.length === 0) continue;
@@ -2536,13 +2565,17 @@ async function loadInstances({ silent = false, fromCache = false } = {}) {
         bandDiv.append(title, bandCards);
         cards.appendChild(bandDiv);
       }
-      grid.replaceChildren(cards);
+      // Sizes and previews go into the new cards BEFORE they replace the old ones (rc.2): sized
+      // after, the browser laid the page out once with unsized cards -- a much shorter page -- and
+      // that pulled the scroll back to the top on every 4 s refresh.
+      viewerCardsDrawn = viewerCards;
       const { sizes } = viewersLayoutNow();
       for (const vc of viewerCards) {
         vc.card.style.setProperty('--pw', `${sizes[vc.id].width}px`);
         vc.card.style.setProperty('--ph', `${sizes[vc.id].height}px`);
         if (vc.viewerWrap) mountPreview(vc.viewerWrap, vc.id, sizes[vc.id].capture);
       }
+      grid.replaceChildren(cards);
       // "fit" needs the grid's real width, which is 0 while it was still hidden: once more on screen.
       if (viewersFit) requestAnimationFrame(resizeViewerCaptures);
     } else {
@@ -2550,6 +2583,7 @@ async function loadInstances({ silent = false, fromCache = false } = {}) {
     }
     stoppedGrid.replaceChildren(isViewers ? stoppedCards : document.createDocumentFragment());
     stoppedGrid.hidden = !isViewers || stoppedGrid.childElementCount === 0;
+    if (silent && window.scrollY !== scrollBefore) window.scrollTo({ top: scrollBefore });
     // Sweep sessions nobody asked to keep any more: every preview not mounted by this draw --
     // "viewers" mounts the running instances shown, "full" only the shown ones whose own 👁
     // toggle is on, "minimal" none. A deleted instance, one hidden by the filter, a mode switch

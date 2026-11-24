@@ -13,7 +13,26 @@
 // localStorage, see its own comment) just calls these on click/reload, never has to track
 // whether a session is already running itself.
 const Viewer = (() => {
-  const sessions = new Map(); // instanceId -> { ws, img, url }
+  const sessions = new Map(); // instanceId -> { ws, img, url, shape }
+  // The shape of the frames actually arriving (1.0.0-rc.2): an app can turn the screen (a game
+  // in landscape on an instance configured portrait), and the "viewers" view lays previews out by
+  // what is really on screen, not by the configured resolution.
+  const shapeListeners = new Set();
+  function onShapeChange(fn) { shapeListeners.add(fn); }
+  function frameSize(instanceId) {
+    const s = sessions.get(instanceId);
+    return s && s.shape ? { ...s.shape } : null;
+  }
+  function noteFrame(state) {
+    const w = state.img.naturalWidth;
+    const h = state.img.naturalHeight;
+    if (!w || !h) return;
+    const prev = state.shape;
+    state.shape = { w, h };
+    // Only a real change of shape is news -- not every frame, not a size change of the same shape.
+    if (prev && Math.abs(prev.w / prev.h - w / h) < 0.02) return;
+    for (const fn of shapeListeners) { try { fn(state.instanceId, { w, h }); } catch (e) { /* a listener's own problem */ } }
+  }
 
   function wsUrl(instanceId, size) {
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
@@ -63,7 +82,8 @@ const Viewer = (() => {
     img.className = 'viewer-preview-img';
     container.appendChild(img);
 
-    const state = { instanceId, img, url: null, ws: null };
+    const state = { instanceId, img, url: null, ws: null, shape: null };
+    img.addEventListener('load', () => noteFrame(state));
     sessions.set(instanceId, state);
 
     const ws = new WebSocket(wsUrl(instanceId, size));
@@ -100,5 +120,5 @@ const Viewer = (() => {
   function isMounted(instanceId) { return sessions.has(instanceId); }
   function mountedIds() { return Array.from(sessions.keys()); }
 
-  return { mountPreview, unmountPreview, setSize, setSizeAll, isMounted, mountedIds };
+  return { mountPreview, unmountPreview, setSize, setSizeAll, isMounted, mountedIds, frameSize, onShapeChange };
 })();
