@@ -109,6 +109,29 @@ test("refresh reads the container's real cgroup usage and rewrites the host file
   });
 });
 
+test('refresh counts the inactive page cache as free, so a cgroup full of cache is not "out of memory"', () => {
+  withFakeStore(() => {
+    // retrato-foto, 24/11/2026: 3 GB cap, all of it in use, 1.6 GB of that page cache (0.5 inactive).
+    const containerId = 'cache-full-container';
+    const cg = path.join(cgroupRoot, 'docker', containerId);
+    fs.mkdirSync(cg, { recursive: true });
+    const MB = 1024 * 1024;
+    fs.writeFileSync(path.join(cg, 'memory.current'), `${3072 * MB}\n`);
+    fs.writeFileSync(path.join(cg, 'memory.stat'),
+      `anon ${1242 * MB}\nfile ${1600 * MB}\nactive_file ${1088 * MB}\ninactive_file ${512 * MB}\n`);
+    const instance = { id: 'inst-cache', name: 'cache', volumeName: 'redroid-forge-cache', memoryMb: 3072, containerId };
+    store.upsert(instance);
+    meminfoFix.prepareBinds(instance.volumeName, instance.memoryMb);
+
+    meminfoFix.refresh(instance.id);
+
+    const content = fs.readFileSync(meminfoFix.hostFilePath(instance.volumeName), 'utf8');
+    assert.match(content, /MemFree:\s+524288 kB/); // 0 truly free + 512 MB inactive cache
+    assert.match(content, /Cached:\s+1114112 kB/); // the active 1088 MB
+    assert.match(content, /MemAvailable:\s+1638400 kB/); // all the cache
+  });
+});
+
 test('refresh is a no-op for an instance with no cap, no container, or an unknown cgroup', () => {
   withFakeStore(() => {
     assert.doesNotThrow(() => meminfoFix.refresh('no-such-instance'));
@@ -180,4 +203,13 @@ test("cleanup removes the instance's generated directory", () => {
   assert.ok(fs.existsSync(meminfoFix.hostFilePath('to-delete')));
   meminfoFix.cleanup('to-delete');
   assert.ok(!fs.existsSync(path.dirname(meminfoFix.hostFilePath('to-delete'))));
+});
+
+test('ensureRcTrigger re-installs the .rc for a capped instance and never throws', async () => {
+  const copies = [];
+  await meminfoFix.ensureRcTrigger({ name: 'x', containerId: 'c1', memoryMb: 3072 }, { copyIn: async (src, dest) => copies.push(dest) });
+  assert.deepStrictEqual(copies, [meminfoFix.RC_TARGET]);
+  await meminfoFix.ensureRcTrigger({ name: 'uncapped', containerId: 'c2', memoryMb: null }, { copyIn: async () => copies.push('no') });
+  assert.strictEqual(copies.length, 1);
+  await assert.doesNotReject(meminfoFix.ensureRcTrigger({ name: 'y', containerId: 'c3', memoryMb: 1024 }, { copyIn: async () => { throw new Error('docker cp failed'); } }));
 });

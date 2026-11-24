@@ -39,6 +39,17 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
   `none`) was stored with `[null]` as its owners, and adding an owner to it later from the UI
   failed with `"ownerIds" must be a non-empty array of ids`. It now starts with no owners (admins
   see it), and the Owners panel ignores a `null` left by older versions.
+- Android killed background apps far too eagerly on a memory-capped instance ("min watermark is
+  breached", 250 kills in 11 minutes on a 3 GB instance using 1.2 GB): the memory figures the
+  instance sees counted the page cache as used, so a cgroup full of cache looked out of memory.
+  The inactive page cache now counts as free, the way a real kernel would have reclaimed it.
+- Instances created before 2026-11-17 could keep seeing the host's whole RAM instead of their own
+  limit (their `.rc` had group-write permission and Android skipped it), so they never trimmed
+  and choked at the cap until they stopped answering. The `.rc` is now re-installed with the
+  right permissions before every start and restart.
+- After the app restarted (an update, a rebuild), instances that kept running stopped getting
+  fresh memory figures until each one was restarted by hand; their refresh is now re-armed at
+  boot like the watchdogs.
 
 ## [1.0.0-rc.2] - 2026-11-23
 

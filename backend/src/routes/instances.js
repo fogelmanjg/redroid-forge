@@ -498,6 +498,7 @@ async function startInstanceRuntime(instance) {
   // Another Android already on this instance's binder nodes (another forge on the same host): refuse,
   // instead of letting both break (see binder.js slotHolders).
   if (instance.binderSlot != null) await binder.assertSlotFreeToStart(runtime.docker, instance.binderSlot, instance.containerId);
+  await meminfoFix.ensureRcTrigger(instance); // a 644 .rc before Android's init reads it (see meminfoFix.js)
   await cpuFix.ensure(instance); // Android sees the instance's own CPUs, not the host's (see cpuFix.js)
   await runtime.start(instance.containerId);
   const reconciled = await reconcileDeviceProfile(instance);
@@ -571,6 +572,7 @@ router.post('/:id/restart', async (req, res) => {
     // stop() does, so the phys have to be released here too (before, not after).
     await releaseWifiFixes(instance);
     await releaseKnockGuards(instance);
+    await meminfoFix.ensureRcTrigger(instance);
     await cpuFix.ensure(instance);
     await runtime.restart(instance.containerId);
     const reconciled = await reconcileDeviceProfile(instance);
@@ -1333,6 +1335,9 @@ async function reattachRunningInstances() {
       const requiredModuleIds = requiredModuleIdsFor(instance);
       await moduleRunner.ensureHostInfraReady(requiredModuleIds);
       moduleScheduler.start(instance.id, instance.containerId, requiredModuleIds);
+      // The meminfo refresh timer lives in memory too (1.0.0-rc.3): without this, every instance
+      // that kept running across an app restart was left showing Android the same MemFree forever.
+      meminfoFix.scheduleRefresh(instance);
       console.log(`[instances] reattached running instance "${instance.name}" (${requiredModuleIds.join(', ') || 'no modules'})`);
     } catch (e) {
       console.warn(`[instances] could not reattach "${instance.name}" at boot: ${e.message}`);

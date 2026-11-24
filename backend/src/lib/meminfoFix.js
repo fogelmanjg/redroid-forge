@@ -215,6 +215,21 @@ async function installRcTrigger(containerId, memoryMb, { copyIn } = {}) {
   log(`installed ${RC_TARGET} in ${containerId} (Android's own init will bind /proc/meminfo after post-fs-data)`);
 }
 
+// Before every start/restart (1.0.0-rc.3), not only at create: instances created before the
+// chmod in defaultCopyIn (17/11/2026) still carried a 664 `.rc` that Android's init skips, so they
+// saw the host's whole RAM forever -- found live on herotale (24/11/2026): 63 GB seen, 4 GB cap,
+// stuck thrashing at the limit until it no longer answered ADB. `docker cp` works on a stopped
+// or a running container, and the copy is the same file, so re-installing it is harmless.
+// Never fails the start: an instance without the fix still runs, as before.
+async function ensureRcTrigger(instance, opts) {
+  if (!instance || !instance.containerId || !instance.memoryMb) return;
+  try {
+    await installRcTrigger(instance.containerId, instance.memoryMb, opts);
+  } catch (e) {
+    warn(`could not (re)install ${RC_TARGET} in "${instance.name}": ${e.message}`);
+  }
+}
+
 // The two cgroup v2 layouts a container's scope can show up under, depending on Docker's cgroup
 // driver (systemd vs cgroupfs) -- same two candidates as sampler.py's Container class.
 function cgroupPath(containerId) {
@@ -248,10 +263,21 @@ function refresh(instanceId) {
   if (!cg) return; // not up yet, or neither known cgroup driver layout -- try again next tick
   const currentBytes = readMatch(path.join(cg, 'memory.current'), /^(\d+)/);
   if (currentBytes === null) return;
-  const fileBytes = readMatch(path.join(cg, 'memory.stat'), /^file\s+(\d+)/m) || 0;
+  const stat = path.join(cg, 'memory.stat');
+  const fileBytes = readMatch(stat, /^file\s+(\d+)/m) || 0;
+  const inactiveFileBytes = Math.min(fileBytes, readMatch(stat, /^inactive_file\s+(\d+)/m) || 0);
   const totalKb = instance.memoryMb * 1024;
-  const cachedKb = fileBytes / 1024;
-  const freeKb = totalKb - currentBytes / 1024;
+  // The inactive page cache counts as FREE, not as used (1.0.0-rc.3). A cgroup has no kswapd
+  // keeping free pages above the watermarks the way a real kernel does: the page cache fills it
+  // up to the limit and `limit - memory.current` sits near 0 all the time. lmkd compares MemFree
+  // with the watermarks of /proc/zoneinfo (the host's, ~66 MB min here) and kept killing apps
+  // with "min watermark is breached" on a 3 GB instance using 1.2 GB -- found live on
+  // retrato-foto (24/11/2026): 252 kills in 11 minutes, 1.6 GB of it page cache. Inactive
+  // cache is dropped on the first reclaim, exactly what a real phone's kswapd would have freed;
+  // the active part stays as Cached. When apps really fill the instance, the inactive cache
+  // shrinks first and MemFree goes down with it, so lmkd still kills when it should.
+  const cachedKb = (fileBytes - inactiveFileBytes) / 1024;
+  const freeKb = totalKb - currentBytes / 1024 + inactiveFileBytes / 1024;
   writeFile(instance.volumeName, { totalKb, freeKb, cachedKb });
 }
 
@@ -281,6 +307,6 @@ function cleanup(volumeName) {
 }
 
 module.exports = {
-  prepareBinds, installRcTrigger, scheduleRefresh, release, refresh, cleanup,
+  prepareBinds, installRcTrigger, ensureRcTrigger, scheduleRefresh, release, refresh, cleanup,
   render, hostFilePath, cgroupPath, DATA_DIR, REFRESH_MS, IN_CONTAINER_SRC, RC_SOURCE, RC_TARGET,
 };
