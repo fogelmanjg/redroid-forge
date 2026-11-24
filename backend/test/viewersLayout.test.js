@@ -2,42 +2,38 @@
 
 const test = require('node:test');
 const assert = require('node:assert');
-const { aspect, rowsOf, fillerGrow, captureSizes } = require('../../frontend/viewersLayout');
+const { dims, bands, fitScale, layout } = require('../../frontend/viewersLayout');
 
-const portrait = { id: 'retrato', ar: 600 / 1000 };
-const landscape = { id: 'paisaje', ar: 1280 / 720 };
+const retrato = { id: 'retrato', w: 600, h: 1000 };
+const paisaje = { id: 'paisaje', w: 1000, h: 600 };
 
-test('aspect: width/height of the display, portrait 9:16 when unknown', () => {
-  assert.strictEqual(aspect({ width: 1000, height: 600 }), 1000 / 600);
-  assert.strictEqual(aspect(null), 9 / 16);
-  assert.strictEqual(aspect({ width: 0, height: 600 }), 9 / 16);
+test('dims: the real resolution, a portrait 720x1280 when unknown', () => {
+  assert.deepStrictEqual(dims({ width: 1000, height: 600 }), { w: 1000, h: 600 });
+  assert.deepStrictEqual(dims(null), { w: 720, h: 1280 });
 });
 
-test('auto: the slider is the height -- capture short side = height for landscape, width for portrait', () => {
-  const s = captureSizes([portrait, landscape], { columns: 'auto', size: 200 });
-  assert.strictEqual(s.paisaje, 200);
-  assert.strictEqual(s.retrato, 120); // 200 * 0.6: its width, its short side
+test('same scale: 600x1000 and 1000x600 take the same room, one standing and one lying down', () => {
+  const { sizes } = layout([retrato, paisaje], { mode: 'free', scalePercent: 30 });
+  assert.deepStrictEqual(sizes.retrato, { width: 180, height: 300, capture: 180 });
+  assert.deepStrictEqual(sizes.paisaje, { width: 300, height: 180, capture: 180 });
 });
 
-test('N per row: every card in a row gets the same height, widths follow the shape', () => {
-  // 2 per row, 1000px wide: free = 1000 - 16 gap - 2*24 pad = 936; sumAr = 0.6 + 1.778 = 2.378
-  const s = captureSizes([portrait, landscape], { columns: '2', gridWidth: 1000 });
-  const h = 936 / (0.6 + 1280 / 720);
-  assert.strictEqual(s.paisaje, Math.round(h));        // landscape: short side = the height
-  assert.strictEqual(s.retrato, Math.round(h * 0.6));  // portrait: short side = its width
+test('two bands, order kept inside each; a square one is landscape', () => {
+  const b = bands([paisaje, retrato, { id: 'cuadrada', w: 800, h: 800 }, { id: 'r2', w: 720, h: 1280 }]);
+  assert.deepStrictEqual(b.portrait.map((i) => i.id), ['retrato', 'r2']);
+  assert.deepStrictEqual(b.landscape.map((i) => i.id), ['paisaje', 'cuadrada']);
 });
 
-test('a short last row gets a filler, so it is not blown up to the whole width', () => {
-  const items = [portrait, landscape, { id: 'sola', ar: 0.6 }];
-  assert.deepStrictEqual(rowsOf(items, 2).map((r) => r.length), [2, 1]);
-  assert.ok(fillerGrow(items, [items[2]], 2) > 0);
-  const s = captureSizes(items, { columns: '2', gridWidth: 1000 });
-  // Without the filler the lone portrait would be 1000-24 wide; with it, close to the first row's size.
-  assert.ok(s.sola < 400, `got ${s.sola}`);
+test('fit: each band in one row across the width, both bands at the same (smallest) scale', () => {
+  // 1000 px: portraits 2x600 wide -> (1000-16-48)/1200; landscapes 1x1000 -> (1000-24)/1000.
+  const items = [retrato, { id: 'r2', w: 600, h: 1000 }, paisaje];
+  const s = fitScale(items, { gridWidth: 1000 });
+  assert.strictEqual(s, (1000 - 16 - 48) / 1200);
+  const { sizes } = layout(items, { mode: 'fit', gridWidth: 1000 });
+  assert.strictEqual(sizes.retrato.height, sizes.paisaje.width);
 });
 
-test('sizes stay inside the backend range', () => {
-  const s = captureSizes([landscape], { columns: '1', gridWidth: 5000 });
-  assert.strictEqual(s.paisaje, 1080);
-  assert.strictEqual(captureSizes([portrait], { columns: 'auto', size: 60 }).retrato, 60);
+test('captures stay inside the backend range', () => {
+  assert.strictEqual(layout([paisaje], { scalePercent: 5 }).sizes.paisaje.capture, 60);
+  assert.strictEqual(layout([{ id: 'big', w: 2160, h: 3840 }], { scalePercent: 100 }).sizes.big.capture, 1080);
 });

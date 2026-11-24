@@ -27,6 +27,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
 
 ## [Unreleased]
 
+## [1.0.0-rc.1] - 2026-11-23
+
+First release candidate: from here on, only fixes until 1.0.0.
+
 ### Added
 - Project logo (an anvil with a glowing phone) in the header, linking to the project on GitHub; the
   installed version links to its own release notes.
@@ -38,6 +42,18 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
   Settings (General, Doctor, Identities / My account) -- with the active group's tabs in a row
   below. Everything else (user, version and update check, Help, language, log out) moved into one
   menu on the right, so the bar fits one row, also on a phone.
+- Instances toolbar: the view (Full / Minimal / Viewers) and the state filter (All / Active /
+  Stopped, with counts) are dropdowns; search and "hide locked" move to a line of their own
+  together when the row is too narrow.
+- "Full" view: one card per instance -- name, state and the everyday buttons on the first line,
+  the ADB address under it, a highlighted line for a pending Android ID registration, and the
+  information in labeled lines (System, Display, Resources, Network, Modules). Resources,
+  Configure, Owners, Storage, ADB access and Delete are in one ⚙ menu.
+- "Viewers" view: every preview at the same scale of its instance's real resolution (a 600x1000
+  and a 1000x600 one take the same room), in two bands, portrait then landscape. The slider is
+  the scale; "Fit to width" puts each band in one row across the width. Replaces "same height
+  per row" and "N per row".
+- Local scrcpy (test, turn on/off) moved from the Instances toolbar to a Settings tab of its own.
 
 ## [1.0.0-beta.11] - 2026-11-23
 

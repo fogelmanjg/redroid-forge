@@ -5,7 +5,7 @@ const { t, loc } = I18n;
 // Navigation (1.0.0-beta.12): three groups in the header, each with its own row of tabs below;
 // Help has no group, it opens from the header menu. `currentTab` is the one on screen.
 const TAB_GROUP = {
-  instances: 'instances', modules: 'modules', 'user-modules': 'modules', settings: 'config', doctor: 'config', identities: 'config',
+  instances: 'instances', modules: 'modules', 'user-modules': 'modules', settings: 'config', 'scrcpy-local': 'config', doctor: 'config', identities: 'config',
 };
 const lastTabOfGroup = {};
 let currentTab = 'instances';
@@ -287,23 +287,32 @@ function saveInstanceViewMode(mode) {
 }
 let instanceViewMode = loadInstanceViewMode();
 
-// Preview tile size for "viewers" mode only -- the slider's current value in px. Drives BOTH the
-// CSS display size (.instances-grid .viewer-preview-img in style.css) AND, since 15/11/2026,
-// the actual backend capture size (screenshotCapture.js, via Viewer.mountPreview's `size`
-// argument and Viewer.setSize/setSizeAll for a live resize) -- stretching the old fixed ~80px
-// capture past its native size with CSS alone just looked blurry, so the slider now asks the
-// backend to capture bigger instead of faking it client-side. Clamped to the slider's own
-// [60,400] range so a hand-edited/stale localStorage value can't push it absurdly large or to 0;
-// the backend clamps independently too (screenshotCapture.js's own clampSize), since this value
-// also travels over the wire and must not be trusted as-is there either.
-function loadViewersSize() {
-  const v = parseInt(localStorage.getItem('viewersSize'), 10);
-  return (Number.isFinite(v) && v >= 60 && v <= 400) ? v : 200;
+// "Viewers" scale (1.0.0-beta.12): percent of each instance's real resolution, the same for all,
+// so a 600x1000 and a 1000x600 instance take the same room (viewersLayout.js). It drives BOTH the
+// size each preview is drawn at AND the backend capture size (Viewer.mountPreview/setSize), so a
+// small capture is never stretched by CSS. Clamped to the slider's own range.
+function loadViewersScale() {
+  let v = NaN;
+  try { v = parseInt(localStorage.getItem('viewersScale'), 10); } catch (e) { /* no storage */ }
+  return (Number.isFinite(v) && v >= 5 && v <= 100) ? v : 30;
 }
-function saveViewersSize(px) {
-  try { localStorage.setItem('viewersSize', String(px)); } catch (e) { /* no storage: just won't persist */ }
+let viewersScale = loadViewersScale();
+
+// A <details class="dropdown">'s summary always shows its active item (1.0.0-beta.12), whatever set
+// it -- a click, a saved preference, the filter counts changing -- so this watches the panel
+// instead of every place that changes it. Picking an item closes the dropdown.
+function wireDropdown(details) {
+  const label = details.querySelector('.dropdown-label');
+  const panel = details.querySelector('.dropdown-panel');
+  const sync = () => {
+    const active = panel.querySelector('.dropdown-item.active');
+    label.innerHTML = active ? active.innerHTML : '';
+  };
+  new MutationObserver(sync).observe(panel, { subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ['class'] });
+  panel.addEventListener('click', (e) => { if (e.target.closest('.dropdown-item')) details.open = false; });
+  sync();
 }
-let viewersSize = loadViewersSize();
+$$('details.dropdown').forEach(wireDropdown);
 
 // `[data-view-mode]`, not `.view-mode-btn`: the state filter buttons (1.0.0-beta.9) share that
 // class for their look, and must not be caught by this switch.
@@ -317,72 +326,54 @@ $$('[data-view-mode]').forEach((btn) => {
     loadInstances({ silent: true });
   });
 });
-const viewersSizeSlider = $('#viewers-size-slider');
-viewersSizeSlider.value = viewersSize;
-$('#instances-grid').style.setProperty('--preview-size', `${viewersSize}px`);
-viewersSizeSlider.addEventListener('input', () => {
-  viewersSize = parseInt(viewersSizeSlider.value, 10);
-  saveViewersSize(viewersSize);
-  $('#instances-grid').style.setProperty('--preview-size', `${viewersSize}px`);
-  // Live, while dragging -- every card's own session gets the new capture size right away
-  // (next tick, see screenshotCapture.js's own comment), not just on the next full reload.
-  if (instanceViewMode === 'viewers') resizeViewerCaptures();
-});
+// "Free" (the slider is the scale, each band wraps) or "fit" (each band in one row across the width).
+let viewersFit = false;
+try { viewersFit = localStorage.getItem('viewersFit') === '1'; } catch (e) { /* no storage */ }
 
-// Per-row layout of the "viewers" grid (21/11/2026, 1.0.0-beta.2 -- the beta1 pending item "how
-// many per row, or use the whole width"; both, as a choice): 'auto' keeps the original
-// behaviour (as many cards per row as fit at the slider's size), a number lays the cards out in
-// that many equal columns sharing the full width. In column mode the slider does not apply: each
-// preview fills its column, and the backend is asked to capture at that real width (same reason
-// the slider drives the capture size -- a small capture stretched by CSS just looks blurry).
-// Persisted per browser like the view mode and the slider.
-const VIEWERS_COLUMN_CHOICES = ['auto', '1', '2', '3', '4', '6'];
-function loadViewersColumns() {
-  let v = null;
-  try { v = localStorage.getItem('viewersColumns'); } catch (e) { /* no storage */ }
-  return VIEWERS_COLUMN_CHOICES.includes(v) ? v : 'auto';
-}
-let viewersColumns = loadViewersColumns();
-
-// Every preview in a row has the same height, its width follows its own shape (1.0.0-beta.10, see
-// viewersLayout.js) -- so each one is captured at its own size (short side, px). `viewerItems` is
-// the last draw's running cards, in order: [{ id, ar }].
-let viewerItems = [];
-function viewerCaptureSizes() {
-  return ViewersLayout.captureSizes(viewerItems, {
-    columns: viewersColumns, size: viewersSize, gridWidth: $('#instances-grid').clientWidth,
-    gap: 16,  // .viewers-row / .instances-grid gap: 1rem
-    pad: 24,  // .instance-card padding 0.7rem on both sides + its 1px borders
+// The last draw's running cards, in order: [{ id, w, h, card, viewerWrap }].
+let viewerCardsDrawn = [];
+function viewersLayoutNow() {
+  return ViewersLayout.layout(viewerCardsDrawn, {
+    mode: viewersFit ? 'fit' : 'free', scalePercent: viewersScale,
+    gridWidth: $('#instances-grid').clientWidth,
+    gap: 16, // .viewers-band-cards gap: 1rem
+    pad: 24, // .instance-card padding 0.7rem on both sides + its 1px borders
   });
 }
+// Sizes every drawn preview and its capture, without rebuilding the cards (slider, window resize).
 function resizeViewerCaptures() {
-  const sizes = viewerCaptureSizes();
-  for (const id of Object.keys(sizes)) Viewer.setSize(id, sizes[id]);
+  const { sizes } = viewersLayoutNow();
+  for (const vc of viewerCardsDrawn) {
+    const s = sizes[vc.id];
+    vc.card.style.setProperty('--pw', `${s.width}px`);
+    vc.card.style.setProperty('--ph', `${s.height}px`);
+    Viewer.setSize(vc.id, s.capture);
+  }
 }
 
-function applyViewersLayout() {
-  const grid = $('#instances-grid');
-  const fixed = viewersColumns !== 'auto';
-  grid.classList.toggle('instances-grid-columns', fixed);
-  grid.style.setProperty('--viewer-columns', fixed ? viewersColumns : '1');
-  viewersSizeSlider.disabled = fixed;
-}
-const viewersColumnsSelect = $('#viewers-columns');
-viewersColumnsSelect.value = viewersColumns;
-applyViewersLayout();
-viewersColumnsSelect.addEventListener('change', () => {
-  viewersColumns = VIEWERS_COLUMN_CHOICES.includes(viewersColumnsSelect.value) ? viewersColumnsSelect.value : 'auto';
-  try { localStorage.setItem('viewersColumns', viewersColumns); } catch (e) { /* no storage */ }
-  applyViewersLayout();
-  // Rows of N are built while drawing: redraw (from the last list, no new request).
-  if (instanceViewMode === 'viewers') loadInstances({ silent: true, fromCache: true });
+const viewersScaleSlider = $('#viewers-size-slider');
+viewersScaleSlider.value = viewersScale;
+const viewersFitSelect = $('#viewers-columns');
+viewersFitSelect.value = viewersFit ? 'fit' : 'free';
+viewersScaleSlider.disabled = viewersFit;
+viewersScaleSlider.addEventListener('input', () => {
+  viewersScale = parseInt(viewersScaleSlider.value, 10);
+  try { localStorage.setItem('viewersScale', String(viewersScale)); } catch (e) { /* no storage */ }
+  // Live, while dragging -- every card's own session gets the new capture size right away.
+  if (instanceViewMode === 'viewers') resizeViewerCaptures();
 });
-// In column mode a window/panel resize changes every column's width: ask for the new capture
-// size, debounced so dragging the window edge does not send a resize per pixel.
+viewersFitSelect.addEventListener('change', () => {
+  viewersFit = viewersFitSelect.value === 'fit';
+  try { localStorage.setItem('viewersFit', viewersFit ? '1' : '0'); } catch (e) { /* no storage */ }
+  viewersScaleSlider.disabled = viewersFit;
+  if (instanceViewMode === 'viewers') resizeViewerCaptures();
+});
+// In "fit" a window/panel resize changes the scale: debounced so dragging the window edge does
+// not send a resize per pixel.
 let viewersResizeTimer = null;
 if (window.ResizeObserver) {
   new ResizeObserver(() => {
-    if (viewersColumns === 'auto' || instanceViewMode !== 'viewers') return;
+    if (!viewersFit || instanceViewMode !== 'viewers') return;
     clearTimeout(viewersResizeTimer);
     viewersResizeTimer = setTimeout(resizeViewerCaptures, 300);
   }).observe($('#instances-grid'));
@@ -2022,9 +2013,10 @@ async function loadInstances({ silent = false, fromCache = false } = {}) {
         return b;
       };
       // Only the actions that make sense for the current state (see instanceState.js).
-      const appendActionButtons = (container) => {
+      const appendActionButtons = (container, { withDelete = true } = {}) => {
         for (const action of state.actions) {
           if (action === 'delete') {
+            if (!withDelete) continue;
             if (AuthUi.can('delete')) container.appendChild(inst.locked ? disableForLock(buildDeleteBtn()) : buildDeleteBtn());
           } else if (AuthUi.can('start-stop')) {
             const btn = mk(t(`instances.${action}`), action);
@@ -2145,9 +2137,7 @@ async function loadInstances({ silent = false, fromCache = false } = {}) {
         }
         const card = document.createElement('div');
         card.className = 'instance-card';
-        const ar = ViewersLayout.aspect(inst.display);
-        card.style.setProperty('--ar', inst.display ? `${inst.display.width} / ${inst.display.height}` : '9 / 16');
-        card.style.setProperty('--ar-num', String(ar));
+        const { w, h } = ViewersLayout.dims(inst.display);
         let viewerWrap = null;
 
         const nameDiv = document.createElement('div');
@@ -2175,7 +2165,7 @@ async function loadInstances({ silent = false, fromCache = false } = {}) {
         appendActionButtons(cardButtons);
         card.appendChild(cardButtons);
 
-        viewerCards.push({ id: inst.id, ar, card, viewerWrap });
+        viewerCards.push({ id: inst.id, w, h, card, viewerWrap });
         continue;
       }
 
@@ -2259,9 +2249,20 @@ async function loadInstances({ silent = false, fromCache = false } = {}) {
       primary.appendChild(statusSpan);
       if (inst.locked) primary.appendChild(buildLockChip());
 
-      primary.appendChild(buildAddressSpan('instance-address'));
+      // Everyday actions at the right of the first line (1.0.0-beta.12); everything that manages
+      // the instance (resources, configure, owners, storage, ADB access, delete) is in the ⚙ menu.
+      const primaryActions = document.createElement('div');
+      primaryActions.className = 'instance-primary-actions';
+      appendActionButtons(primaryActions, { withDelete: false });
+      const manageItems = [];
+      primary.appendChild(primaryActions);
 
       tdPrimary.appendChild(primary);
+      // The ADB address on a line of its own, under the name and the buttons (1.0.0-beta.12).
+      const addressLine = document.createElement('div');
+      addressLine.className = 'instance-address-line';
+      addressLine.appendChild(buildAddressSpan('instance-address'));
+      tdPrimary.appendChild(addressLine);
       trPrimary.appendChild(tdPrimary);
 
       // Viewer column (eye toggle, inline preview, expand button) -- a column of its own
@@ -2324,26 +2325,45 @@ async function loadInstances({ silent = false, fromCache = false } = {}) {
       const secondary = document.createElement('div');
       secondary.className = 'instance-secondary';
 
+      // The information, grouped in labeled lines (1.0.0-beta.12) instead of one run of chips.
+      const infoLine = (labelKey, ...nodes) => {
+        const line = document.createElement('div');
+        line.className = 'instance-info-line';
+        const label = document.createElement('span');
+        label.className = 'instance-info-label';
+        label.textContent = t(labelKey);
+        const values = document.createElement('div');
+        values.className = 'instance-info-values';
+        for (const n of nodes) if (n) values.appendChild(n);
+        line.append(label, values);
+        return line;
+      };
       const imageChip = document.createElement('span');
       imageChip.className = 'resource-chip';
       imageChip.textContent = inst.dockerImage;
-      secondary.appendChild(imageChip);
-      const displayChip = buildDisplayChip(inst);
-      if (displayChip) secondary.appendChild(displayChip);
-      secondary.appendChild(buildDeviceProfileChip(inst));
-      secondary.appendChild(buildResourcesChips(inst));
-      secondary.appendChild(buildCodecChips(inst));
-      secondary.appendChild(buildWifiInternoChip(inst));
-      secondary.appendChild(buildNetworkChip(inst));
-      secondary.appendChild(buildModulesCell(inst));
-      secondary.appendChild(buildSupportCell(inst));
       const androidIdSpan = document.createElement('span');
       androidIdSpan.className = 'android-id-cell';
-      androidIdSpan.innerHTML = androidIdCellHtml(inst);
-      secondary.appendChild(androidIdSpan);
+      androidIdSpan.innerHTML = inst.hasGapps ? androidIdCellHtml(inst).replace(/<br>/g, ' ') : '';
+      const info = document.createElement('div');
+      info.className = 'instance-info';
+      info.append(
+        infoLine('instances.info.system', imageChip, buildDeviceProfileChip(inst), buildSupportCell(inst), inst.hasGapps ? androidIdSpan : null),
+        infoLine('instances.info.display', buildDisplayChip(inst), buildCodecChips(inst)),
+        infoLine('instances.info.resources', buildResourcesChips(inst)),
+        infoLine('instances.info.network', buildNetworkChip(inst), buildWifiInternoChip(inst)),
+        infoLine('instances.info.modules', buildModulesCell(inst)),
+      );
 
+      // A pending Android ID registration is a warning line of its own, above the information.
       const buttons = document.createElement('div');
-      buttons.className = 'instance-secondary-buttons';
+      buttons.className = 'instance-alert';
+      if (inst.hasGapps && inst.androidId && !inst.androidIdRegisteredAt) {
+        const hoursLeft = Math.round(48 - (Date.now() - new Date(inst.createdAt).getTime()) / 3_600_000);
+        const alertText = document.createElement('span');
+        alertText.className = hoursLeft <= 12 ? 'fail-text' : 'warn-text';
+        alertText.textContent = `⚠ ${t('instances.alert.androidId', { left: hoursLeft > 0 ? `~${hoursLeft} h` : t('instances.expired').trim() })}`;
+        buttons.appendChild(alertText);
+      }
 
       if (inst.hasGapps && inst.androidId && !inst.androidIdRegisteredAt && AuthUi.can('configure')) {
         const link = document.createElement('a');
@@ -2385,7 +2405,7 @@ async function loadInstances({ silent = false, fromCache = false } = {}) {
           openNoRestartId = openNoRestartId === inst.id ? null : inst.id;
           loadInstances({ silent: true });
         });
-        buttons.appendChild(resourcesBtn);
+        manageItems.push(resourcesBtn);
 
         const configureBtn = document.createElement('button');
         configureBtn.type = 'button';
@@ -2401,7 +2421,7 @@ async function loadInstances({ silent = false, fromCache = false } = {}) {
           }
           loadInstances({ silent: true });
         });
-        buttons.appendChild(configureBtn);
+        manageItems.push(configureBtn);
       }
 
       if (AuthUi.can('transfer-ownership')) {
@@ -2419,7 +2439,7 @@ async function loadInstances({ silent = false, fromCache = false } = {}) {
           }
           loadInstances({ silent: true });
         });
-        buttons.appendChild(ownersBtn);
+        manageItems.push(ownersBtn);
       }
 
       const storageBtn = document.createElement('button');
@@ -2448,7 +2468,7 @@ async function loadInstances({ silent = false, fromCache = false } = {}) {
         }
         loadInstances({ silent: true });
       });
-      buttons.appendChild(storageBtn);
+      manageItems.push(storageBtn);
 
       if ((inst.knockRequiredHosts || []).length > 0) {
         const adbAccessBtn = document.createElement('button');
@@ -2459,12 +2479,34 @@ async function loadInstances({ silent = false, fromCache = false } = {}) {
           openAdbAccessId = openAdbAccessId === inst.id ? null : inst.id;
           loadInstances({ silent: true });
         });
-        buttons.appendChild(adbAccessBtn);
+        manageItems.push(adbAccessBtn);
       }
 
-      appendActionButtons(buttons);
+      // Delete goes last in the ⚙ menu, apart from the everyday buttons.
+      const deleteHolder = document.createElement('div');
+      appendActionButtons(deleteHolder);
+      for (const b of deleteHolder.querySelectorAll('button')) {
+        if (b.textContent === t('instances.delete')) manageItems.push(b);
+      }
+      if (manageItems.length) {
+        const menu = document.createElement('details');
+        menu.className = 'dropdown action-menu';
+        const summary = document.createElement('summary');
+        summary.textContent = '⚙ ▾';
+        summary.title = t('instances.manage');
+        const panel = document.createElement('div');
+        panel.className = 'dropdown-panel';
+        for (const item of manageItems) {
+          item.className = 'dropdown-item';
+          item.addEventListener('click', () => { menu.open = false; });
+          panel.appendChild(item);
+        }
+        menu.append(summary, panel);
+        primaryActions.appendChild(menu);
+      }
 
-      secondary.appendChild(buttons);
+      if (buttons.childElementCount) secondary.appendChild(buttons);
+      secondary.appendChild(info);
       tdSecondary.appendChild(secondary);
       trSecondary.appendChild(tdSecondary);
 
@@ -2477,30 +2519,32 @@ async function loadInstances({ silent = false, fromCache = false } = {}) {
       if (openAdbAccessId === inst.id) rows.appendChild(buildAdbAccessEditRow(inst));
     }
     if (isViewers) {
-      // "N per row": rows of N that fill the width, same height inside each row; a short last row
-      // gets an empty filler so it keeps about that height (viewersLayout.js).
-      viewerItems = viewerCards.map(({ id, ar }) => ({ id, ar }));
-      if (viewersColumns === 'auto') {
-        for (const vc of viewerCards) cards.appendChild(vc.card);
-      } else {
-        const n = Number(viewersColumns);
-        for (const row of ViewersLayout.rowsOf(viewerCards, n)) {
-          const rowDiv = document.createElement('div');
-          rowDiv.className = 'viewers-row';
-          for (const vc of row) rowDiv.appendChild(vc.card);
-          const grow = ViewersLayout.fillerGrow(viewerItems, row, n);
-          if (grow > 0) {
-            const filler = document.createElement('div');
-            filler.className = 'viewers-row-filler';
-            filler.style.flexGrow = String(grow);
-            rowDiv.appendChild(filler);
-          }
-          cards.appendChild(rowDiv);
-        }
+      // Two bands, portrait then landscape, each wrapping on its own (viewersLayout.js); every
+      // preview at the same scale of its real resolution.
+      viewerCardsDrawn = viewerCards;
+      const split = ViewersLayout.bands(viewerCards);
+      for (const [key, band] of [['portrait', split.portrait], ['landscape', split.landscape]]) {
+        if (band.length === 0) continue;
+        const bandDiv = document.createElement('section');
+        bandDiv.className = 'viewers-band';
+        const title = document.createElement('h3');
+        title.className = 'viewers-band-title';
+        title.textContent = `${t(`instances.viewers.${key}`)} (${band.length})`;
+        const bandCards = document.createElement('div');
+        bandCards.className = 'viewers-band-cards';
+        for (const vc of band) bandCards.appendChild(vc.card);
+        bandDiv.append(title, bandCards);
+        cards.appendChild(bandDiv);
       }
-      const sizes = viewerCaptureSizes();
-      for (const vc of viewerCards) if (vc.viewerWrap) mountPreview(vc.viewerWrap, vc.id, sizes[vc.id]);
       grid.replaceChildren(cards);
+      const { sizes } = viewersLayoutNow();
+      for (const vc of viewerCards) {
+        vc.card.style.setProperty('--pw', `${sizes[vc.id].width}px`);
+        vc.card.style.setProperty('--ph', `${sizes[vc.id].height}px`);
+        if (vc.viewerWrap) mountPreview(vc.viewerWrap, vc.id, sizes[vc.id].capture);
+      }
+      // "fit" needs the grid's real width, which is 0 while it was still hidden: once more on screen.
+      if (viewersFit) requestAnimationFrame(resizeViewerCaptures);
     } else {
       tbody.replaceChildren(rows);
     }
@@ -4004,10 +4048,14 @@ document.addEventListener('langchange', () => {
 I18n.apply();
 syncLangButton();
 
-// Header menu: closes on a click anywhere outside it, or on Escape.
+// Header menu and dropdowns: close on a click anywhere outside them, or on Escape.
 const headerMenu = $('#header-menu');
-document.addEventListener('click', (e) => { if (headerMenu.open && !headerMenu.contains(e.target)) headerMenu.open = false; });
-document.addEventListener('keydown', (e) => { if (e.key === 'Escape') headerMenu.open = false; });
+document.addEventListener('click', (e) => {
+  $$('details.header-menu[open], details.dropdown[open]').forEach((d) => { if (!d.contains(e.target)) d.open = false; });
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') $$('details.header-menu[open], details.dropdown[open]').forEach((d) => { d.open = false; });
+});
 $('#btn-menu-help').addEventListener('click', () => { headerMenu.open = false; switchTab('help'); });
 
 // Everything below waits on AuthUi.ready (docs/ROADMAP.md Phase 7): in "none" mode it resolves
@@ -4036,7 +4084,7 @@ AuthUi.ready.then(() => {
   // already typed/checked there before they got to click Apply; found for real, 22/10/2026) nor
   // when the browser tab is hidden.
   setInterval(() => {
-    const onInstances = currentTab === 'instances';
+    const onInstances = currentTab === 'instances' && !$('#tab-instances details.dropdown[open]');
     const dialogOpen = $$('dialog').some((d) => d.open);
     if (onInstances && !dialogOpen && openNoRestartId === null && openRestartId === null && openOwnersId === null && openStorageId === null && openAdbAccessId === null && openRenameId === null && !document.hidden) loadInstances({ silent: true });
   }, 4000);

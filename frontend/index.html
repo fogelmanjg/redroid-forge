@@ -50,6 +50,7 @@
     </nav>
     <nav class="subnav" data-group="config" hidden>
       <button class="tab-btn" data-tab="settings" data-i18n="nav.general">General</button>
+      <button class="tab-btn" data-tab="scrcpy-local" data-i18n="nav.scrcpyLocal">Local scrcpy</button>
       <button class="tab-btn" data-tab="doctor" data-i18n="nav.doctor">Doctor</button>
       <button class="tab-btn" id="nav-identities-btn" data-tab="identities" data-i18n="nav.identities" hidden>Identities</button>
     </nav>
@@ -58,36 +59,42 @@
   <main>
     <section id="tab-instances" class="tab active">
       <div class="toolbar">
+        <div class="toolbar-group">
         <button id="btn-new-instance" data-i18n="instances.new">+ New instance</button>
         <button id="btn-refresh-instances" data-i18n="common.refresh">Refresh</button>
-        <button id="btn-scrcpy-launcher" type="button" class="secondary">Test local scrcpy</button>
-        <span class="view-mode-switch">
-          <button type="button" class="view-mode-btn" data-view-mode="full" data-i18n="instances.viewMode.full" data-i18n-title="instances.viewMode.fullHint">Full</button>
-          <button type="button" class="view-mode-btn" data-view-mode="minimal" data-i18n="instances.viewMode.minimal" data-i18n-title="instances.viewMode.minimalHint">Minimal</button>
-          <button type="button" class="view-mode-btn" data-view-mode="viewers" data-i18n="instances.viewMode.viewers" data-i18n-title="instances.viewMode.viewersHint">Viewers</button>
-        </span>
-        <span id="viewers-size-control" class="viewers-size-control" hidden>
-          <label for="viewers-size-slider" data-i18n="instances.viewMode.size">Preview height</label>
-          <input type="range" id="viewers-size-slider" min="60" max="400" step="20" />
-          <label for="viewers-columns" data-i18n="instances.viewMode.columns">Per row</label>
-          <select id="viewers-columns">
-            <option value="auto" data-i18n="instances.viewMode.columnsAuto">Auto (size)</option>
-            <option value="1">1</option>
-            <option value="2">2</option>
-            <option value="3">3</option>
-            <option value="4">4</option>
-            <option value="6">6</option>
-          </select>
-        </span>
-      </div>
-      <div class="instances-filterbar">
-        <span class="view-mode-switch instance-filter-switch">
-          <button type="button" class="view-mode-btn" data-instance-filter="all" data-i18n-title="instances.filter.allHint"><span data-i18n="instances.filter.all">All</span> <span class="filter-count"></span></button>
-          <button type="button" class="view-mode-btn" data-instance-filter="active" data-i18n-title="instances.filter.activeHint"><span data-i18n="instances.filter.active">Active</span> <span class="filter-count"></span></button>
-          <button type="button" class="view-mode-btn" data-instance-filter="stopped" data-i18n-title="instances.filter.stoppedHint"><span data-i18n="instances.filter.stopped">Stopped</span> <span class="filter-count"></span></button>
-        </span>
+        <!-- 1.0.0-beta.12: view and state are dropdowns (same look as the header menu); the summary
+             shows the chosen option, see app.js wireDropdown. -->
+        <details class="dropdown" id="view-mode-dropdown">
+          <summary><span class="dropdown-label"></span> ▾</summary>
+          <div class="dropdown-panel">
+            <button type="button" class="dropdown-item" data-view-mode="full" data-i18n-title="instances.viewMode.fullHint"><span data-i18n="instances.viewMode.full">Full</span></button>
+            <button type="button" class="dropdown-item" data-view-mode="minimal" data-i18n-title="instances.viewMode.minimalHint"><span data-i18n="instances.viewMode.minimal">Minimal</span></button>
+            <button type="button" class="dropdown-item" data-view-mode="viewers" data-i18n-title="instances.viewMode.viewersHint"><span data-i18n="instances.viewMode.viewers">Viewers</span></button>
+          </div>
+        </details>
+        <details class="dropdown" id="instance-filter-dropdown">
+          <summary><span class="dropdown-label"></span> ▾</summary>
+          <div class="dropdown-panel">
+            <button type="button" class="dropdown-item" data-instance-filter="all" data-i18n-title="instances.filter.allHint"><span data-i18n="instances.filter.all">All</span> <span class="filter-count"></span></button>
+            <button type="button" class="dropdown-item" data-instance-filter="active" data-i18n-title="instances.filter.activeHint"><span data-i18n="instances.filter.active">Active</span> <span class="filter-count"></span></button>
+            <button type="button" class="dropdown-item" data-instance-filter="stopped" data-i18n-title="instances.filter.stoppedHint"><span data-i18n="instances.filter.stopped">Stopped</span> <span class="filter-count"></span></button>
+          </div>
+        </details>
+        </div>
+        <!-- Search + hide locked move to a line of their own together when the row is too narrow. -->
+        <div class="toolbar-group">
         <input type="search" id="instances-search" class="instances-search" data-i18n-placeholder="instances.filter.searchPlaceholder" autocomplete="off" />
         <label class="instances-hide-locked" data-i18n-title="instances.filter.hideLockedHint"><input type="checkbox" id="instances-hide-locked" /> <span data-i18n="instances.filter.hideLocked">Hide locked</span></label>
+        </div>
+        <span id="viewers-size-control" class="viewers-size-control" hidden>
+          <label for="viewers-size-slider" data-i18n="instances.viewMode.size">Preview height</label>
+          <input type="range" id="viewers-size-slider" min="5" max="100" step="5" />
+          <label for="viewers-columns" data-i18n="instances.viewMode.columns">Per row</label>
+          <select id="viewers-columns">
+            <option value="free" data-i18n="instances.viewMode.free">Free (scale)</option>
+            <option value="fit" data-i18n="instances.viewMode.fit">Fit to width</option>
+          </select>
+        </span>
       </div>
       <p id="instances-filter-empty" class="instances-filter-empty" hidden><span data-i18n="instances.filter.noMatch">No instance matches the filter.</span> <button type="button" id="instances-filter-reset" class="link-btn" data-i18n="instances.filter.showAll">Show all</button></p>
       <table id="instances-table">
@@ -111,6 +118,13 @@
         <button id="btn-refresh-user-modules" data-i18n="common.refresh">Refresh</button>
       </div>
       <ul id="user-modules-tab-list" class="doctor-list"></ul>
+    </section>
+
+    <section id="tab-scrcpy-local" class="tab">
+      <p class="tab-intro" data-i18n="scrcpyLauncher.tabIntro"></p>
+      <div class="toolbar">
+        <button id="btn-scrcpy-launcher" type="button" class="secondary">Test local scrcpy</button>
+      </div>
     </section>
 
     <section id="tab-doctor" class="tab">

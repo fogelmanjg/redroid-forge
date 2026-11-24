@@ -1,62 +1,72 @@
-// Layout of the "viewers" grid by each instance's own shape (1.0.0-beta.10) -- pure logic, no DOM,
-// tested from node (backend/test/viewersLayout.test.js), used by app.js in the browser.
+// Layout of the "viewers" view (1.0.0-beta.12) -- pure logic, no DOM, tested from node
+// (backend/test/viewersLayout.test.js), used by app.js in the browser.
 //
-// Before, every preview got the same WIDTH: a portrait instance came out very tall next to a short
-// landscape one, and in "N per row" each one got the same column. Now every preview in a row has
-// the same HEIGHT and its width follows its own aspect ratio (the way photo galleries lay out
-// mixed shapes): a landscape one takes about twice the width of a portrait one.
-//   - "auto": the slider is the height; as many per row as fit.
-//   - "N per row": rows of N that fill the whole width ("justified" rows); a last, shorter row
-//     gets an empty filler so it keeps about the same height instead of blowing up.
+// Every preview is drawn at the SAME SCALE of its real resolution: a 600x1000 instance and a
+// 1000x600 one take the same room, one standing and one lying down. Before (1.0.0-beta.10) every
+// preview in a row had the same height, which made a landscape one almost three times the area
+// of a portrait one. Portrait and landscape instances go in two separate bands, so the shapes do
+// not leave gaps among each other and one of either shape is quick to find.
+//   - "free": the slider is the scale (percent of the real resolution); each band wraps.
+//   - "fit": the scale that puts each band in a single row across the whole width (the smaller
+//     of the two, so both bands keep the same scale).
 // It also says, per instance, what capture size (short side, px) to ask the backend for, so each
 // one is captured at the size it is really shown at -- never bigger.
 (function (root) {
   const MIN = 60;
   const MAX = 1080; // same range the backend clamps to (screenshotCapture.js's clampSize)
   const clamp = (n) => Math.max(MIN, Math.min(MAX, Math.round(n)));
+  const DEFAULT = { width: 720, height: 1280 };
 
-  // width / height of an instance's display; portrait 9:16 when unknown.
-  function aspect(display) {
+  // The display's real size; a portrait 720x1280 when unknown.
+  function dims(display) {
     const w = Number(display && display.width);
     const h = Number(display && display.height);
-    return (w > 0 && h > 0) ? w / h : 9 / 16;
+    return (w > 0 && h > 0) ? { w, h } : { w: DEFAULT.width, h: DEFAULT.height };
   }
 
-  function rowsOf(items, n) {
-    const rows = [];
-    for (let i = 0; i < items.length; i += n) rows.push(items.slice(i, i + n));
-    return rows;
+  // width / height; kept for callers that only need the shape.
+  function aspect(display) {
+    const { w, h } = dims(display);
+    return w / h;
   }
 
-  // How much "flex-grow" the empty filler of a short last row gets: the average shape of the
-  // whole grid times the missing slots.
-  function fillerGrow(items, row, n) {
-    if (row.length >= n || items.length === 0) return 0;
-    const avg = items.reduce((s, it) => s + it.ar, 0) / items.length;
-    return avg * (n - row.length);
+  // A square one counts as landscape.
+  function isPortrait(item) { return item.h > item.w; }
+
+  // items: [{ id, w, h }] in display order -> { portrait: [...], landscape: [...] }, order kept.
+  function bands(items) {
+    return { portrait: items.filter(isPortrait), landscape: items.filter((it) => !isPortrait(it)) };
   }
 
-  // items: [{ id, ar }] in display order. -> { [id]: shortSidePx }
-  // gap: space between cards; pad: each card's horizontal padding + borders (both px).
-  function captureSizes(items, { columns = 'auto', size = 200, gridWidth = 0, gap = 16, pad = 24 } = {}) {
-    const out = {};
-    if (columns === 'auto') {
-      for (const it of items) out[it.id] = clamp(size * Math.min(it.ar, 1));
-      return out;
+  // The scale that fits every band in one row of `gridWidth` (gap between cards, pad = each
+  // card's horizontal padding + borders, all px). The smallest band scale wins, so both bands
+  // share it. 1 (real size) at most.
+  function fitScale(items, { gridWidth = 0, gap = 16, pad = 24 } = {}) {
+    let scale = 1;
+    for (const band of Object.values(bands(items))) {
+      if (band.length === 0) continue;
+      const free = gridWidth - gap * (band.length - 1) - pad * band.length;
+      const sumW = band.reduce((s, it) => s + it.w, 0);
+      scale = Math.min(scale, Math.max(0, free) / sumW);
     }
-    const n = Math.max(1, Number(columns) || 1);
-    for (const row of rowsOf(items, n)) {
-      const filler = fillerGrow(items, row, n);
-      const sumAr = row.reduce((s, it) => s + it.ar, 0) + filler;
-      const gaps = gap * (row.length - 1 + (filler > 0 ? 1 : 0));
-      const free = Math.max(0, gridWidth - gaps - pad * row.length);
-      const height = free / sumAr; // the same for every card in the row
-      for (const it of row) out[it.id] = clamp(Math.min(height * it.ar, height));
-    }
-    return out;
+    return scale;
   }
 
-  const api = { aspect, rowsOf, fillerGrow, captureSizes };
+  // -> { scale, sizes: { [id]: { width, height, capture } } }
+  function layout(items, { mode = 'free', scalePercent = 30, gridWidth = 0, gap = 16, pad = 24 } = {}) {
+    const scale = mode === 'fit' ? fitScale(items, { gridWidth, gap, pad }) : Math.max(0.01, scalePercent / 100);
+    const sizes = {};
+    for (const it of items) {
+      sizes[it.id] = {
+        width: Math.round(it.w * scale),
+        height: Math.round(it.h * scale),
+        capture: clamp(Math.min(it.w, it.h) * scale),
+      };
+    }
+    return { scale, sizes };
+  }
+
+  const api = { dims, aspect, isPortrait, bands, fitScale, layout };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.ViewersLayout = api;
 }(typeof window !== 'undefined' ? window : globalThis));
