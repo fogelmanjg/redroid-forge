@@ -11,6 +11,11 @@ const { runTickWith } = require('../src/modules/cifi/watchdog');
 
 const noSleep = async () => {}; // collapses every real-world wait to instant
 
+// What `dumpsys activity activities` prints with the game in the stack, vs without it (the
+// process re-forked by Android for a background service after the game itself was killed).
+const STACK_WITH_GAME = '    * Hist  #0: ActivityRecord{146637241 u0 com.OctocubeGamesCompany.CIFI/com.unity3d.player.UnityPlayerActivity t32}\n';
+const STACK_WITHOUT_GAME = '    * Hist  #0: ActivityRecord{c8e6b24 u0 com.android.launcher3/.uioverrides.QuickstepLauncher t31}\n';
+
 function fakeExec(behavior) {
   const calls = [];
   const exec = async (containerId, args) => {
@@ -25,12 +30,42 @@ function fakeExec(behavior) {
 test('runTickWith: the game is already running -> no am start, no taps', async () => {
   const { exec, calls } = fakeExec((args) => {
     if (args[0] === 'pidof') return '1234\n';
+    if (args[0] === 'dumpsys') return STACK_WITH_GAME;
     throw new Error(`unexpected exec call: ${args.join(' ')}`);
   });
 
   await runTickWith('inst-1', 'container-1', { exec, sleep: noSleep });
 
-  assert.deepEqual(calls, [['pidof', 'com.OctocubeGamesCompany.CIFI']]);
+  assert.deepEqual(calls, [['pidof', 'com.OctocubeGamesCompany.CIFI'], ['dumpsys', 'activity', 'activities']]);
+});
+
+test('runTickWith: process alive but the game activity is gone -> treated as closed and reopened', async () => {
+  let started = false;
+  const { exec, calls } = fakeExec((args) => {
+    if (args[0] === 'pidof') return '1234\n'; // the re-forked background process, always there
+    if (args[0] === 'dumpsys') return started ? STACK_WITH_GAME : STACK_WITHOUT_GAME;
+    if (args[0] === 'wm') return 'Physical size: 600x1000\n';
+    if (args[0] === 'am') { started = true; return ''; }
+    if (args[0] === 'input') return '';
+    throw new Error(`unexpected exec call: ${args.join(' ')}`);
+  });
+
+  await runTickWith('inst-1', 'container-1', { exec, sleep: noSleep });
+
+  assert.equal(calls.filter((a) => a[0] === 'am').length, 1);
+  assert.equal(calls.filter((a) => a[0] === 'input').length, 2 + 12);
+});
+
+test('runTickWith: dumpsys fails while the process is alive -> assumed open, never taps blind', async () => {
+  const { exec, calls } = fakeExec((args) => {
+    if (args[0] === 'pidof') return '1234\n';
+    if (args[0] === 'dumpsys') return new Error('system_server busy');
+    throw new Error(`unexpected exec call: ${args.join(' ')}`);
+  });
+
+  await runTickWith('inst-1', 'container-1', { exec, sleep: noSleep });
+
+  assert.equal(calls.filter((a) => a[0] === 'am' || a[0] === 'input').length, 0);
 });
 
 test('runTickWith: not running, recovers on the first am start attempt, taps the right spots', async () => {
@@ -42,6 +77,7 @@ test('runTickWith: not running, recovers on the first am start attempt, taps the
       // found right after the one and only `am start` below.
       return pidofCalls <= 2 ? new Error('exit 1') : '1234\n';
     }
+    if (args[0] === 'dumpsys') return STACK_WITH_GAME;
     if (args[0] === 'wm') return 'Physical size: 600x1000\n';
     if (args[0] === 'am') return '';
     if (args[0] === 'input') return '';

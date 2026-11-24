@@ -27,13 +27,29 @@ const TAPS = {
 
 function realSleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
 
+// "Running" = the process exists AND the game's activity is still in the activity stack (resumed,
+// or stopped behind another app -- both mean the game is open). A live process alone is not
+// enough (1.0.0-rc.4): seen on prod 24/11/2026, lmkd killed CIFI, Android force-removed its
+// activity ("app died, no saved state"), and a minute later re-forked the process for a
+// background service (billing) with no activity at all. pidof matched, so the game sat closed on
+// the launcher for 2+ hours without the watchdog reopening it.
 async function isRunning(containerId, exec) {
   try {
     const out = await exec(containerId, ['pidof', PKG]);
-    return out.trim().length > 0;
+    if (out.trim().length === 0) return false;
   } catch {
     return false; // pidof exits non-zero when nothing matches -- that is the expected "not running" case, not an error
   }
+  let activities;
+  try {
+    activities = await exec(containerId, ['dumpsys', 'activity', 'activities']);
+  } catch {
+    // Can't tell (system_server busy?): the process is alive, so assume the game is open. A false
+    // "closed" here would am start + tap over a game someone may be playing; a false "open" is
+    // only retried on the next tick.
+    return true;
+  }
+  return activities.includes(`ActivityRecord{`) && activities.includes(`${PKG}/${ACTIVITY}`);
 }
 
 async function screenSize(containerId, exec) {
