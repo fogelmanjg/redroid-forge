@@ -4,12 +4,12 @@ This project's official language is English (see `README.md`). Keep that in mind
 and commit messages — Spanish is fine for an informal report, but a PR's own description/commit
 message should be in English, same as the rest of the codebase and docs.
 
-## Current status: feature freeze on big features (since 16/11/2026)
+## Current status: release candidate, fixes only (since 23/11/2026)
 
-**What is being merged right now: bug fixes, performance fixes, annoyances, missing UI bits that
-should already be there (a button, a layout option, a control that obviously belongs on a screen
-that already exists), and documentation.** What waits: big features. The project
-is in its `1.0.0` pre-release cycle (first beta: 21/11/2026) — see `docs/ROADMAP.md`'s Phase 10 for exactly what that
+**What is being merged right now: bug fixes, performance fixes and documentation.** What waits:
+new features, big or small. The project is at its `1.0.0` release candidates (`1.0.0-rc.N`, after
+a beta cycle that started 21/11/2026; the feature freeze on big features dates from 16/11/2026) —
+see `docs/ROADMAP.md`'s Phase 10 for exactly what that
 means (it is a cleanup/documentation gate, not a feature-completeness one) and `CHANGELOG.md`'s
 versioning policy for how `1.0.0` is decided. A new module, a new subsystem, a whole new
 frontend section — anything that would be a MINOR bump under that policy — will not be merged until

@@ -18,7 +18,7 @@ que atiende los links `scrcpy-redroid://` que usa el botón. Por ahora solo Linu
    `sudo apt install scrcpy adb desktop-file-utils xdg-utils`). `desktop-file-utils` importa: sin él
    algunos navegadores no ven el manejador aunque esté registrado.
 2. **Instalá el lanzador**, con tu usuario normal (sin root). redroid-forge sirve su propia copia; el
-   diálogo "Probar scrcpy local" muestra estas líneas con la dirección de tu forge ya puesta:
+   diálogo de **Configuración → scrcpy local** muestra estas líneas con la dirección de tu forge ya puesta:
 
    ```
    mkdir -p ~/redroid-forge-launcher && cd ~/redroid-forge-launcher
@@ -28,15 +28,15 @@ que atiende los links `scrcpy-redroid://` que usa el botón. Por ahora solo Linu
    ```
 
    (Los mismos archivos están en el repositorio, en `launcher/linux/`.)
-3. En redroid-forge, apretá **▶ Probar scrcpy local** (barra de Instancias) y después **Probar**. La
+3. En redroid-forge, andá a **Configuración → scrcpy local**, apretá **▶ Probar scrcpy local** y después **Probar**. La
    primera vez el navegador pregunta si abrir el link con "redroid-forge scrcpy launcher": aceptá, y
    tildá "siempre" si lo ofrece. La prueba es real, no una suposición: el forge abre un dispositivo
    ADB falso y temporal en su host, el lanzador se conecta con tu adb y responde, y recién ahí se
    activa la función.
 4. Queda **activado en este navegador** (el botón dice "scrcpy local ● activado") y cada instancia
    encendida muestra **📲**. La preferencia vive en el navegador: se prueba una vez por navegador o
-   computadora. Volvé a apretar el botón de la barra para desactivarlo, o para probar de nuevo si
-   cambiaste algo.
+   computadora. Volvé a apretar el mismo botón en Configuración → scrcpy local para desactivarlo, o
+   para probar de nuevo si cambiaste algo.
 
 **Tus propias opciones de scrcpy** van en `~/.config/redroid-forge-launcher/config` (lo crea el
 instalador): por ejemplo `SCRCPY_ARGS=(--hwdec=disabled)` para forzar decodificación por software, o

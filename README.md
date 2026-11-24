@@ -12,7 +12,8 @@ A standalone app (frontend + backend in a single container) to manage
 [redroid](https://github.com/remote-android/redroid-doc) instances on any PC that only has Docker,
 without depending on any other infrastructure.
 
-> In the 1.0 pre-release cycle (`1.0.0-beta.N`, first beta 21/11/2026). It consolidates several separate projects in one
+> In the 1.0 release-candidate stage (`1.0.0-rc.N`, after the `1.0.0-beta.N` cycle that started
+> 21/11/2026): only fixes until `1.0.0`. It consolidates several separate projects in one
 > place (`redroid-manager`, `redroid-hwenc`, `redroid-nvidia`, and what currently lives spread
 > across `jg-dashboard`/`plenum-redroid`). See [`docs/REQUIREMENTS.md`](docs/REQUIREMENTS.md) (what
 > and why), [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) (how the pieces fit together — base
@@ -25,16 +26,17 @@ without depending on any other infrastructure.
 > 10's own gate** (securing and removing the legacy code this project replaces, plus writing this
 > exact kind of definitive documentation) — in progress, not a feature requirement; Phase 8
 > (federation: `jg-dashboard`/Plenum becoming `oidc` consumers of this app) is independent and can
-> land before or after 1.0. **The project is in a feature freeze since 16/11/2026, for big features
-> only: until 1.0 ships, bug fixes, annoyances and missing UI bits that should already be there
-> keep landing, along with documentation** — see [`CONTRIBUTING.md`](CONTRIBUTING.md).
+> land before or after 1.0. **The project is in a feature freeze since 16/11/2026, and since the
+> first release candidate (23/11/2026) only fixes and documentation land until 1.0 ships** — see
+> [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
 ## Screenshots
 
 <img src="docs/screenshots/complete-view.png" width="270" alt="Instances tab, Completo view"> <img src="docs/screenshots/viewers.png" width="270" alt="Instances tab, Visores view"> <img src="docs/screenshots/new-instance.png" width="270" alt="New instance dialog">
 
-More in [`docs/SCREENSHOTS.md`](docs/SCREENSHOTS.md) — all three Instances-tab view modes, Doctor,
-Settings, Identities, port-knocking, and module management.
+More in [`docs/SCREENSHOTS.md`](docs/SCREENSHOTS.md) — all three Instances-tab view modes, module
+management, and everything under Settings (General, Local scrcpy, Doctor, Identities), plus
+port-knocking.
 
 ## Features
 
@@ -53,10 +55,10 @@ means validated with evidence on real hardware, not a guarantee.
 | | 📝 planned | Magisk (manifest exists, no real integration yet). |
 | **User-defined watchdogs** | ✅ pilot | Periodic per-instance scripts (pause/resume/status from the UI, no cron to hand-edit) — CIFI (a specific game's reconnection logic) ported and running as the first one; the mechanism is generic for more. |
 | **Backup & restore** | ✅ | Whole-instance backup/restore (tar.gz via a throwaway container) in the background with progress, optionally stopping the instance for a consistent copy, per-instance retention, optional Android ID reset, a warning (never a block) when restoring onto an instance with different modules/GApps version. |
-| **Access control** | ✅ | Three roles (admin/operator/viewer) with per-instance ownership. Pluggable: `none` (default, zero-friction), `local` (built-in accounts), `oidc` (any number of standard identity providers at once — Keycloak, Google, Plenum, another federation, ... — roles assigned here, never read from the provider), `both` (local accounts and OIDC on the same login screen). A local account can also be reached through a linked OIDC identity (opt-in, proven by logging into both at once — never by matching a claimed email). A setup wizard creates the first admin live from `none` mode, and a self-lockout guard keeps `local`/`both` from ever becoming a permanently closed door. Switching modes and adding/editing/removing OIDC providers can both be done live from the Identities panel — no `.env` edit needed — though a restart is still required to apply, same rule as every other setting in this app. |
+| **Access control** | ✅ | Three roles (admin/operator/viewer) with per-instance ownership. Pluggable: `none` (default, zero-friction), `local` (built-in accounts), `oidc` (any number of standard identity providers at once — Keycloak, Google, Plenum, another federation, ... — roles assigned here, never read from the provider), `both` (local accounts and OIDC on the same login screen). A local account can also be reached through a linked OIDC identity (opt-in, proven by logging into both at once — never by matching a claimed email). A setup wizard creates the first admin live from `none` mode, and a self-lockout guard keeps `local`/`both` from ever becoming a permanently closed door. A non-admin user links their own SSO login from **Settings → My account**. Switching modes and adding/editing/removing OIDC providers can both be done live from **Settings → Identities** — no `.env` edit needed — though a restart is still required to apply, same rule as every other setting in this app. |
 | **Network exposure control** | ✅ | The app and every instance bind to `127.0.0.1` only, by default — `redroid` itself has no access control of its own. Opt into any specific interface (or all of them) per instance and for the app itself, from the UI; Docker/container-internal interfaces (`docker0`, `br-*`, `veth*`, ...) are filtered out of that picker by default, with an admin override. |
-| **Doctor** | ✅ | Host diagnostics with the exact command to fix what's missing — it only diagnoses, never runs anything on its own. |
-| **Screen viewing** | ✅ | Bundled web viewer right in the Instances tab — own scrcpy-server protocol client, no third-party viewer embedded. A persistent small live preview per instance, and an opt-in full-screen expanded viewer with real video (H.264)/audio (Opus)/input. Also: scrcpy connector scripts (`connect.sh`/`connect.ps1`) for a desktop scrcpy client, and a port for viewing from an Android device itself. |
+| **Doctor** | ✅ | Host diagnostics with the exact command to fix what's missing — it only diagnoses, never runs anything on its own. An admin sees every check; any other user sees only the checks about their own instances, plus a plain "ask your administrator" notice when a host check fails. |
+| **Screen viewing** | ✅ | Bundled web viewer right in the Instances tab — own scrcpy-server protocol client, no third-party viewer embedded. A persistent small live preview per instance, and an opt-in full-screen expanded viewer with real video (H.264)/audio (Opus)/input. Also: a 📲 button that opens an instance in the real desktop scrcpy through a small local launcher (Linux, see [`docs/HOWTO.md`](docs/HOWTO.md)), scrcpy connector scripts (`connect.sh`/`connect.ps1`), and a port for viewing from an Android device itself. |
 | **Federation** | 📝 planned | `jg-dashboard` and Plenum becoming consumers of this app via `oidc`, reusing each host's existing identity provider instead of a separate login. |
 | **Port knocking** | ✅ done | Per-instance, per-interface SPA (`fwknop`) gate for the ADB/scrcpy port, on top of the network controls above -- opened from the UI by an already-authenticated session, never by the connecting device. |
 
@@ -98,9 +100,9 @@ the first boot, Google blocks GApps access on that instance** — it is an uncer
 code can do on its own, it is a human step.
 
 The app helps make sure it does not get overlooked:
-- The **Instances** tab shows the Android ID of every instance with GApps, with a direct link to
-  register it and an "I already registered it" button once done.
-- The **Doctor** tab lists as pending (⚠️, and ❌ if the deadline has passed) any GApps instance
+- The **Instances** tab shows the Android ID of every instance with GApps, and a highlighted warning
+  line with a direct link to register it and an "I already registered it" button while it is pending.
+- **Settings → Doctor** lists as pending (⚠️, and ❌ if the deadline has passed) any GApps instance
   that is not registered.
 
 ## Third-party / non-free modules: a contract before enabling them
@@ -112,7 +114,7 @@ logic.
 The backend never creates or starts an instance that requires a module without a current
 acceptance of its manifest — if it is missing, it answers `428` with the pending contract, the
 frontend shows it (the same generic dialog for all of them, `frontend/contracts.js`), and only
-after it is accepted is the request retried. See the **Modules** tab in the UI and section 5 of
+after it is accepted is the request retried. See **Modules** in the UI and section 5 of
 [`docs/REQUIREMENTS.md`](docs/REQUIREMENTS.md) for the full detail (it includes `compatibleCon`:
 a module is not offered if the chosen image does not support it).
 
@@ -137,7 +139,7 @@ on Docker Hub — the simplest path, and the one that covers almost everyone, is
 docker pull redroid/redroid:15.0.0-latest
 ```
 
-(The Doctor tab does this check for you and shows the exact command if it is missing — you do not
+(Settings → Doctor does this check for you and shows the exact command if it is missing — you do not
 need to pull it by hand before starting the app, this is just here for reference.)
 
 Only if the image you need is private/custom, or this host has no internet access, bring it over
@@ -168,8 +170,8 @@ docker compose up -d --build
 ```
 
 The UI is available at `http://<this-pc-ip>:8080` (or the port you set in `PORT`, since it runs in
-`network_mode: host`). Go to the **Doctor** tab first: it tells you exactly what is missing on this
-host and the command to fix it before creating the first instance.
+`network_mode: host`). Go to **Settings → Doctor** first: it tells you exactly what is missing on
+this host and the command to fix it before creating the first instance.
 
 Running a second instance on a host that already has one (e.g. a disposable/dev deployment
 alongside a stable one)? Clone into a differently-named directory instead of the default
@@ -186,7 +188,7 @@ Two more things a second checkout does NOT inherit from the first one, found liv
   the host — not just non-overlapping with the first checkout's own range, but with anything else
   listening on this host at all (a completely unrelated process can already hold a port inside
   the default `5555`-`5595`). `docker create` only reports this as a raw "port is already
-  allocated" once instance creation is already underway; the Doctor tab's "ADB port range
+  allocated" once instance creation is already underway; the Doctor's "ADB port range
   availability" check now catches it ahead of time.
 - **The optional modules' host data** (gapps, arm-translation, hwsim-wifi-overlay under
   `backend/data/`, plus any `REDROID_FORGE_*_DIR`/`REDROID_HWENC_ARTIFACTS_DIR` override pointing
@@ -195,7 +197,7 @@ Two more things a second checkout does NOT inherit from the first one, found liv
   folder(s) over from the existing checkout (or re-extract/re-provide them, see each module's own
   README) before creating an instance that needs them; each module fails with a clear, specific
   message naming the missing path/env var rather than a confusing crash, so check the instance
-  creation error (or the Doctor tab) for exactly which one is missing.
+  creation error (or the Doctor) for exactly which one is missing.
 
 ## Screen viewing: the built-in web viewer
 
@@ -203,12 +205,15 @@ No install needed on the viewing side — open the Instances tab in a browser. T
 reusing the same access-control model as the rest of the app (`view` to watch, `start-stop` to
 send input):
 
-- **Live preview**: a small, persistent live preview per instance, always visible on the Instances
-  tab (periodic screenshots, not full video — it is meant to just be there, not to be fluid).
+- **Live preview**: a small, persistent live preview per instance (periodic screenshots, not full
+  video — it is meant to just be there, not to be fluid). In the **Full** view each instance has its
+  own 👁 toggle; the **Viewers** view shows every running instance's preview at once, all the same
+  size whatever their resolution, in a portrait band and a landscape band (by what is on screen right
+  now — a game running in landscape on a portrait instance goes with the landscape ones).
 - **Expanded viewer**: an opt-in full-screen mode with real streaming-quality video (H.264, decoded
   with `VideoDecoder`) and audio (Opus, `AudioDecoder`), plus input (click/tap, a hidden text
   field for typing, and a nav bar for back/home/recent-apps/volume). Reachable from the ⛶ button
-  next to the live preview toggle on each instance's row.
+  on each instance, in the Full and Viewers views.
 
 Both drive the real `scrcpy-server.jar` this project pushes and launches on the instance itself —
 own protocol client (`backend/src/lib/scrcpy/`), not an embedded third-party viewer. See
@@ -218,13 +223,17 @@ own protocol client (`backend/src/lib/scrcpy/`), not an embedded third-party vie
 ## Viewing the screen from another PC (scrcpy) — e.g. a TV with an old laptop
 
 For a desktop-native client instead of the browser (lighter on an old laptop used purely as a
-display, or for scripting), or from another Android device:
+display, or for scripting), or from another Android device. On a Linux desktop, the simplest way is
+the **📲** button with the local launcher installed (see
+["Open an instance in scrcpy on your computer"](docs/HOWTO.md#open-an-instance-in-scrcpy-on-your-computer));
+the rest of this section is the manual way:
 
 scrcpy repository: https://github.com/Genymobile/scrcpy
 
-Every instance exposes its ADB port on the host (`adbPort` in the `GET /api/instances` response,
-the same one shown in the "ADB" column of the UI). From any other machine on the network that has
-scrcpy and `adb`:
+Every instance exposes its ADB port on the host (`adbPort` in the `GET /api/instances` response;
+the UI shows `host:port` under each instance's name, click it to copy). The host part is
+**Settings → General → ADB address for clients** when set, else the name or IP you opened the page
+with. From any other machine on the network that has scrcpy and `adb`:
 
 ```bash
 adb connect <server-ip>:<adbPort>
@@ -305,7 +314,11 @@ backend/test/             tests (node --test, no new dependencies)
 android/                  Codec2 components (hardware encoder/decoders) and their test tools
 frontend/                 vanilla frontend (no build step); contracts.js = generic contract modal,
                            authUi.js = login gate + per-capability UI hide/disable (Phase 7),
-                           viewer.js/viewerExpanded.js = the two built-in viewer modes (Phase 11)
+                           viewer.js/viewerExpanded.js = the two built-in viewer modes (Phase 11),
+                           instanceFilter.js/viewersLayout.js = the Instances filter and the
+                           Viewers layout, scrcpyLauncher.js = the 📲 local-scrcpy test/toggle
+launcher/linux/           the local scrcpy launcher (handler of scrcpy-redroid:// links), served by
+                          the app at /launcher/linux/ for installing on a desktop
 scripts/                 connect.sh / connect.ps1 -- scrcpy connector scripts for end users (not
                           backend/scripts/, which is dev/admin-time tooling)
 docs/                     REQUIREMENTS.md (what and why), ARCHITECTURE.md (how the pieces fit

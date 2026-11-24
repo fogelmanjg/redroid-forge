@@ -17,7 +17,7 @@ that computer; it handles the `scrcpy-redroid://` links the button uses. Linux o
    `sudo apt install scrcpy adb desktop-file-utils xdg-utils`). `desktop-file-utils` matters: without
    it some browsers do not see the handler even though it is registered.
 2. **Install the launcher**, as your normal user (no root). redroid-forge serves its own copy; the
-   "Test local scrcpy" dialog shows these lines with your forge's address filled in:
+   **Settings → Local scrcpy** dialog shows these lines with your forge's address filled in:
 
    ```
    mkdir -p ~/redroid-forge-launcher && cd ~/redroid-forge-launcher
@@ -27,14 +27,15 @@ that computer; it handles the `scrcpy-redroid://` links the button uses. Linux o
    ```
 
    (The same files are in the repository under `launcher/linux/`.)
-3. In redroid-forge, press **▶ Test local scrcpy** (Instances toolbar) and then **Test**. The first
+3. In redroid-forge, go to **Settings → Local scrcpy**, press **▶ Test local scrcpy** and then **Test**. The first
    time, the browser asks whether to open the link with "redroid-forge scrcpy launcher": accept, and
    tick "always" if it offers it. The test is real, not a guess: the forge opens a temporary fake ADB
    device on its host, the launcher connects to it with your adb and answers, and only then is the
    feature turned on.
 4. It is now **on in this browser** (the button reads "Local scrcpy ● on") and every running
-   instance shows **📲**. The setting lives in the browser: test once per browser/computer. Click the
-   toolbar button again to turn it off, or to test again after changing something.
+   instance shows **📲**. The setting lives in the browser: test once per browser/computer. Press the
+   same button in Settings → Local scrcpy again to turn it off, or to test again after changing
+   something.
 
 **Your own scrcpy flags** go in `~/.config/redroid-forge-launcher/config` (created by the installer):
 e.g. `SCRCPY_ARGS=(--hwdec=disabled)` to force software decode, or `ALLOWED_HOSTS=(...)` to only accept

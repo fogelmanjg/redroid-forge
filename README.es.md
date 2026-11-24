@@ -13,7 +13,8 @@ App standalone (frontend + backend en un solo contenedor) para manejar instancia
 [redroid](https://github.com/remote-android/redroid-doc) en cualquier PC que solo tenga Docker,
 sin depender de ninguna otra infraestructura.
 
-> En el ciclo de pre-releases de la 1.0 (`1.0.0-beta.N`, primera beta el 21/11/2026) — consolida en un solo lugar varios proyectos
+> En la etapa de release candidates de la 1.0 (`1.0.0-rc.N`, después del ciclo `1.0.0-beta.N` que
+> arrancó el 21/11/2026): solo arreglos hasta la `1.0.0`. Consolida en un solo lugar varios proyectos
 > separados (`redroid-manager`, `redroid-hwenc`, `redroid-nvidia`, y lo que hoy vive repartido en
 > `jg-dashboard`/`plenum-redroid`). Ver [`docs/REQUIREMENTS.es.md`](docs/REQUIREMENTS.es.md) (qué y por
 > qué), [`docs/ARCHITECTURE.es.md`](docs/ARCHITECTURE.es.md) (cómo encajan las piezas — imagen base,
@@ -27,16 +28,17 @@ sin depender de ninguna otra infraestructura.
 > 10** (asegurar y borrar el código legacy que este proyecto reemplaza, más escribir documentación
 > definitiva como esta) — en curso, no una condición de features; la Fase 8 (federación:
 > `jg-dashboard`/Plenum como clientes `oidc` de esta app) es independiente y puede llegar antes o
-> después de la 1.0. **El proyecto está en feature freeze desde el 16/11/2026, solo para
-> funcionalidades grandes: hasta que salga la 1.0 siguen entrando arreglos de bugs, molestias y
-> cosas que faltan en la interfaz y ya deberían estar, además de documentación** — ver [`CONTRIBUTING.md`](CONTRIBUTING.md) (solo en inglés).
+> después de la 1.0. **El proyecto está en feature freeze desde el 16/11/2026, y desde el primer
+> release candidate (23/11/2026) solo entran arreglos y documentación hasta que salga la 1.0** — ver
+> [`CONTRIBUTING.md`](CONTRIBUTING.md) (solo en inglés).
 
 ## Capturas de pantalla
 
 <img src="docs/screenshots/complete-view.png" width="270" alt="Pestaña Instancias, vista Completo"> <img src="docs/screenshots/viewers.png" width="270" alt="Pestaña Instancias, vista Visores"> <img src="docs/screenshots/new-instance.png" width="270" alt="Diálogo de nueva instancia">
 
-Más en [`docs/SCREENSHOTS.es.md`](docs/SCREENSHOTS.es.md) — los tres modos de vista de la pestaña
-Instancias, Doctor, Configuración, Identidades, port-knocking y manejo de módulos.
+Más en [`docs/SCREENSHOTS.es.md`](docs/SCREENSHOTS.es.md) — los tres modos de vista de Instancias,
+el manejo de módulos, todo lo de Configuración (General, scrcpy local, Doctor, Identidades) y
+port-knocking.
 
 ## Features
 
@@ -55,10 +57,10 @@ oficial significa validado con evidencia en hardware real, no una garantía.
 | | 📝 planeado | Magisk (el manifest existe, falta la integración real). |
 | **Watchdogs definidos por el usuario** | ✅ piloto | Scripts periódicos por instancia (pause/resume/status desde la UI, sin cron para editar a mano) — CIFI (la lógica de reconexión de un juego puntual) ya portado y corriendo como primer caso; el mecanismo es genérico para sumar más. |
 | **Backup y restore** | ✅ | Backup/restore de toda la instancia (tar.gz vía un contenedor descartable) en segundo plano con progreso, opcionalmente deteniendo la instancia para una copia consistente, retención por instancia, reset opcional del Android ID, un aviso (nunca un bloqueo) al restaurar sobre una instancia con módulos/versión de GApps distinta. |
-| **Control de acceso** | ✅ | Tres roles (admin/operator/viewer) con ownership por instancia. Pluggable: `none` (default, sin fricción), `local` (cuentas propias), `oidc` (cualquier cantidad de identity providers a la vez — Keycloak, Google, Plenum, otra federación, ... — roles asignados acá, nunca leídos del proveedor), `both` (local y OIDC en la misma pantalla de login). Una cuenta local también puede entrarse por una identidad OIDC vinculada (opt-in, probado logueándose de ambos lados a la vez — nunca por matchear un email declarado). Un asistente crea el primer admin en caliente desde modo `none`, y un guard de auto-bloqueo evita que `local`/`both` se conviertan en una puerta cerrada para siempre. Cambiar de modo y agregar/editar/borrar proveedores OIDC se puede hacer en caliente desde el panel de Identidades — sin editar `.env` — aunque sigue haciendo falta reiniciar para que tome efecto, misma regla que cualquier otra configuración de esta app. |
+| **Control de acceso** | ✅ | Tres roles (admin/operator/viewer) con ownership por instancia. Pluggable: `none` (default, sin fricción), `local` (cuentas propias), `oidc` (cualquier cantidad de identity providers a la vez — Keycloak, Google, Plenum, otra federación, ... — roles asignados acá, nunca leídos del proveedor), `both` (local y OIDC en la misma pantalla de login). Una cuenta local también puede entrarse por una identidad OIDC vinculada (opt-in, probado logueándose de ambos lados a la vez — nunca por matchear un email declarado). Un asistente crea el primer admin en caliente desde modo `none`, y un guard de auto-bloqueo evita que `local`/`both` se conviertan en una puerta cerrada para siempre. Un usuario que no es admin vincula su propio login SSO desde **Configuración → Mi cuenta**. Cambiar de modo y agregar/editar/borrar proveedores OIDC se puede hacer en caliente desde **Configuración → Identidades** — sin editar `.env` — aunque sigue haciendo falta reiniciar para que tome efecto, misma regla que cualquier otra configuración de esta app. |
 | **Control de exposición de red** | ✅ | La app y cada instancia bindean a `127.0.0.1` solamente, por defecto — redroid en sí no tiene ningún control de acceso propio. Se puede optar por cualquier interfaz específica (o todas) por instancia y para la app en sí, desde la UI; las interfaces internas de Docker/contenedores (`docker0`, `br-*`, `veth*`, ...) quedan filtradas de ese selector por defecto, con override de admin. |
-| **Doctor** | ✅ | Diagnóstico del host con el comando exacto para arreglar lo que falta — solo diagnostica, nunca ejecuta nada solo. |
-| **Visualización de pantalla** | ✅ | Visor web embebido, en la propia pestaña Instancias — cliente propio del protocolo scrcpy-server, sin visor de terceros embebido. Una vista previa chica y persistente por instancia, y una vista expandida opcional a pantalla completa con video (H.264)/audio (Opus)/input reales. Además: scripts de conexión scrcpy (`connect.sh`/`connect.ps1`) para un cliente scrcpy de escritorio, y un puerto para ver desde un dispositivo Android mismo. |
+| **Doctor** | ✅ | Diagnóstico del host con el comando exacto para arreglar lo que falta — solo diagnostica, nunca ejecuta nada solo. Un admin ve todos los chequeos; cualquier otro usuario ve solo los de sus propias instancias, más un aviso de "consultá a tu administrador" cuando falla un chequeo del host. |
+| **Visualización de pantalla** | ✅ | Visor web embebido, en la propia pestaña Instancias — cliente propio del protocolo scrcpy-server, sin visor de terceros embebido. Una vista previa chica y persistente por instancia, y una vista expandida opcional a pantalla completa con video (H.264)/audio (Opus)/input reales. Además: un botón 📲 que abre una instancia en el scrcpy real de escritorio a través de un pequeño lanzador local (Linux, ver [`docs/HOWTO.es.md`](docs/HOWTO.es.md)), scripts de conexión scrcpy (`connect.sh`/`connect.ps1`), y un puerto para ver desde un dispositivo Android mismo. |
 | **Federación** | 📝 planeado | `jg-dashboard` y Plenum pasando a consumir esta app vía `oidc`, reusando el identity provider que cada host ya tiene en vez de un login aparte. |
 | **Port knocking** | ✅ hecho | Gate SPA (`fwknop`) por instancia y por interfaz para el puerto ADB/scrcpy, encima de los controles de red de arriba -- se abre desde la UI por una sesión ya autenticada, nunca por el dispositivo que se conecta. |
 
@@ -102,9 +104,9 @@ certificado (redroid + Magisk), y ese registro es la forma de evitar el bloqueo.
 el código pueda hacer solo, es un paso humano.
 
 La app ayuda a que no se pase por alto:
-- La tab **Instancias** muestra el Android ID de cada instancia con GApps, con un link directo
-  para registrarlo y un botón "Ya lo registré" una vez hecho.
-- La tab **Doctor** lista como pendiente (⚠️, y ❌ si ya venció el plazo) cualquier instancia con
+- La pestaña **Instancias** muestra el Android ID de cada instancia con GApps, y mientras está
+  pendiente, una línea de aviso resaltada con un link directo para registrarlo y un botón "Ya lo registré".
+- **Configuración → Doctor** lista como pendiente (⚠️, y ❌ si ya venció el plazo) cualquier instancia con
   GApps sin registrar.
 
 ## Módulos de terceros / no libres: contrato antes de activarlos
@@ -115,7 +117,7 @@ Todo lo que no es 100% software libre (GApps, Magisk) o depende de una elección
 habilitación. El backend nunca crea ni arranca una instancia que requiera un módulo sin una
 aceptación vigente de su manifest — si falta, responde `428` con el contrato pendiente, el
 frontend lo muestra (mismo diálogo genérico para todos, `frontend/contracts.js`), y solo tras
-aceptarlo se reintenta. Ver la tab **Módulos** en la UI y la sección 5 de
+aceptarlo se reintenta. Ver **Módulos** en la UI y la sección 5 de
 [`docs/REQUIREMENTS.es.md`](docs/REQUIREMENTS.es.md) para el detalle completo (incluye
 `compatibleCon`: un módulo no se ofrece si la imagen elegida no lo soporta).
 
@@ -139,7 +141,7 @@ públicas en Docker Hub — el camino más simple, y el que cubre a casi todos, 
 docker pull redroid/redroid:15.0.0-latest
 ```
 
-(La pestaña Doctor hace este chequeo sola y muestra el comando exacto si falta — no hace falta
+(Configuración → Doctor hace este chequeo sola y muestra el comando exacto si falta — no hace falta
 bajarla a mano antes de arrancar la app, esto es solo referencia.)
 
 Solo si la imagen que necesitás es privada/propia, o esta PC no tiene internet, traerla a mano en
@@ -170,8 +172,8 @@ docker compose up -d --build
 ```
 
 La UI queda en `http://<ip-de-esta-pc>:8080` (o el puerto que pongas en `PORT`, ya que corre en
-`network_mode: host`). Entrar a la tab **Doctor** primero: te dice exactamente qué falta en este
-host y el comando para resolverlo antes de crear la primera instancia.
+`network_mode: host`). Entrar a **Configuración → Doctor** primero: te dice exactamente qué falta en
+este host y el comando para resolverlo antes de crear la primera instancia.
 
 ¿Vas a correr una segunda instancia en un host que ya tiene una (por ejemplo un despliegue
 descartable/de prueba al lado de uno estable)? Cloná en un directorio con otro nombre en vez del
@@ -188,13 +190,16 @@ No hace falta instalar nada del lado de quien mira — se abre la pestaña Insta
 navegador. Dos modos, reusando el mismo modelo de permisos del resto de la app (`view` para
 mirar, `start-stop` para mandar input):
 
-- **"Vista previa en vivo"**: una vista previa chica y persistente por instancia, siempre visible en la
-  pestaña Instancias (capturas periódicas, no video real — está pensada para estar siempre
-  encendida, no para ser fluida).
+- **"Vista previa en vivo"**: una vista previa chica y persistente por instancia (capturas
+  periódicas, no video real — está pensada para estar siempre encendida, no para ser fluida). En la
+  vista **Completo** cada instancia tiene su propio botón 👁; la vista **Visores** muestra a la vez
+  todas las instancias en ejecución, todas del mismo tamaño sea cual sea su resolución, en una banda
+  de retrato y otra de paisaje (según lo que hay en pantalla ahora — un juego en paisaje sobre una
+  instancia retrato va con las paisaje).
 - **"Vista expandida"**: un modo opcional a pantalla completa con video real tipo streaming (H.264,
   decodificado con `VideoDecoder`) y audio (Opus, `AudioDecoder`), más input (click/tap, un campo
   de texto oculto para tipear, y una barra de navegación para back/home/recientes/volumen).
-  Se abre con el botón ⛶ al lado del toggle de la vista previa en vivo, en cada fila de instancia.
+  Se abre con el botón ⛶ de cada instancia, en las vistas Completo y Visores.
 
 Los dos manejan el `scrcpy-server` real que este proyecto empuja y lanza en la propia instancia —
 cliente propio del protocolo (`backend/src/lib/scrcpy/`), no un visor de terceros embebido. Ver
@@ -204,13 +209,18 @@ la Fase 11 de [`docs/ROADMAP.md`](docs/ROADMAP.md) (solo en inglés) para el dis
 ## Ver la pantalla desde otra PC (scrcpy) — ej. una TV con una notebook vieja
 
 Para un cliente de escritorio en vez del navegador (más liviano en una notebook vieja usada solo
-como pantalla, o para scriptear), o desde otro dispositivo Android:
+como pantalla, o para scriptear), o desde otro dispositivo Android. En un escritorio Linux, lo más
+simple es el botón **📲** con el lanzador local instalado (ver
+["Abrir una instancia en scrcpy en tu computadora"](docs/HOWTO.es.md#abrir-una-instancia-en-scrcpy-en-tu-computadora));
+el resto de esta sección es la forma manual:
 
 Repo de scrcpy: https://github.com/Genymobile/scrcpy
 
 Cada instancia expone su puerto ADB en el host (`adbPort` en la respuesta de
-`GET /api/instances`, el mismo que se ve en la columna "ADB" de la UI). Desde cualquier otra
-máquina en la red que tenga scrcpy y `adb`:
+`GET /api/instances`; la UI muestra `host:puerto` debajo del nombre de cada instancia, con un clic
+se copia). La parte del host es **Configuración → General → dirección ADB para clientes** si está
+cargada, si no el nombre o la IP con que abriste la página. Desde cualquier otra máquina en la red
+que tenga scrcpy y `adb`:
 
 ```bash
 adb connect <ip-del-server>:<adbPort>
@@ -290,7 +300,11 @@ backend/test/             tests (node --test, sin dependencias nuevas)
 android/                  componentes Codec2 (encoder y decoders por hardware) y sus herramientas de prueba
 frontend/                 frontend vanilla (sin build step); contracts.js = modal de contrato genérico,
                            authUi.js = gate de login + oculta/deshabilita UI por capacidad (Fase 7),
-                           viewer.js/viewerExpanded.js = los dos modos de visor embebido (Fase 11)
+                           viewer.js/viewerExpanded.js = los dos modos de visor embebido (Fase 11),
+                           instanceFilter.js/viewersLayout.js = el filtro de Instancias y el
+                           acomodo de Visores, scrcpyLauncher.js = la prueba/activación del 📲
+launcher/linux/           el lanzador local de scrcpy (maneja los links scrcpy-redroid://), servido
+                          por la app en /launcher/linux/ para instalarlo en un escritorio
 scripts/                 connect.sh / connect.ps1 -- scripts de conexión scrcpy para el usuario final
                           (no confundir con backend/scripts/, que es tooling dev/admin)
 docs/                     REQUIREMENTS (qué y por qué), ARCHITECTURE (cómo encajan las
