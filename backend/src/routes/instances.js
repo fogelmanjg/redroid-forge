@@ -451,8 +451,11 @@ router.post('/', async (req, res) => {
       memoryMb: resources.memoryMb || null,
       cpusetCpus: resources.cpusetCpus || null,
       bindHosts,
-      ownerId: [req.user.id],
-      createdId: req.user.id,
+      // A request with no account behind it (the loopback admin, auth "none") has no id: it used to
+      // be stored as [null], and adding an owner later from the UI then failed with '"ownerIds"
+      // must be a non-empty array of ids' (1.0.0-rc.3). No owner at all instead -- admins see it.
+      ownerId: req.user && req.user.id ? [req.user.id] : [],
+      createdId: (req.user && req.user.id) || null,
       androidId: null,
       androidIdRegisteredAt: null,
       createdAt: new Date().toISOString(),

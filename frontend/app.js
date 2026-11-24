@@ -494,7 +494,9 @@ function buildOwnersEditRow(inst, directory) {
 
   const byId = new Map((directory || []).map((d) => [d.id, d.username]));
   const nameOf = (id) => byId.get(id) || id;
-  const owners = inst.ownerId || [];
+  // An instance created with no account behind it could carry [null] (fixed in 1.0.0-rc.3): never
+  // send that back, or every add/remove is rejected.
+  const owners = (inst.ownerId || []).filter((id) => typeof id === 'string' && id);
 
   const ownersHeader = document.createElement('div');
   ownersHeader.className = 'resources-edit-header';

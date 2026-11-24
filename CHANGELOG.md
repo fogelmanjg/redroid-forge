@@ -35,6 +35,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
   host for a 4-CPU instance), so apps sized their thread pools for CPUs they cannot use (Unity
   logged "Cores = 16" and started a worker per core). Android now sees only the instance's own
   CPUs, from the next start or restart; an instance with no CPU limit sees the host's.
+- An instance created with no account behind the request (the loopback admin, or auth mode
+  `none`) was stored with `[null]` as its owners, and adding an owner to it later from the UI
+  failed with `"ownerIds" must be a non-empty array of ids`. It now starts with no owners (admins
+  see it), and the Owners panel ignores a `null` left by older versions.
 
 ## [1.0.0-rc.2] - 2026-11-23
 
