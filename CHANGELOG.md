@@ -27,6 +27,11 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
 
 ## [Unreleased]
 
+## [1.0.0-rc.3] - 2026-11-24
+
+Release candidate for 1.0.0, published as the stable (Latest) release. Fixes only: what an
+instance believes about its own hardware (RAM, CPUs), watchdogs after a start, and owners.
+
 ### Fixed
 - A watchdog (such as cifi's, which reopens the game) waited one whole interval (5 minutes) after
   every start or restart before its first pass. It now runs one pass as soon as Android has
