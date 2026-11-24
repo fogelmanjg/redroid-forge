@@ -93,4 +93,5 @@ async function ensure(instance, { copyIn, readHostOnline } = {}) {
   }
 }
 
-module.exports = { ensure, toCpuList, cpuListFor, RC_SOURCE, RC_TARGET, LIST_TARGET };
+// defaultCopyIn is shared with psiFix.js (same "0644, never trust the mode on disk" rule).
+module.exports = { ensure, toCpuList, cpuListFor, defaultCopyIn, RC_SOURCE, RC_TARGET, LIST_TARGET };

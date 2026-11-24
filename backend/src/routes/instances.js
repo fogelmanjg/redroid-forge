@@ -4,6 +4,7 @@ const binder = require('../lib/binder');
 const hwsimWifi = require('../lib/hwsimWifi');
 const meminfoFix = require('../lib/meminfoFix');
 const cpuFix = require('../lib/cpuFix');
+const psiFix = require('../lib/psiFix');
 const androidIdentity = require('../lib/androidIdentity');
 const deviceProfile = require('../lib/deviceProfile');
 const store = require('../lib/store');
@@ -469,6 +470,7 @@ router.post('/', async (req, res) => {
     // hook) -- it has to be ready before the start.
     await moduleRunner.ensureHostInfraReady(requiredModuleIds);
     await cpuFix.ensure(instance);
+    await psiFix.ensure(instance);
     await runtime.start(containerId);
     scheduleWifiFixes(instance);
     meminfoFix.scheduleRefresh(instance);
@@ -500,6 +502,7 @@ async function startInstanceRuntime(instance) {
   if (instance.binderSlot != null) await binder.assertSlotFreeToStart(runtime.docker, instance.binderSlot, instance.containerId);
   await meminfoFix.ensureRcTrigger(instance); // a 644 .rc before Android's init reads it (see meminfoFix.js)
   await cpuFix.ensure(instance); // Android sees the instance's own CPUs, not the host's (see cpuFix.js)
+  await psiFix.ensure(instance); // lmkd sees the instance's own memory pressure, not the host's (see psiFix.js)
   await runtime.start(instance.containerId);
   const reconciled = await reconcileDeviceProfile(instance);
   scheduleWifiFixes(reconciled);
@@ -574,6 +577,7 @@ router.post('/:id/restart', async (req, res) => {
     await releaseKnockGuards(instance);
     await meminfoFix.ensureRcTrigger(instance);
     await cpuFix.ensure(instance);
+    await psiFix.ensure(instance);
     await runtime.restart(instance.containerId);
     const reconciled = await reconcileDeviceProfile(instance);
     scheduleWifiFixes(reconciled);
@@ -974,6 +978,7 @@ router.post('/:id/display', async (req, res) => {
     if (wasRunning && !updated.locked) {
       await moduleRunner.ensureHostInfraReady(requiredModuleIds);
       await cpuFix.ensure(updated);
+      await psiFix.ensure(updated);
       await runtime.start(containerId);
       updated = await reconcileDeviceProfile(updated);
       scheduleWifiFixes(updated);

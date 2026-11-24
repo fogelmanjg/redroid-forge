@@ -1,0 +1,2 @@
+on post-fs-data
+    mount none /sys/fs/cgroup/memory.pressure /proc/pressure/memory bind
