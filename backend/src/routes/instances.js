@@ -3,6 +3,7 @@ const runtime = require('../lib/dockerRuntime');
 const binder = require('../lib/binder');
 const hwsimWifi = require('../lib/hwsimWifi');
 const meminfoFix = require('../lib/meminfoFix');
+const cpuFix = require('../lib/cpuFix');
 const androidIdentity = require('../lib/androidIdentity');
 const deviceProfile = require('../lib/deviceProfile');
 const store = require('../lib/store');
@@ -464,6 +465,7 @@ router.post('/', async (req, res) => {
     // Stage 5: host infrastructure (e.g. hwAccel.js's VA-API daemon, via hwenc's
     // hook) -- it has to be ready before the start.
     await moduleRunner.ensureHostInfraReady(requiredModuleIds);
+    await cpuFix.ensure(instance);
     await runtime.start(containerId);
     scheduleWifiFixes(instance);
     meminfoFix.scheduleRefresh(instance);
@@ -493,6 +495,7 @@ async function startInstanceRuntime(instance) {
   // Another Android already on this instance's binder nodes (another forge on the same host): refuse,
   // instead of letting both break (see binder.js slotHolders).
   if (instance.binderSlot != null) await binder.assertSlotFreeToStart(runtime.docker, instance.binderSlot, instance.containerId);
+  await cpuFix.ensure(instance); // Android sees the instance's own CPUs, not the host's (see cpuFix.js)
   await runtime.start(instance.containerId);
   const reconciled = await reconcileDeviceProfile(instance);
   scheduleWifiFixes(reconciled);
@@ -565,6 +568,7 @@ router.post('/:id/restart', async (req, res) => {
     // stop() does, so the phys have to be released here too (before, not after).
     await releaseWifiFixes(instance);
     await releaseKnockGuards(instance);
+    await cpuFix.ensure(instance);
     await runtime.restart(instance.containerId);
     const reconciled = await reconcileDeviceProfile(instance);
     scheduleWifiFixes(reconciled);
@@ -964,6 +968,7 @@ router.post('/:id/display', async (req, res) => {
     // A locked instance is always stopped (locking stops it), but never start one here either.
     if (wasRunning && !updated.locked) {
       await moduleRunner.ensureHostInfraReady(requiredModuleIds);
+      await cpuFix.ensure(updated);
       await runtime.start(containerId);
       updated = await reconcileDeviceProfile(updated);
       scheduleWifiFixes(updated);

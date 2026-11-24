@@ -1,0 +1,9 @@
+# Part of cpuFix.js (1.0.0-rc.3): Android reads how many CPUs it has from these three sysfs files,
+# which a container always shows as the HOST's (0-15 on a 16-thread host) even when the instance is
+# pinned to 4 of them. Unity counted 16 cores on a 4-core instance and started a worker thread per
+# core. /vendor/etc/redroid-forge-cpus (copied in before every start) holds the instance's real
+# CPU list; post-fs-data runs after Android's own early mounts, same as the meminfo trigger.
+on post-fs-data
+    mount none /vendor/etc/redroid-forge-cpus /sys/devices/system/cpu/online bind
+    mount none /vendor/etc/redroid-forge-cpus /sys/devices/system/cpu/possible bind
+    mount none /vendor/etc/redroid-forge-cpus /sys/devices/system/cpu/present bind

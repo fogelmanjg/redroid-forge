@@ -27,6 +27,12 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
 
 ## [Unreleased]
 
+### Fixed
+- An instance pinned to some CPUs still told Android it had all of the host's (16 on a 16-thread
+  host for a 4-CPU instance), so apps sized their thread pools for CPUs they cannot use (Unity
+  logged "Cores = 16" and started a worker per core). Android now sees only the instance's own
+  CPUs, from the next start or restart; an instance with no CPU limit sees the host's.
+
 ## [1.0.0-rc.2] - 2026-11-23
 
 Release candidate for 1.0.0, published as the stable (Latest) release.
