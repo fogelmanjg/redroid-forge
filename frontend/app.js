@@ -2,9 +2,31 @@ const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => Array.from(document.querySelectorAll(sel));
 const { t, loc } = I18n;
 
-function switchTab(name) {
+// Navigation (1.0.0-beta.12): three groups in the header, each with its own row of tabs below;
+// Help has no group, it opens from the header menu. `currentTab` is the one on screen.
+const TAB_GROUP = {
+  instances: 'instances', modules: 'modules', 'user-modules': 'modules', settings: 'config', doctor: 'config', identities: 'config',
+};
+const lastTabOfGroup = {};
+let currentTab = 'instances';
+
+// Highlights the current tab and its group and shows the right sub-tab row, loading nothing.
+function syncNav() {
+  const name = currentTab;
+  const group = TAB_GROUP[name] || null;
+  $$('.nav-group').forEach((b) => b.classList.toggle('active', b.dataset.group === group));
+  // A group with a single tab needs no second row.
+  $$('.subnav').forEach((n) => {
+    n.hidden = n.dataset.group !== group || n.querySelectorAll('.tab-btn:not([hidden])').length < 2;
+  });
   $$('.tab-btn').forEach((b) => b.classList.toggle('active', b.dataset.tab === name));
   $$('.tab').forEach((t) => t.classList.toggle('active', t.id === `tab-${name}`));
+}
+
+function switchTab(name) {
+  currentTab = name;
+  if (TAB_GROUP[name]) lastTabOfGroup[TAB_GROUP[name]] = name;
+  syncNav();
   if (name === 'instances') loadInstances();
   if (name === 'modules') loadModules();
   if (name === 'user-modules') loadUserModulesTab();
@@ -14,6 +36,11 @@ function switchTab(name) {
 }
 
 $$('.tab-btn').forEach((btn) => btn.addEventListener('click', () => switchTab(btn.dataset.tab)));
+$$('.nav-group').forEach((btn) => btn.addEventListener('click', () => {
+  const group = btn.dataset.group;
+  const first = $(`.subnav[data-group="${group}"] .tab-btn:not([hidden])`);
+  switchTab(lastTabOfGroup[group] || (first && first.dataset.tab));
+}));
 
 async function api(path, opts) {
   const res = await fetch(`/api${path}`, {
@@ -174,9 +201,15 @@ async function loadHostCoreCount() {
 let installedVersion = null;
 async function loadInstalledVersion() {
   try {
-    const { installed } = await api('/version');
+    const { installed, repoUrl } = await api('/version');
     installedVersion = installed;
     $('#app-version').textContent = `v${installed}`;
+    // The installed version opens its own release notes; "GitHub" opens the project page.
+    if (repoUrl) {
+      $('#app-version').href = `${repoUrl}/releases/tag/v${encodeURIComponent(installed)}`;
+      $('#app-version').title = t('version.releaseNotes');
+      $('#app-repo-link').href = repoUrl;
+    }
   } catch { $('#app-version').textContent = ''; }
 }
 
@@ -191,7 +224,7 @@ async function checkForNewerVersion() {
     label.textContent = r.newer
       ? t('version.newer', { latest: r.latest, installed: r.installed })
       : t('version.upToDate', { version: r.installed });
-    if (r.newer && r.url) label.title = r.url;
+    if (r.newer && r.url) { label.title = r.url; label.href = r.url; }
   } catch (e) {
     label.textContent = t('version.error', { error: e.message });
     setTimeout(() => { if (label.textContent === t('version.error', { error: e.message })) label.textContent = prevLabel; }, 5000);
@@ -3966,11 +3999,16 @@ function syncLangButton() { langBtn.textContent = I18n.lang.toUpperCase(); }
 langBtn.addEventListener('click', () => I18n.setLang(I18n.lang === 'es' ? 'en' : 'es'));
 document.addEventListener('langchange', () => {
   syncLangButton();
-  const active = $('.tab-btn.active');
-  if (active) switchTab(active.dataset.tab);
+  switchTab(currentTab);
 });
 I18n.apply();
 syncLangButton();
+
+// Header menu: closes on a click anywhere outside it, or on Escape.
+const headerMenu = $('#header-menu');
+document.addEventListener('click', (e) => { if (headerMenu.open && !headerMenu.contains(e.target)) headerMenu.open = false; });
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') headerMenu.open = false; });
+$('#btn-menu-help').addEventListener('click', () => { headerMenu.open = false; switchTab('help'); });
 
 // Everything below waits on AuthUi.ready (docs/ROADMAP.md Phase 7): in "none" mode it resolves
 // immediately with the fixed admin bypass user, so this changes nothing from before Phase 7; in
@@ -3984,6 +4022,7 @@ AuthUi.ready.then(() => {
   // for a feature nobody but admin has any use for.
   $('#btn-new-instance').hidden = !AuthUi.can('create');
   $('.tab-btn[data-tab="settings"]').hidden = !AuthUi.canManageSettings();
+  syncNav(); // the sub-tab rows depend on what this user can see, known only now
 
   loadHostCoreCount();
   loadInstalledVersion();
@@ -3997,7 +4036,7 @@ AuthUi.ready.then(() => {
   // already typed/checked there before they got to click Apply; found for real, 22/10/2026) nor
   // when the browser tab is hidden.
   setInterval(() => {
-    const onInstances = $('.tab-btn.active')?.dataset.tab === 'instances';
+    const onInstances = currentTab === 'instances';
     const dialogOpen = $$('dialog').some((d) => d.open);
     if (onInstances && !dialogOpen && openNoRestartId === null && openRestartId === null && openOwnersId === null && openStorageId === null && openAdbAccessId === null && openRenameId === null && !document.hidden) loadInstances({ silent: true });
   }, 4000);

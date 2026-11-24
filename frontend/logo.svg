@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <title>redroid-forge</title>
+  <style>
+    .steel { fill: #3A4250; }
+    @media (prefers-color-scheme: dark) { .steel { fill: #9AA4B2; } }
+  </style>
+  <!-- sparks -->
+  <g stroke="#F26B1D" stroke-width="5" stroke-linecap="round">
+    <line x1="96" y1="40" x2="108" y2="32"/>
+    <line x1="99" y1="51" x2="113" y2="49"/>
+    <line x1="92" y1="29" x2="98" y2="17"/>
+  </g>
+  <!-- phone -->
+  <rect class="steel" x="51" y="8" width="36" height="52" rx="7"/>
+  <rect x="56" y="14" width="26" height="36" rx="2.5" fill="#F26B1D"/>
+  <path d="M56 40 Q69 30 82 40 V47.5 Q82 50 79.5 50 H58.5 Q56 50 56 47.5 Z" fill="#FFB347"/>
+  <circle cx="69" cy="54.5" r="2.2" fill="#F7F7F8"/>
+  <!-- anvil -->
+  <path class="steel" d="
+    M36 62 H116 V74 L102 77
+    L90 84 V98 L106 106 V116 H26 V106 L42 98 V84
+    L34 77 C24 76 14 72 8 64 C16 63 26 62 36 62 Z"/>
+</svg>

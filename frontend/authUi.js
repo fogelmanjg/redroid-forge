@@ -133,6 +133,9 @@ const AuthUi = (() => {
     const logoutBtn = document.querySelector('#btn-logout');
     const logoutAllBtn = document.querySelector('#btn-logout-all');
     const identitiesNavBtn = document.querySelector('#nav-identities-btn');
+    // The header menu's own button shows who is logged in (1.0.0-beta.12), "Menu" when nobody is.
+    document.querySelector('#header-menu-label').textContent = state.user && state.authMode !== 'none'
+      ? (state.user.username || state.user.id) : I18n.t('menu.label');
     if (state.authMode === 'none') {
       info.hidden = true;
       logoutBtn.hidden = true;

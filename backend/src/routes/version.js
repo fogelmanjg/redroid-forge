@@ -5,7 +5,8 @@ const router = express.Router();
 
 // Installed version only -- no network call, safe to show on every page load.
 router.get('/', (req, res) => {
-  res.json({ installed: versionCheck.getInstalledVersion() });
+  // repoUrl (1.0.0-beta.12): the header links the version to its release notes and the project page.
+  res.json({ installed: versionCheck.getInstalledVersion(), repoUrl: `https://github.com/${versionCheck.REPO}` });
 });
 
 // The ONLY thing that ever calls GitHub here -- a person pressing "Chequear" right now. No

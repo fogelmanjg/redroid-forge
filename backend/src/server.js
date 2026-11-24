@@ -31,9 +31,14 @@ app.use(express.json());
 // registered before express.static below so it intercepts the /favicon.svg request instead of
 // falling through to the static file on disk.
 const FAVICON_SVG = fs.readFileSync(path.join(__dirname, '..', '..', 'frontend', 'favicon.svg'), 'utf-8');
+// Since 1.0.0-beta.12 the icon is the anvil logo and only the phone's SCREEN takes this color
+// (the logo's ember orange when the var is unset), so the shape stays the project's own on every
+// deployment. Only a plain #rgb/#rrggbb is accepted -- it goes straight into the SVG.
+const SCREEN_RE = /(<rect class="screen"[^>]*fill=")[^"]*(")/;
 app.get('/favicon.svg', (req, res) => {
-  const color = process.env.REDROID_FORGE_ICON_COLOR || '#3a6df0';
-  res.type('image/svg+xml').send(FAVICON_SVG.replaceAll('#3a6df0', color));
+  const color = process.env.REDROID_FORGE_ICON_COLOR;
+  const svg = color && /^#[0-9a-fA-F]{3}([0-9a-fA-F]{3})?$/.test(color) ? FAVICON_SVG.replace(SCREEN_RE, `$1${color}$2`) : FAVICON_SVG;
+  res.type('image/svg+xml').send(svg);
 });
 
 app.use(express.static(path.join(__dirname, '..', '..', 'frontend')));

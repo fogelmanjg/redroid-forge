@@ -27,6 +27,18 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
 
 ## [Unreleased]
 
+### Added
+- Project logo (an anvil with a glowing phone) in the header, linking to the project on GitHub; the
+  installed version links to its own release notes.
+
+### Changed
+- The tab icon is the anvil logo; `REDROID_FORGE_ICON_COLOR` now colors only the phone's screen
+  (ember orange when unset), so each deployment is still told apart at a glance.
+- Navigation: the header keeps three groups -- Instances, Modules (Modules, User modules) and
+  Settings (General, Doctor, Identities / My account) -- with the active group's tabs in a row
+  below. Everything else (user, version and update check, Help, language, log out) moved into one
+  menu on the right, so the bar fits one row, also on a phone.
+
 ## [1.0.0-beta.11] - 2026-11-23
 
 ### Security

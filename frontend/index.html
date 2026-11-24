@@ -11,23 +11,49 @@
 </head>
 <body>
   <header>
-    <h1>redroid-forge</h1>
-    <span id="app-version" class="muted"></span>
-    <button id="btn-version-check" class="secondary" data-i18n="version.check">Check for updates</button>
+    <div class="brand">
+      <a id="app-repo-link" target="_blank" rel="noopener" data-i18n-title="version.repo" title="GitHub"><img src="logo.svg" alt="redroid-forge on GitHub" width="36" height="36" /></a>
+      <h1>redroid-forge</h1>
+    </div>
+    <!-- 1.0.0-beta.12: three groups up here; each group's own tabs show in the row below. -->
     <nav>
+      <button class="nav-group active" data-group="instances" data-i18n="nav.instances">Instances</button>
+      <button class="nav-group" data-group="modules" data-i18n="nav.modulesGroup">Modules</button>
+      <button class="nav-group" data-group="config" data-i18n="nav.config">Settings</button>
+    </nav>
+    <!-- 1.0.0-beta.12: everything that is not a tab lives in this one menu, so the bar stays one row. -->
+    <details class="header-menu" id="header-menu">
+      <summary><span id="header-menu-label">☰</span> ▾</summary>
+      <div class="header-menu-panel">
+        <div id="current-user-info" class="muted" hidden></div>
+        <div class="header-menu-row">
+          <a id="app-version" class="muted" target="_blank" rel="noopener"></a>
+          <button id="btn-version-check" class="secondary" data-i18n="version.check">Check for updates</button>
+        </div>
+        <button id="btn-menu-help" class="secondary" data-i18n="nav.help">Help</button>
+        <div class="header-menu-row">
+          <span data-i18n="menu.language">Language</span>
+          <button id="btn-lang" class="secondary" title="Language / Idioma">ES</button>
+        </div>
+        <button id="btn-logout" class="secondary" data-i18n="auth.logout" hidden>Log out</button>
+        <button id="btn-logout-all" class="secondary" data-i18n="auth.logoutAll" data-i18n-title="auth.logoutAllHint" hidden>Log out everywhere</button>
+      </div>
+    </details>
+  </header>
+  <div class="subnav-bar">
+    <nav class="subnav" data-group="instances" hidden>
       <button class="tab-btn active" data-tab="instances" data-i18n="nav.instances">Instances</button>
+    </nav>
+    <nav class="subnav" data-group="modules" hidden>
       <button class="tab-btn" data-tab="modules" data-i18n="nav.modules">Modules</button>
       <button class="tab-btn" data-tab="user-modules" data-i18n="nav.userModules">User modules</button>
+    </nav>
+    <nav class="subnav" data-group="config" hidden>
+      <button class="tab-btn" data-tab="settings" data-i18n="nav.general">General</button>
       <button class="tab-btn" data-tab="doctor" data-i18n="nav.doctor">Doctor</button>
-      <button class="tab-btn" data-tab="help" data-i18n="nav.help">Help</button>
-      <button class="tab-btn" data-tab="settings" data-i18n="nav.settings">Settings</button>
       <button class="tab-btn" id="nav-identities-btn" data-tab="identities" data-i18n="nav.identities" hidden>Identities</button>
     </nav>
-    <span id="current-user-info" class="muted" hidden></span>
-    <button id="btn-logout" class="secondary" data-i18n="auth.logout" hidden>Log out</button>
-    <button id="btn-logout-all" class="secondary" data-i18n="auth.logoutAll" data-i18n-title="auth.logoutAllHint" hidden>Log out everywhere</button>
-    <button id="btn-lang" class="secondary" title="Language / Idioma">ES</button>
-  </header>
+  </div>
 
   <main>
     <section id="tab-instances" class="tab active">
