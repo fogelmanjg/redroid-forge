@@ -27,6 +27,22 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
 
 ## [Unreleased]
 
+## [1.0.0-rc.4] - 2026-11-24
+
+### Fixed
+
+- **Apps no longer killed in several instances at once when the host reclaims memory.** Android's
+  low-memory killer (lmkd) reacts to memory-pressure events from `/proc/pressure/memory`, which inside
+  a container is the whole host's pressure. Every time the host stalled briefly (kswapd reclaiming page
+  cache), lmkd in every instance saw "critical" pressure at the same moment and killed apps, down to
+  the one on screen. Seen in prod: CIFI killed while playing, using 1.4 GB of its 3 GB, with 34 GB still
+  available on the host. Each instance's own cgroup `memory.pressure` is now bound over
+  `/proc/pressure/memory` at boot (`psiFix.js`), installed before every start/restart like the CPU fix.
+- **CIFI watchdog: reopens the game when only its process survived.** After the game was killed,
+  Android re-forked its process for a background service with no game window. The watchdog only
+  checked `pidof`, saw a process and left the game closed for hours. It now also checks that the game's
+  activity is in the activity stack.
+
 ## [1.0.0-rc.3] - 2026-11-24
 
 Release candidate for 1.0.0, published as the stable (Latest) release. Fixes only: what an
