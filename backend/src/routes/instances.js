@@ -5,6 +5,8 @@ const hwsimWifi = require('../lib/hwsimWifi');
 const meminfoFix = require('../lib/meminfoFix');
 const cpuFix = require('../lib/cpuFix');
 const psiFix = require('../lib/psiFix');
+const androidRestartWatch = require('../lib/androidRestartWatch');
+const grallocFix = require('../modules/redroid-gralloc-fix/integrate');
 const androidIdentity = require('../lib/androidIdentity');
 const deviceProfile = require('../lib/deviceProfile');
 const store = require('../lib/store');
@@ -271,7 +273,11 @@ async function releaseKnockGuards(instance) {
 async function withRuntimeStatus(instance) {
   try {
     const info = await runtime.inspect(instance.containerId);
-    return { ...instance, status: info.State.Status };
+    // 1.0.0-rc.5: a live CPU change that took cores away suggests a restart until the container's
+    // next start (non-blocking, shown as a note on the instance).
+    const restartSuggested = Boolean(instance.restartSuggestedAt && info.State.Status === 'running'
+      && new Date(info.State.StartedAt) < new Date(instance.restartSuggestedAt));
+    return { ...instance, status: info.State.Status, restartSuggested };
   } catch {
     return { ...instance, status: 'missing' };
   }
@@ -503,6 +509,7 @@ async function startInstanceRuntime(instance) {
   await meminfoFix.ensureRcTrigger(instance); // a 644 .rc before Android's init reads it (see meminfoFix.js)
   await cpuFix.ensure(instance); // Android sees the instance's own CPUs, not the host's (see cpuFix.js)
   await psiFix.ensure(instance); // lmkd sees the instance's own memory pressure, not the host's (see psiFix.js)
+  await grallocFix.ensure(instance, requiredModuleIds); // instances created before a gralloc fix get it now
   await runtime.start(instance.containerId);
   const reconciled = await reconcileDeviceProfile(instance);
   scheduleWifiFixes(reconciled);
@@ -564,35 +571,42 @@ router.post('/:id/restart', async (req, res) => {
   if (!instance) return res.status(404).json({ error: 'Instancia no encontrada' });
   try {
     permissions.assertCan(req.user, 'start-stop', instance);
-    assertNotLocked(instance, 'restart');
-    assertNoBlockingJob(instance, 'restart');
-    await revalidateModulesIfImageKnown(instance);
-    const requiredModuleIds = requiredModuleIdsFor(instance);
-    await moduleRunner.ensureHostInfraReady(requiredModuleIds);
-    moduleScheduler.stop(instance.id); // cleared and rescheduled below -- never double-ticking across a restart
-    meminfoFix.release(instance.id);
-    // Docker's own restart = stop + start under the hood -- the same netns teardown a plain
-    // stop() does, so the phys have to be released here too (before, not after).
-    await releaseWifiFixes(instance);
-    await releaseKnockGuards(instance);
-    await meminfoFix.ensureRcTrigger(instance);
-    await cpuFix.ensure(instance);
-    await psiFix.ensure(instance);
-    await runtime.restart(instance.containerId);
-    const reconciled = await reconcileDeviceProfile(instance);
-    scheduleWifiFixes(reconciled);
-    meminfoFix.scheduleRefresh(reconciled);
-    // Same catalog lookup as reconcileDeviceProfile/requiredModuleIdsFor -- see /start's own
-    // comment on this same pattern.
-    const restartedImg = catalog.find((i) => i.id === reconciled.imageId);
-    moduleRunner.scheduleRuntimeFixups(requiredModuleIds, reconciled.containerId, { androidVersion: restartedImg?.androidVersion });
-    moduleScheduler.start(reconciled.id, reconciled.containerId, requiredModuleIds);
-    await applyKnockGuards(reconciled);
-    res.json(await withRuntimeStatus(reconciled));
+    res.json(await withRuntimeStatus(await restartInstanceRuntime(instance)));
   } catch (e) {
     sendError(res, e);
   }
 });
+
+// The full restart, shared by the route above and by the watcher that restarts an instance whose
+// Android restarted on its own (lib/androidRestartWatch.js). Returns the reconciled instance.
+async function restartInstanceRuntime(instance) {
+  assertNotLocked(instance, 'restart');
+  assertNoBlockingJob(instance, 'restart');
+  await revalidateModulesIfImageKnown(instance);
+  const requiredModuleIds = requiredModuleIdsFor(instance);
+  await moduleRunner.ensureHostInfraReady(requiredModuleIds);
+  moduleScheduler.stop(instance.id); // cleared and rescheduled below -- never double-ticking across a restart
+  meminfoFix.release(instance.id);
+  // Docker's own restart = stop + start under the hood -- the same netns teardown a plain
+  // stop() does, so the phys have to be released here too (before, not after).
+  await releaseWifiFixes(instance);
+  await releaseKnockGuards(instance);
+  await meminfoFix.ensureRcTrigger(instance);
+  await cpuFix.ensure(instance);
+  await psiFix.ensure(instance);
+  await grallocFix.ensure(instance, requiredModuleIds);
+  await runtime.restart(instance.containerId);
+  const reconciled = await reconcileDeviceProfile(instance);
+  scheduleWifiFixes(reconciled);
+  meminfoFix.scheduleRefresh(reconciled);
+  // Same catalog lookup as reconcileDeviceProfile/requiredModuleIdsFor -- see /start's own
+  // comment on this same pattern.
+  const restartedImg = catalog.find((i) => i.id === reconciled.imageId);
+  moduleRunner.scheduleRuntimeFixups(requiredModuleIds, reconciled.containerId, { androidVersion: restartedImg?.androidVersion });
+  moduleScheduler.start(reconciled.id, reconciled.containerId, requiredModuleIds);
+  await applyKnockGuards(reconciled);
+  return reconciled;
+}
 
 // There is no prior convention of an "on-demand stage 6" (see ARCHITECTURE.md)
 // triggered by the user against a particular instance -- this route is the first.
@@ -741,12 +755,25 @@ router.post('/:id/resources', async (req, res) => {
       pool: settings.get(),
     });
     await runtime.updateResources(instance.containerId, resources);
+    let restartSuggestedAt = instance.restartSuggestedAt || null;
+    if (resources.cpusetCpus !== undefined) {
+      let removed = [];
+      try { removed = cpuFix.removedCpus(instance.cpusetCpus, resources.cpusetCpus); } catch { removed = []; }
+      if (removed.length > 0) restartSuggestedAt = new Date().toISOString();
+    }
     const updated = store.upsert({
       ...instance,
+      restartSuggestedAt,
       memoryMb: resources.memoryMb !== undefined ? resources.memoryMb : instance.memoryMb,
       cpusetCpus: resources.cpusetCpus !== undefined ? resources.cpusetCpus : instance.cpusetCpus,
     });
-    res.json(await withRuntimeStatus(updated));
+    const withStatus = await withRuntimeStatus(updated);
+    // 1.0.0-rc.5: the CPU count Android sees follows a live cpuset change right away (cpuFix.applyLive).
+    // `androidCpus: 'next-start'` on a running instance tells the UI to offer a restart instead.
+    if (resources.cpusetCpus !== undefined && withStatus.status === 'running') {
+      withStatus.androidCpus = await cpuFix.applyLive(updated);
+    }
+    res.json(withStatus);
   } catch (e) {
     sendError(res, e);
   }
@@ -1386,6 +1413,32 @@ async function handleExternalStart(instance) {
   console.log(`[instances] "${current.name}" reconciled after an external start`);
 }
 
+// Watches every running instance for an Android that restarted inside its container and restarts the
+// whole instance (lib/androidRestartWatch.js). Started once from server.js.
+function startAndroidRestartWatch() {
+  const watch = androidRestartWatch.createWatch({
+    async listRunning() {
+      const out = [];
+      for (const instance of store.readAll()) {
+        if (!instance.containerId || instance.locked) continue;
+        try {
+          const info = await runtime.inspect(instance.containerId);
+          if (info.State.Status === 'running') out.push({ instance, startedAt: info.State.StartedAt });
+        } catch { /* gone */ }
+      }
+      return out;
+    },
+    restart: (instance) => restartInstanceRuntime(store.get(instance.id) || instance),
+    onRestarted(instance, at) {
+      const current = store.get(instance.id);
+      if (current) store.upsert({ ...current, androidRestartedAt: at });
+    },
+  });
+  watch.start();
+  return watch;
+}
+
 module.exports = router;
 module.exports.reattachRunningInstances = reattachRunningInstances;
+module.exports.startAndroidRestartWatch = startAndroidRestartWatch;
 module.exports.handleExternalStart = handleExternalStart;

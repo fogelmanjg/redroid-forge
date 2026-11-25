@@ -30,6 +30,7 @@ const originCheck = require('../lib/originCheck');
 const httpListeners = require('../lib/httpListeners');
 const wsServer = require('../lib/wsServer');
 const captureHub = require('../lib/captureHub');
+const runtime = require('../lib/dockerRuntime');
 
 const HOST = '127.0.0.1'; // docker-compose.yml: network_mode: host -- reaches the instance's
 // published adbPort directly, same as viewerSession.js's own HOST constant.
@@ -39,11 +40,25 @@ const CAPTURE_INTERVAL_MS = 1500; // "no necesito fluidez" -- a couple of second
 const PATH_RE = /^\/api\/instances\/([^/]+)\/viewer(?:\?.*)?$/;
 
 function rejectUpgrade(socket, status, message) {
-  const statusText = { 400: 'Bad Request', 401: 'Unauthorized', 403: 'Forbidden', 404: 'Not Found' }[status] || 'Error';
+  const statusText = { 400: 'Bad Request', 401: 'Unauthorized', 403: 'Forbidden', 404: 'Not Found', 409: 'Conflict' }[status] || 'Error';
   try {
     socket.write(`HTTP/1.1 ${status} ${statusText}\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\n${message || statusText}`);
   } catch (e) { /* socket may already be unusable -- destroy() below is what actually matters */ }
   socket.destroy();
+}
+
+// 1.0.0-rc.5: a live preview is only opened against a RUNNING container. Before, a page with the
+// preview toggled on for a stopped instance (antimater, on prod) reopened the WS on every list
+// refresh; each one cost 3 failed `adb screencap` ("device not found") before the hub gave up, so
+// prod's log got one error every ~1.5 s, all day, for an instance that was simply off.
+async function isContainerRunning(instance, inspect = runtime.inspect) {
+  if (!instance || !instance.containerId) return false;
+  try {
+    const info = await inspect(instance.containerId);
+    return Boolean(info && info.State && info.State.Status === 'running');
+  } catch {
+    return false; // no such container: not running either
+  }
 }
 
 async function handleUpgrade(req, socket, head) {
@@ -73,6 +88,7 @@ async function handleUpgrade(req, socket, head) {
     rejectUpgrade(socket, e.httpStatus || 500, e.message);
     return;
   }
+  if (!(await isContainerRunning(instance))) { rejectUpgrade(socket, 409, 'Instance is not running'); return; }
 
   const ws = wsServer.acceptUpgrade(req, socket, head);
   if (!ws) return; // acceptUpgrade already answered (not a real WS handshake) and destroyed it
@@ -122,4 +138,4 @@ function registerUpgrade() {
   httpListeners.onUpgrade(handleUpgrade);
 }
 
-module.exports = { registerUpgrade };
+module.exports = { registerUpgrade, isContainerRunning };

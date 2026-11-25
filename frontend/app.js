@@ -181,7 +181,7 @@ async function applyResources(instanceId, { memoryMb, cpusetCpus }) {
   const body = {};
   if (memoryMb !== undefined) body.memoryMb = memoryMb;
   if (cpusetCpus !== undefined) body.cpusetCpus = cpusetCpus;
-  await api(`/instances/${instanceId}/resources`, { method: 'POST', body: JSON.stringify(body) });
+  return api(`/instances/${instanceId}/resources`, { method: 'POST', body: JSON.stringify(body) });
 }
 
 // Host core count, for the per-core checkbox grid (see buildResourcesEditRow) -- fetched once
@@ -462,6 +462,29 @@ function coreSetToCpuset(set) {
 // Informational only now -- editing happens through the dedicated "Resources" button, which
 // opens the shared no-restart panel (see openNoRestartId above). Two separate chips, same as
 // before, just no click handler of their own any more.
+// 1.0.0-rc.5: non-blocking note after a live CPU change took cores away; gone after the next start.
+function buildRestartSuggestedChip(inst) {
+  if (!inst.restartSuggested) return null;
+  const chip = document.createElement('span');
+  chip.className = 'resource-chip resource-chip-warn';
+  chip.textContent = t('instances.resources.restartSuggested');
+  chip.title = t('instances.resources.restartSuggestedHint');
+  return chip;
+}
+
+// 1.0.0-rc.5: shown for a day after the app restarted the instance because its Android restarted on
+// its own (backend lib/androidRestartWatch.js).
+function buildAndroidRestartedChip(inst) {
+  if (!inst.androidRestartedAt) return null;
+  const at = new Date(inst.androidRestartedAt);
+  if (Number.isNaN(at.getTime()) || Date.now() - at.getTime() > 24 * 3_600_000) return null;
+  const chip = document.createElement('span');
+  chip.className = 'resource-chip resource-chip-warn';
+  chip.textContent = t('instances.androidRestarted', { when: at.toLocaleString([], { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) });
+  chip.title = t('instances.androidRestartedHint');
+  return chip;
+}
+
 function buildResourcesChips(inst) {
   const frag = document.createDocumentFragment();
   const mk = (text) => {
@@ -685,6 +708,18 @@ function buildResourcesEditRow(inst, allInstances) {
       w.textContent = t('instances.resources.conflict', { cores: cores.join(', '), name });
       warnBox.appendChild(w);
     }
+    // 1.0.0-rc.5: taking away cores a running instance already had -> suggest a restart (never
+    // required: apps keep thread pools sized for the cores they saw at launch).
+    if (inst.status === 'running' && selected.size > 0) {
+      const before = inst.cpusetCpus ? parseCoreSet(inst.cpusetCpus) : new Set(Array.from({ length: hostCoreCount || 16 }, (_, i) => i));
+      const removed = [...before].filter((c) => !selected.has(c)).sort((a, b) => a - b);
+      if (removed.length > 0) {
+        const w = document.createElement('div');
+        w.className = 'resources-warn';
+        w.textContent = t('instances.resources.coresRemovedHint', { cores: removed.join(', ') });
+        warnBox.appendChild(w);
+      }
+    }
   }
   for (let i = 0; i < (hostCoreCount || 16); i++) {
     const label = document.createElement('label');
@@ -754,7 +789,13 @@ function buildResourcesEditRow(inst, allInstances) {
         await applyResources(inst.id, { cpusetCpus: coreSetToCpuset(selected), memoryMb });
         await api(`/instances/${inst.id}/start`, { method: 'POST' });
       } else {
-        await applyResources(inst.id, { cpusetCpus: coreSetToCpuset(selected), memoryMb });
+        const result = await applyResources(inst.id, { cpusetCpus: coreSetToCpuset(selected), memoryMb });
+        // 1.0.0-rc.5: the new CPUs normally reach Android on the spot. Only an instance booted
+        // without the CPU fix needs a restart for Android to count them; the limit itself is
+        // already in force either way, so declining just leaves the count for the next start.
+        if (result && result.androidCpus === 'next-start' && confirm(t('instances.resources.cpuRestartConfirm'))) {
+          await api(`/instances/${inst.id}/restart`, { method: 'POST' });
+        }
       }
       openNoRestartId = null;
       await loadInstances({ silent: true });
@@ -2342,7 +2383,9 @@ async function loadInstances({ silent = false, fromCache = false } = {}) {
         // to be full-size.
         const previewWrap = document.createElement('div');
         previewWrap.className = 'viewer-preview-wrap';
-        if (isOn) mountPreview(previewWrap, inst.id);
+        // Only a running instance has a screen to capture (1.0.0-rc.5): the toggle stays on for a
+        // stopped one, and its preview comes back by itself on the first refresh after it starts.
+        if (isOn && inst.status === 'running') mountPreview(previewWrap, inst.id);
         viewerCol.appendChild(previewWrap);
 
         tdViewer.appendChild(viewerCol);
@@ -2380,7 +2423,7 @@ async function loadInstances({ silent = false, fromCache = false } = {}) {
       info.append(
         infoLine('instances.info.system', imageChip, buildDeviceProfileChip(inst), buildSupportCell(inst), inst.hasGapps ? androidIdSpan : null),
         infoLine('instances.info.display', buildDisplayChip(inst), buildCodecChips(inst)),
-        infoLine('instances.info.resources', buildResourcesChips(inst)),
+        infoLine('instances.info.resources', buildResourcesChips(inst), buildRestartSuggestedChip(inst), buildAndroidRestartedChip(inst)),
         infoLine('instances.info.network', buildNetworkChip(inst), buildWifiInternoChip(inst)),
         infoLine('instances.info.modules', buildModulesCell(inst)),
       );

@@ -36,6 +36,29 @@ function warn(msg) { console.warn(`[cpu-fix] ${msg}`); }
 
 // "6,7,14,15" (Docker's format) -> "6-7,14-15" (the kernel's cpulist format, what these sysfs
 // files normally hold; bionic parses both, this just keeps the file looking like the real one).
+// "6-7,14-15" or "6,7,14,15" -> Set {6,7,14,15}. Throws on anything else.
+function expandCpuList(cpuset) {
+  const ids = new Set();
+  for (const part of String(cpuset).split(',').map((x) => x.trim()).filter(Boolean)) {
+    const m = part.match(/^(\d+)(?:-(\d+))?$/);
+    if (!m) throw new Error(`bad cpuset "${cpuset}"`);
+    const a = Number(m[1]);
+    const b = m[2] === undefined ? a : Number(m[2]);
+    for (let i = Math.min(a, b); i <= Math.max(a, b); i++) ids.add(i);
+  }
+  return ids;
+}
+
+// Cores a cpuset change takes away (1.0.0-rc.5), for the "restart suggested" note: an app sized
+// its thread pools for the cores it saw at launch, and some of those cores are gone now. No old
+// cpuset = every host core.
+function removedCpus(oldCpuset, newCpuset, { readHostOnline } = {}) {
+  const read = readHostOnline || (() => fs.readFileSync(HOST_ONLINE, 'utf8'));
+  const before = expandCpuList(oldCpuset || read().trim());
+  const after = expandCpuList(newCpuset);
+  return [...before].filter((c) => !after.has(c)).sort((x, y) => x - y);
+}
+
 function toCpuList(cpuset) {
   const ids = new Set();
   for (const part of String(cpuset).split(',').map((s) => s.trim()).filter(Boolean)) {
@@ -93,5 +116,25 @@ async function ensure(instance, { copyIn, readHostOnline } = {}) {
   }
 }
 
+// A live cpuset change (POST /:id/resources, 1.0.0-rc.5): rewrite the list file IN PLACE, same
+// inode, so the bind mounts over the three sysfs files show the new list right away -- no restart.
+// (`docker cp` would replace the file with a new inode, and the binds would keep the old one.)
+// Verified on prod 25/11/2026 (retrato-foto, pvz2-juan): /sys/devices/system/cpu/online changed
+// on the spot. Apps already open keep the thread pools they sized at launch until reopened.
+// -> 'now' (Android sees it already), or 'next-start' (stopped, or booted without the bind -- an
+// instance from before rc.3 that was never restarted since; the next start installs it).
+async function applyLive(instance, { exec } = {}) {
+  if (!instance || !instance.containerId) return 'next-start';
+  const run = exec || require('./dockerRuntime').exec;
+  try {
+    const list = cpuListFor(instance); // digits, commas and dashes only (toCpuList validates)
+    const script = `grep -q ' /sys/devices/system/cpu/online ' /proc/mounts && printf '%s\\n' '${list}' > ${LIST_TARGET} && echo live`;
+    const out = await run(instance.containerId, ['sh', '-c', script]);
+    return String(out || '').includes('live') ? 'now' : 'next-start';
+  } catch (e) {
+    return 'next-start'; // not running, or exec failed: the next start's ensure() covers it
+  }
+}
+
 // defaultCopyIn is shared with psiFix.js (same "0644, never trust the mode on disk" rule).
-module.exports = { ensure, toCpuList, cpuListFor, defaultCopyIn, RC_SOURCE, RC_TARGET, LIST_TARGET };
+module.exports = { ensure, applyLive, removedCpus, expandCpuList, toCpuList, cpuListFor, defaultCopyIn, RC_SOURCE, RC_TARGET, LIST_TARGET };

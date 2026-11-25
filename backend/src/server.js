@@ -103,6 +103,9 @@ require('./routes/instances').reattachRunningInstances().catch((e) => console.wa
 // ...and from now on, any start of an instance's container that this app did not ask for is
 // reconciled live (lib/externalStartWatcher.js).
 require('./lib/externalStartWatcher').start(require('./routes/instances').handleExternalStart);
+// An Android that restarts on its own inside a running container (system_server died) gets the
+// whole instance restarted, so everything set up at start comes back (lib/androidRestartWatch.js).
+require('./routes/instances').startAndroidRestartWatch();
 
 // Last safety net: a bug in a single request cannot bring down the whole process
 // (and with it the management of ALL the running instances).
