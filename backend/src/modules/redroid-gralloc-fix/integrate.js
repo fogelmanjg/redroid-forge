@@ -48,18 +48,76 @@ const BUGGY = Buffer.from('31c9', 'hex');   // xor %ecx,%ecx
 const FIXED = Buffer.from('b104', 'hex');    // mov $4,%cl
 const AFTER = Buffer.from('eb05b90300000031d2f7', 'hex');
 
+// 1.0.0-rc.5: YV12 video buffers the GPU can import. The same file lays out a YV12 buffer with the
+// image WIDTH as the luma row pitch and half of it (aligned to 16) for the chroma planes, in a GR88 bo
+// only w/2 wide. AMD's driver (radeonsi) only imports a linear plane whose pitch is a multiple of 256
+// bytes, so for nearly every video size (720x1280, 1280x720, 720x406, 1920x1080...) Mesa's
+// eglCreateImage returns EGL_NO_IMAGE and surfaceflinger aborts ("Failed to create a valid texture"),
+// which restarts the whole of Android -- seen on server01 with video ads, 25/11/2026. Two changes:
+//  - gralloc_gbm_bo_create: the GR88 bo for YV12 is ALIGN(w, 512)/2 wide instead of w/2, so its real
+//    pitch is a multiple of 512 (27 bytes, same length: add/shr/shl instead of the signed halving);
+//  - gralloc_gbm_bo_lock_ycbcr: the luma pitch is the handle's real stride (offset 0x28) instead of its
+//    width (0x18), so the chroma pitch, half of it, is a multiple of 256 (1 byte).
+//  - gralloc_gbm_handle_register: the importing side rebuilds the bo with the same real width (16 bytes).
+// All or none: one without the others is a layout that does not match the buffer.
+const YV12_PATCHES = [
+  {
+    offset: 0x5673,
+    before: Buffer.from('817c241859563132751b', 'hex'), // cmpl $YV12,0x18(%rsp); jne
+    buggy: Buffer.from('4989f64489e0c1e81f4401e0d1f84489ead1ea4101d54189c4eb03', 'hex'),
+    fixed: Buffer.from('4989f64181c4ff01000041c1ec0941c1e4084489ead1ea4101d590', 'hex'),
+    after: Buffer.from('4989f6488b7c2420', 'hex'),
+  },
+  {
+    // gralloc_gbm_handle_register: a process that IMPORTS the buffer (the decoder, surfaceflinger) rebuilt
+    // the bo with the old w/2 width, and the driver clipped CPU writes to it -- every odd chroma row lost
+    // its last bytes (seen 25/11/2026 as a striped right edge on the video). The width now comes from the
+    // handle's real stride (stride/2 GR88 pixels); the height keeps h + h/2, added in place (16 bytes).
+    offset: 0x54f0,
+    before: Buffer.from('4181f8595631327510', 'hex'), // cmp $YV12,%r8d; jne
+    buggy: Buffer.from('d1e9894c241089f9d1e901f9894c2414', 'hex'),
+    fixed: Buffer.from('8b4828d1e9894c2410d1ef017c241490', 'hex'),
+    after: Buffer.from('c744241c01000000', 'hex'),
+  },
+  {
+    offset: 0x5b33,
+    before: Buffer.from('31c04883c4105bc348634b', 'hex'), // ...ret; movslq 0x??(%rbx),%rcx
+    buggy: Buffer.from('18', 'hex'),
+    fixed: Buffer.from('28', 'hex'),
+    after: Buffer.from('89cac1ea1f01cad1fa', 'hex'),
+  },
+];
+
 function log(msg) { console.log(`[redroid-gralloc-fix] ${msg}`); }
 function warn(msg) { console.warn(`[redroid-gralloc-fix] ${msg}`); }
 
-// Pure. -> { status: 'patched'|'already'|'unknown', buffer }   (the input buffer is never modified)
+// Pure. -> { status: 'patched'|'already'|'unknown', buffer, yv12: 'patched'|'already'|'unknown' }
+// (the input buffer is never modified). `status` keeps its meaning (the 10-bit patch, which the doctor
+// checks); `yv12` is the video patch, applied only when every one of its parts is recognised.
 function patchGralloc(input) {
   const data = Buffer.from(input);
   const at = (from, expected) => data.length >= from + expected.length && data.subarray(from, from + expected.length).equals(expected);
-  if (!at(OFFSET - BEFORE.length, BEFORE) || !at(OFFSET + 2, AFTER)) return { status: 'unknown', buffer: data };
-  if (at(OFFSET, FIXED)) return { status: 'already', buffer: data };
-  if (!at(OFFSET, BUGGY)) return { status: 'unknown', buffer: data };
-  FIXED.copy(data, OFFSET);
-  return { status: 'patched', buffer: data };
+
+  let yv12;
+  const ctxOk = YV12_PATCHES.every((p) => at(p.offset - p.before.length, p.before) && at(p.offset + p.buggy.length, p.after));
+  if (!ctxOk) yv12 = 'unknown';
+  else if (YV12_PATCHES.every((p) => at(p.offset, p.fixed))) yv12 = 'already';
+  else if (YV12_PATCHES.every((p) => at(p.offset, p.buggy) || at(p.offset, p.fixed))) {
+    for (const p of YV12_PATCHES) p.fixed.copy(data, p.offset);
+    yv12 = 'patched';
+  } else yv12 = 'unknown';
+
+  let status;
+  if (!at(OFFSET - BEFORE.length, BEFORE) || !at(OFFSET + 2, AFTER)) status = 'unknown';
+  else if (at(OFFSET, FIXED)) status = 'already';
+  else if (!at(OFFSET, BUGGY)) status = 'unknown';
+  else {
+    FIXED.copy(data, OFFSET);
+    status = 'patched';
+  }
+  if (status === 'unknown') return { status, buffer: Buffer.from(input), yv12: 'unknown' };
+  if (status === 'already' && yv12 === 'patched') status = 'patched';
+  return { status, buffer: data, yv12 };
 }
 
 async function integrate(containerId, ctx = {}, {
@@ -78,10 +136,10 @@ async function integrate(containerId, ctx = {}, {
     // 1. Mesa's EGL does not offer 10-bit configurations (the init script).
     await put(rcSource, RC_TARGET);
     log(`installed ${RC_TARGET} in ${containerId} (Mesa's EGL will not offer 10-bit configurations)`);
-    // 2. the safety net: the 2-byte patch.
+    // 2. the safety net for 10-bit buffers, and the YV12 video layout (see patchGralloc).
     await out(TARGET, file);
     const mode = fs.statSync(file).mode & 0o777;
-    const { status, buffer } = patchGralloc(fs.readFileSync(file));
+    const { status, buffer, yv12 } = patchGralloc(fs.readFileSync(file));
     if (status === 'already') { log(`${TARGET} of ${containerId} already has the fix`); return; }
     if (status === 'unknown') {
       warn(`${TARGET} of ${containerId} is not the version this fix was written for: left as it is (an app asking for a 10-bit buffer can still restart Android)`);
@@ -90,12 +148,24 @@ async function integrate(containerId, ctx = {}, {
     fs.writeFileSync(file, buffer);
     fs.chmodSync(file, mode);
     await put(file, TARGET);
-    log(`patched ${TARGET} of ${containerId} (2 bytes at 0x${OFFSET.toString(16)})`);
+    log(`patched ${TARGET} of ${containerId} (10-bit fix${yv12 === 'patched' || yv12 === 'already' ? ' + YV12 video layout' : '; YV12 video layout NOT recognised, left as it was'})`);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
 }
 
+// 1.0.0-rc.5: before every start/restart too, not only at creation (stage 4), so an instance created
+// before a fix was added to this file gets it on its next start. Idempotent (an already patched file
+// is left alone) and it never fails the start: without it the instance runs as it did before.
+async function ensure(instance, requiredModuleIds, deps = {}) {
+  if (!instance || !instance.containerId || !(requiredModuleIds || []).includes('redroid-gralloc-fix')) return;
+  try {
+    await integrate(instance.containerId, {}, deps);
+  } catch (e) {
+    warn(`could not check ${TARGET} of "${instance.name}" before its start: ${e.message}`);
+  }
+}
+
 module.exports = {
-  integrate, patchGralloc, TARGET, OFFSET, GPU_VENDORS, RC_TARGET, RC_SOURCE,
+  integrate, ensure, patchGralloc, TARGET, OFFSET, YV12_PATCHES, GPU_VENDORS, RC_TARGET, RC_SOURCE,
 };

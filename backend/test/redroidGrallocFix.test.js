@@ -55,6 +55,59 @@ test('integrate installs the init script, then copies the file out, patches it a
   assert.deepStrictEqual(calls, [['in', fix.RC_TARGET], ['out', fix.TARGET], ['in', fix.TARGET]]);
 });
 
+// A file with the bytes around the 10-bit change AND around both parts of the YV12 change.
+function fakeGrallocWithYv12({ yv12 = 'buggy', rgb10 = '31c9' } = {}) {
+  const buf = fakeGralloc(rgb10);
+  for (const p of fix.YV12_PATCHES) {
+    p.before.copy(buf, p.offset - p.before.length);
+    (yv12 === 'fixed' ? p.fixed : p.buggy).copy(buf, p.offset);
+    p.after.copy(buf, p.offset + p.buggy.length);
+  }
+  return buf;
+}
+
+test('YV12: both parts are patched together, and only those bytes change', () => {
+  const src = fakeGrallocWithYv12({ rgb10: 'b104' });
+  const r = fix.patchGralloc(src);
+  assert.strictEqual(r.yv12, 'patched');
+  assert.strictEqual(r.status, 'patched', 'a file with only the 10-bit fix still needs copying back');
+  for (const p of fix.YV12_PATCHES) assert.ok(r.buffer.subarray(p.offset, p.offset + p.fixed.length).equals(p.fixed));
+  const changed = [...r.buffer].map((b, i) => (b !== src[i] ? i : -1)).filter((i) => i >= 0);
+  for (const i of changed) {
+    assert.ok(fix.YV12_PATCHES.some((p) => i >= p.offset && i < p.offset + p.fixed.length), `byte 0x${i.toString(16)} is outside the patch`);
+  }
+});
+
+test('YV12: an already patched file is left alone', () => {
+  const r = fix.patchGralloc(fakeGrallocWithYv12({ yv12: 'fixed', rgb10: 'b104' }));
+  assert.strictEqual(r.status, 'already');
+  assert.strictEqual(r.yv12, 'already');
+});
+
+test('YV12: if one part is not recognised, neither is applied (the 10-bit fix still is)', () => {
+  const src = fakeGrallocWithYv12();
+  const p = fix.YV12_PATCHES[1];
+  src[p.offset + p.buggy.length] ^= 0xff; // the bytes after the 1-byte change differ
+  const r = fix.patchGralloc(src);
+  assert.strictEqual(r.yv12, 'unknown');
+  assert.strictEqual(r.status, 'patched');
+  const first = fix.YV12_PATCHES[0];
+  assert.ok(r.buffer.subarray(first.offset, first.offset + first.buggy.length).equals(first.buggy));
+});
+
+test('YV12: the replacement has the same length as the code it replaces', () => {
+  for (const p of fix.YV12_PATCHES) assert.strictEqual(p.fixed.length, p.buggy.length);
+});
+
+test('ensure runs only for instances that use the module, and never throws', async () => {
+  let ran = 0;
+  const deps = { gpuVendor: 'amd', copyIn: async () => { ran++; }, copyOut: async () => { throw new Error('boom'); } };
+  await fix.ensure({ name: 'x', containerId: 'c' }, ['hwenc'], deps);
+  assert.strictEqual(ran, 0);
+  await fix.ensure({ name: 'x', containerId: 'c' }, ['redroid-gralloc-fix'], deps);
+  assert.strictEqual(ran, 1, 'it got as far as the init script before the copy failed');
+});
+
 test('the init script sets the Mesa option that stops EGL from offering 10-bit configurations', () => {
   const rc = fs.readFileSync(fix.RC_SOURCE, 'utf8');
   assert.match(rc, /^on early-init$/m);
