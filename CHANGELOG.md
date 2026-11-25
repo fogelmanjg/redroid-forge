@@ -27,6 +27,44 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
 
 ## [Unreleased]
 
+## [1.0.0-rc.5] - 2026-11-25
+
+### Fixed
+
+- **A live CPU change reaches Android right away.** Changing a running instance's CPUs limited it
+  at once, but Android kept counting the old CPUs until the next restart. The forge now rewrites
+  the CPU list Android reads in place, so the new count shows up immediately; apps already open
+  pick it up when reopened. An instance booted without the CPU fix gets a prompt offering a
+  restart instead.
+- **"Restart suggested" note after taking cores away.** When a live CPU change removes cores a
+  running instance already had (even if others are added), the Resources panel says so before
+  applying, and the instance shows a non-blocking "↻ Restart suggested" note until its next start:
+  apps opened before keep thread pools sized for the old cores.
+- **No live preview capture loop for a stopped instance.** With the preview turned on for an
+  instance that was off, the page reopened the preview on every list refresh, and each time the
+  backend tried `adb screencap` 3 times before giving up. On prod that was one "device not found"
+  error every ~1.5 s, all day. The backend now refuses the preview right away (409) unless the
+  container is running, and the "complete" view only opens it for a running instance. The toggle
+  stays on, so the preview comes back by itself once the instance is started.
+- **An Android that restarts on its own gets the whole instance restarted.** When Android's
+  system_server dies inside a running container (seen with a video ad crashing surfaceflinger),
+  Android restarts every app but the container keeps running, so what the forge set up at start
+  stays half broken: the internal WiFi never came back and the instance was left with no internet.
+  The forge now notices it (system_server's pid changes within the same container start) and
+  restarts the instance in full, then shows a "⟲ Restarted automatically" note on it for a day. An
+  instance that keeps crashing is restarted at most 3 times an hour.
+- **Video no longer brings Android down on AMD.** redroid's gralloc lays out YV12 video buffers
+  with row pitches AMD's driver cannot import (luma = the image width, chroma = half of it), so for
+  nearly every video size Mesa could not create the image and surfaceflinger aborted, restarting
+  the whole of Android -- seen with video ads in games (Horde Rush, herotale) and, inside the game
+  only, in PvZ2. The `redroid-gralloc-fix` module now also patches that layout: YV12 buffers are
+  allocated, imported by other processes and described with a row pitch that is a multiple of 512
+  bytes. Checked on the host GPU with every failing size, and inside Android with test videos
+  (720×1280, 1280×720, 640×360, 768×432, 1920×1080): no crash and the right colours across the
+  whole frame (a first version that skipped the import side left a striped right edge). The module now runs before every start
+  and restart too, so existing instances get it on their next start. Its contract changed
+  (version 4): accept it again before starting instances that use it.
+
 ## [1.0.0-rc.4] - 2026-11-24
 
 ### Fixed
