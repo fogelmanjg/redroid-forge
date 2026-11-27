@@ -91,9 +91,10 @@ const YV12_PATCHES = [
 function log(msg) { console.log(`[redroid-gralloc-fix] ${msg}`); }
 function warn(msg) { console.warn(`[redroid-gralloc-fix] ${msg}`); }
 
-// Pure. -> { status: 'patched'|'already'|'unknown', buffer, yv12: 'patched'|'already'|'unknown' }
-// (the input buffer is never modified). `status` keeps its meaning (the 10-bit patch, which the doctor
-// checks); `yv12` is the video patch, applied only when every one of its parts is recognised.
+// Pure. -> { status, yv12, changed, buffer }   (the input buffer is never modified)
+// `status` ('patched'|'already'|'unknown') is ONLY the 10-bit patch, as before -- the doctor reads it.
+// `yv12` (same values) is the video patch, applied only when every one of its parts is recognised.
+// `changed`: whether `buffer` differs from the input, i.e. whether it has to be copied back.
 function patchGralloc(input) {
   const data = Buffer.from(input);
   const at = (from, expected) => data.length >= from + expected.length && data.subarray(from, from + expected.length).equals(expected);
@@ -115,9 +116,8 @@ function patchGralloc(input) {
     FIXED.copy(data, OFFSET);
     status = 'patched';
   }
-  if (status === 'unknown') return { status, buffer: Buffer.from(input), yv12: 'unknown' };
-  if (status === 'already' && yv12 === 'patched') status = 'patched';
-  return { status, buffer: data, yv12 };
+  if (status === 'unknown') return { status, buffer: Buffer.from(input), yv12: 'unknown', changed: false };
+  return { status, buffer: data, yv12, changed: status === 'patched' || yv12 === 'patched' };
 }
 
 async function integrate(containerId, ctx = {}, {
@@ -139,8 +139,8 @@ async function integrate(containerId, ctx = {}, {
     // 2. the safety net for 10-bit buffers, and the YV12 video layout (see patchGralloc).
     await out(TARGET, file);
     const mode = fs.statSync(file).mode & 0o777;
-    const { status, buffer, yv12 } = patchGralloc(fs.readFileSync(file));
-    if (status === 'already') { log(`${TARGET} of ${containerId} already has the fix`); return; }
+    const { status, buffer, yv12, changed } = patchGralloc(fs.readFileSync(file));
+    if (status === 'already' && !changed) { log(`${TARGET} of ${containerId} already has the fix`); return; }
     if (status === 'unknown') {
       warn(`${TARGET} of ${containerId} is not the version this fix was written for: left as it is (an app asking for a 10-bit buffer can still restart Android)`);
       return;

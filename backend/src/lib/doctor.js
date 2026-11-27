@@ -632,11 +632,15 @@ async function checkGrallocFix({ readFile = runtime.readFile, vendorOf = hwAccel
   const buggy = [];
   const partial = []; // patched, but Mesa's EGL still offers 10-bit configurations: an app that uses one draws a garbled picture
   const unknown = [];
+  const videoMissing = []; // 1.0.0-rc.5: the YV12 video layout patch, applied on the next start/restart
+  const videoUnknown = [];
   let fixed = 0;
   for (const i of instances) {
     try {
       // eslint-disable-next-line no-await-in-loop
-      const { status } = fix.patchGralloc(await readFile(i.containerId, fix.TARGET));
+      const { status, yv12 } = fix.patchGralloc(await readFile(i.containerId, fix.TARGET));
+      if (yv12 === 'patched') videoMissing.push(i.name); // "it would be patched" = not applied yet
+      else if (yv12 === 'unknown') videoUnknown.push(i.name);
       if (status === 'patched') buggy.push(i.name); // "it would be patched" = it still has the bug
       else if (status === 'already') {
         // eslint-disable-next-line no-await-in-loop
@@ -647,6 +651,7 @@ async function checkGrallocFix({ readFile = runtime.readFile, vendorOf = hwAccel
       unknown.push(i.name);
     }
   }
+  const results = [];
   if (buggy.length === 0) {
     const notes = [];
     if (partial.length) {
@@ -655,20 +660,36 @@ async function checkGrallocFix({ readFile = runtime.readFile, vendorOf = hwAccel
     if (unknown.length) {
       notes.push(`${unknown.length} could not be checked or carry another version of the file (${unknown.slice(0, 4).join(', ')}): an app asking for a 10-bit buffer could still restart Android there.`);
     }
-    return [{
+    results.push({
       id,
       label,
       status: notes.length ? 'warn' : 'ok',
       detail: `${fixed} instance(s) have the workaround.${notes.length ? ` ${notes.join(' ')}` : ''}`,
-    }];
-  }
-  return [{
+    });
+  } else results.push({
     id,
     label,
     status: 'warn',
     detail: `${buggy.length} instance(s) still have the redroid bug (${buggy.slice(0, 6).join(', ')}${buggy.length > 6 ? ', ...' : ''}): when an app asks for a 10-bit buffer (RGBA_1010102, P010: Unity 6 games, benchmarks, HDR) the graphics allocator dies with SIGFPE and the whole of Android restarts inside the container. It is a known bug of redroid, reported at https://github.com/remote-android/redroid-doc/issues/930.`,
-    fix: 'Create the instance again: the redroid-gralloc-fix module (bound to the official image) applies the workaround to its copy of gralloc.gbm.so when it is created. An instance that already exists can be patched in place while it is stopped, with the same 2-byte change (see backend/src/modules/redroid-gralloc-fix/README.md).',
-  }];
+    fix: 'Restart the instance: the redroid-gralloc-fix module patches its copy of gralloc.gbm.so before every start and restart (accept its current contract first if the Modules page asks for it).',
+  });
+
+  const videoLabel = 'Known redroid bug: video (YV12) crashes Android or shows stripes';
+  const videoNotes = [];
+  if (videoMissing.length) {
+    videoNotes.push(`${videoMissing.length} instance(s) do not have the video fix yet (${videoMissing.slice(0, 6).join(', ')}${videoMissing.length > 6 ? ', ...' : ''}): a video in an app or an ad can still restart Android there. It is applied on the next restart.`);
+  }
+  if (videoUnknown.length) {
+    videoNotes.push(`${videoUnknown.length} carry a version of the file the video fix does not recognise (${videoUnknown.slice(0, 4).join(', ')}): left as it is.`);
+  }
+  results.push({
+    id: 'redroid-gralloc-fix-video',
+    label: videoLabel,
+    status: videoNotes.length ? 'warn' : 'ok',
+    detail: videoNotes.length ? videoNotes.join(' ') : `All ${instances.length} instance(s) have the video fix.`,
+    ...(videoMissing.length ? { fix: 'Restart those instances (accept the redroid-gralloc-fix contract on the Modules page first if it asks for it).' } : {}),
+  });
+  return results;
 }
 
 // Known-combinations database (docs/KNOWN-COMBINATIONS.md). Informative: never

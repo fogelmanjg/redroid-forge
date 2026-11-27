@@ -70,7 +70,8 @@ test('YV12: both parts are patched together, and only those bytes change', () =>
   const src = fakeGrallocWithYv12({ rgb10: 'b104' });
   const r = fix.patchGralloc(src);
   assert.strictEqual(r.yv12, 'patched');
-  assert.strictEqual(r.status, 'patched', 'a file with only the 10-bit fix still needs copying back');
+  assert.strictEqual(r.status, 'already', 'status is only the 10-bit patch');
+  assert.strictEqual(r.changed, true, 'a file with only the 10-bit fix still needs copying back');
   for (const p of fix.YV12_PATCHES) assert.ok(r.buffer.subarray(p.offset, p.offset + p.fixed.length).equals(p.fixed));
   const changed = [...r.buffer].map((b, i) => (b !== src[i] ? i : -1)).filter((i) => i >= 0);
   for (const i of changed) {
@@ -216,4 +217,22 @@ test('doctor: an instance with only the 2-byte patch (no init script) is a warni
   assert.strictEqual(r[0].status, 'warn');
   assert.match(r[0].detail, /half/);
   assert.match(r[0].detail, /garbled picture/);
+});
+
+test('doctor: an instance with the 10-bit fix but not the video fix is NOT reported as having the 10-bit bug', async () => {
+  const r = await checkGrallocFix({
+    vendorOf: async () => 'amd',
+    list: () => [{ name: 'rc4-era', containerId: 'old' }, { name: 'fresh', containerId: 'new' }],
+    readFile: async (id, p) => {
+      if (p === fix.RC_TARGET) return Buffer.from('rc');
+      return fakeGrallocWithYv12({ rgb10: 'b104', yv12: id === 'new' ? 'fixed' : 'buggy' });
+    },
+  });
+  const tenBit = r.find((x) => x.id === 'redroid-gralloc-fix');
+  const video = r.find((x) => x.id === 'redroid-gralloc-fix-video');
+  assert.strictEqual(tenBit.status, 'ok');
+  assert.strictEqual(video.status, 'warn');
+  assert.match(video.detail, /rc4-era/);
+  assert.doesNotMatch(video.detail, /fresh/);
+  assert.match(video.detail, /next restart/);
 });

@@ -17,6 +17,9 @@
 // Guard rails: an instance that keeps crashing is not restarted forever -- after MAX_RESTARTS within
 // WINDOW_MS this gives up on it (logged, flagged) until its next start. A failing probe (container
 // gone, exec error) never counts as a restart.
+//
+// Before restarting (and also when giving up), beforeRestart saves the logcat and tombstones
+// (crashLogs.js): the container restart would otherwise wipe the only record of the cause.
 
 const { execFile } = require('child_process');
 
@@ -46,6 +49,8 @@ function createWatch({
   listRunning, // async () => [{ instance, startedAt }]: instances whose container is running right now
   restart, // async (instance) => void: the same full restart the UI does
   onRestarted = () => {}, // (instance, at) => void: record it on the instance
+  beforeRestart = async () => {}, // async (instance, info) => void: save the logs while they still exist
+  onBaseline = async () => {}, // async (instance) => void: Android finished booting in a new container start
   probe = defaultProbe,
   now = () => Date.now(),
   log = (m) => console.log(`[androidRestartWatch] ${m}`),
@@ -69,12 +74,17 @@ function createWatch({
     const prev = seen.get(instance.containerId);
     if (!prev || prev.startedAt !== startedAt) {
       seen.set(instance.containerId, { startedAt, pid: state.pid });
+      try { await onBaseline(instance); } catch { /* best effort */ }
       return;
     }
     if (prev.pid === state.pid) return;
 
     const t = now();
     const recent = (history.get(instance.id) || []).filter((x) => t - x < WINDOW_MS);
+    const info = { 'system_server pid': `${prev.pid} -> ${state.pid}`, 'automatic restarts in the last hour': recent.length };
+    // The logs are saved for every crash seen, also when the instance is then left alone.
+    busy.add(instance.id);
+    try { await beforeRestart(instance, info); } catch { /* never blocks the restart */ } finally { busy.delete(instance.id); }
     if (recent.length >= MAX_RESTARTS) {
       if (!prev.gaveUp) log(`"${instance.name}": Android restarted inside the container again, but it was already restarted ${recent.length} times in the last hour -- leaving it alone until its next start`);
       seen.set(instance.containerId, { ...prev, pid: state.pid, gaveUp: true });

@@ -6,6 +6,7 @@ const meminfoFix = require('../lib/meminfoFix');
 const cpuFix = require('../lib/cpuFix');
 const psiFix = require('../lib/psiFix');
 const androidRestartWatch = require('../lib/androidRestartWatch');
+const crashLogs = require('../lib/crashLogs');
 const grallocFix = require('../modules/redroid-gralloc-fix/integrate');
 const androidIdentity = require('../lib/androidIdentity');
 const deviceProfile = require('../lib/deviceProfile');
@@ -1295,6 +1296,7 @@ router.delete('/:id', async (req, res) => {
     await runtime.remove(instance.containerId, { force: true });
     if (instance.volumeName) await runtime.removeVolume(instance.volumeName);
     meminfoFix.cleanup(instance.volumeName);
+    crashLogs.cleanup(instance.id);
     store.remove(instance.id);
     res.status(204).end();
   } catch (e) {
@@ -1429,6 +1431,8 @@ function startAndroidRestartWatch() {
       return out;
     },
     restart: (instance) => restartInstanceRuntime(store.get(instance.id) || instance),
+    beforeRestart: (instance, info) => crashLogs.capture(instance, info),
+    onBaseline: (instance) => crashLogs.setBufferSize(instance),
     onRestarted(instance, at) {
       const current = store.get(instance.id);
       if (current) store.upsert({ ...current, androidRestartedAt: at });

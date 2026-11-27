@@ -27,6 +27,32 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
 
 ## [Unreleased]
 
+## [1.0.0-rc.6] - 2026-11-27
+
+### Added
+
+- **`docs/UPSTREAM.md`: the fixes offered back to redroid.** A table of each forge workaround, the
+  redroid bug behind it, the upstream issue or PR and its status, plus how a fix is offered and
+  when a workaround is retired.
+
+### Changed
+
+- **The logs of an Android crash are kept.** When Android restarts on its own inside an instance,
+  the automatic restart now first saves the logcat (every buffer, gzipped) and the recent
+  tombstones to `backend/data/crash-logs/<instance id>/<time>/`. Before, the restart wiped the only
+  record of the cause. A capture is removed only when it is older than a day and not among the
+  instance's 10 newest, so a chain of crashes keeps the first one. Android's log buffers are also
+  raised to 16 MB after each boot, so the minutes before a crash are still there. Deleting an
+  instance deletes its captures.
+
+### Fixed
+
+- **Doctor: instances without the new video fix were reported as having the 10-bit bug.** Since
+  1.0.0-rc.5 the gralloc check counted an instance that only lacked the YV12 video patch as one
+  still carrying the 10-bit crash, with the 10-bit explanation. The two are now separate lines:
+  the 10-bit one as before, and a new "video (YV12)" one that lists the instances still waiting for
+  the video fix and says it is applied on their next restart.
+
 ## [1.0.0-rc.5] - 2026-11-25
 
 ### Fixed

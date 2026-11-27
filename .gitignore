@@ -17,4 +17,5 @@ backend/data/backups/
 backend/data/meminfo-fix/
 backend/data/logs/
 backend/data/fwknop/
+backend/data/crash-logs/
 __pycache__/
