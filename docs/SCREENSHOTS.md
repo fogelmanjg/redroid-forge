@@ -2,9 +2,10 @@
 
 **Languages:** English | [Español](SCREENSHOTS.es.md)
 
-A few UI details are blurred/redacted in these images (part of an IP address or an account ID,
-keeping just enough of it visible to tell what it is) — that's this machine's own data, not
-something the app does.
+Taken on 1.0.0-rc.6 (28/11/2026). Some of this machine's own data is masked in these images:
+the domain reads `example.org`, IP addresses and Android IDs keep only their last part
+(`x.x.x.50`, `••••9064`), and e-mail addresses keep only their first letter. The app itself does
+not do this.
 
 The header has three groups — **Instances**, **Modules** and **Settings** — with the open group's
 tabs in a row below, and a menu on the right with the user, the version and update check, Help, the
@@ -54,10 +55,19 @@ interfaces the app itself listens on (that's in Settings → General, below).
 
 <img src="screenshots/configure-instance.png" width="800" alt="Configure instance — network exposure">
 
+## Resources (CPU and RAM, live)
+
+Which host cores an instance may use and its RAM limit (⚙ → Resources), applied to the running
+instance without a restart. The panel warns when a core is shared with other instances. RAM can be
+raised live; lowering it restarts the instance.
+
+<img src="screenshots/resources.png" width="800" alt="Resources — CPU cores and RAM limit">
+
 ## Port-knocking (open access)
 
 A time-limited, IP-scoped access window for an instance's ADB port — opened from an already
-logged-in session, never by the connecting device itself.
+logged-in session, never by the connecting device itself. It shows only on an instance that requires
+a knock (⚙ → Configure → Port-knocking).
 
 <img src="screenshots/open-access.png" width="800" alt="Open access — port-knocking panel">
 
@@ -90,13 +100,19 @@ shared hardware encoder backend, the ADB port range, and optional quotas. Admin 
 Test the local launcher once in this browser, then turn the 📲 button on or off (see
 [`HOWTO.md`](HOWTO.md#open-an-instance-in-scrcpy-on-your-computer)).
 
+<img src="screenshots/local-scrcpy.png" width="800" alt="Local scrcpy">
+
 ### Doctor
 
 Host diagnostics, worst status first (red, then yellow, then green) — each check comes with the
 exact command to fix it, never runs anything on its own. A non-admin user sees only the checks about
 their own instances.
 
-<img src="screenshots/doctor.png" width="800" alt="Doctor">
+<img src="screenshots/doctor.png" width="800" alt="Doctor, admin">
+
+The same tab for a viewer, limited to their own instances:
+
+<img src="screenshots/viewer-doctor.png" width="800" alt="Doctor, viewer">
 
 ### Identities / My account
 
@@ -105,3 +121,20 @@ be linked to a provider identity, and each linked identity can be managed indepe
 user sees **My account** instead, to link or unlink their own SSO login.
 
 <img src="screenshots/identities.png" width="800" alt="Identities">
+<img src="screenshots/viewer-my-account.png" width="800" alt="My account">
+
+## What each role sees
+
+There are three roles. An **admin** sees and manages every instance and every setting (the images
+above). The other two roles see only the instances they own: an instance can have several owners
+(⚙ → Owners).
+
+**Operator:** can create instances within their quota, and on their own instances do everything,
+configuration and deletion included.
+
+<img src="screenshots/operator-instances.png" width="800" alt="Instances seen by an operator">
+
+**Viewer:** can only see, start, stop and restart their own instances. There is no "New instance",
+and the Settings group shows only Local scrcpy, Doctor and My account.
+
+<img src="screenshots/viewer-instances.png" width="800" alt="Instances seen by a viewer">

@@ -2,9 +2,9 @@
 
 **Idiomas:** [English](SCREENSHOTS.md) | Español
 
-Algunos datos de la interfaz están borroneados en estas imágenes (parte de una dirección IP o de un
-ID de cuenta, dejando visible lo justo para saber qué es) — son datos de esta máquina, no algo que
-haga la app.
+Tomadas en 1.0.0-rc.6 (28/11/2026). Algunos datos de esta máquina están enmascarados en las
+imágenes: el dominio dice `example.org`, las direcciones IP y los Android ID muestran solo su última
+parte (`x.x.x.50`, `••••9064`) y los correos solo su primera letra. La app en sí no hace esto.
 
 El encabezado tiene tres grupos — **Instancias**, **Módulos** y **Configuración** — con las pestañas
 del grupo abierto en una fila debajo, y un menú a la derecha con el usuario, la versión y el chequeo
@@ -57,10 +57,19 @@ interfaces escucha la app en sí (eso está en Configuración → General, más 
 
 <img src="screenshots/configure-instance.png" width="800" alt="Configurar instancia — exposición de red">
 
+## Recursos (CPU y RAM, en vivo)
+
+Qué núcleos del host puede usar una instancia y su límite de RAM (⚙ → Recursos), aplicado a la
+instancia en marcha sin reiniciarla. El panel avisa cuando un núcleo se comparte con otras
+instancias. La RAM se puede subir en vivo; bajarla reinicia la instancia.
+
+<img src="screenshots/resources.png" width="800" alt="Recursos — núcleos de CPU y límite de RAM">
+
 ## Port-knocking (acceso abierto)
 
 Una ventana de acceso con tiempo y IP limitados al puerto ADB de una instancia — se abre desde una
-sesión ya logueada, nunca desde el dispositivo que se conecta.
+sesión ya logueada, nunca desde el dispositivo que se conecta. Aparece solo en una instancia que
+exige knock (⚙ → Configurar → Port-knocking).
 
 <img src="screenshots/open-access.png" width="800" alt="Acceso abierto — panel de port-knocking">
 
@@ -95,13 +104,19 @@ y cuotas opcionales. Solo admin.
 Se prueba el lanzador local una vez en este navegador y después se activa o desactiva el botón 📲
 (ver [`HOWTO.es.md`](HOWTO.es.md#abrir-una-instancia-en-scrcpy-en-tu-computadora)).
 
+<img src="screenshots/local-scrcpy.png" width="800" alt="scrcpy local">
+
 ### Doctor
 
 Diagnóstico del host, el peor estado primero (rojo, después amarillo, después verde) — cada chequeo
 trae el comando exacto para arreglarlo, nunca ejecuta nada solo. Un usuario que no es admin ve solo
 los chequeos de sus propias instancias.
 
-<img src="screenshots/doctor.png" width="800" alt="Doctor">
+<img src="screenshots/doctor.png" width="800" alt="Doctor, admin">
+
+La misma pestaña para un viewer, limitada a sus propias instancias:
+
+<img src="screenshots/viewer-doctor.png" width="800" alt="Doctor, viewer">
 
 ### Identidades / Mi cuenta
 
@@ -111,3 +126,20 @@ separado. Cualquier otro usuario ve **Mi cuenta** en su lugar, para vincular o d
 login SSO.
 
 <img src="screenshots/identities.png" width="800" alt="Identidades">
+<img src="screenshots/viewer-my-account.png" width="800" alt="Mi cuenta">
+
+## Qué ve cada rol
+
+Hay tres roles. Un **admin** ve y maneja todas las instancias y toda la configuración (las imágenes
+de arriba). Los otros dos roles ven solo las instancias de las que son dueños: una instancia puede
+tener varios dueños (⚙ → Dueños).
+
+**Operador:** puede crear instancias dentro de su cuota y, en sus propias instancias, hacer todo,
+incluso configurarlas y borrarlas.
+
+<img src="screenshots/operator-instances.png" width="800" alt="Instancias vistas por un operador">
+
+**Viewer:** solo puede ver, arrancar, detener y reiniciar sus propias instancias. No tiene "Nueva
+instancia", y el grupo Configuración muestra solo scrcpy local, Doctor y Mi cuenta.
+
+<img src="screenshots/viewer-instances.png" width="800" alt="Instancias vistas por un viewer">
