@@ -4,21 +4,22 @@
 a stable specification.
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning follows
-[SemVer](https://semver.org/), with this policy while the project stays pre-1.0 (`0.MINOR.PATCH`):
+[SemVer](https://semver.org/). Since `1.0.0` (02/12/2026) the policy is:
 
-- **MINOR** bump: anything a user can newly do -- a new module, a new API route, a new frontend section.
-  Also any breaking change (SemVer allows those in a MINOR before 1.0), called out with a `⚠ Breaking`
-  bullet so it is never missed just because the version number alone did not say so.
+- **MAJOR** bump: anything that breaks an existing setup -- an instance, a module, a setting, an API
+  route or a `.env` variable that stops working the way it did, or needs a manual step to keep
+  working. The release notes say what breaks and what to do about it.
+- **MINOR** bump: anything a user can newly do -- a new module, a new API route, a new frontend section,
+  a new security layer.
 - **PATCH** bump: bug fixes, internal refactors, tests, docs, UI rewording/reorganizing that adds no new
-  capability.
-- **1.0.0**: reserved for the Phase 10 gate in `docs/ROADMAP.md` ("the project is in a condition to be
-  called beta 0.9") -- not claimed before that milestone is actually reached.
+  capability. Fixing something that already existed but did not work is a PATCH, even when the user
+  could not do it before because of the bug: the limitation was a bug, not a missing design.
 - No third tier between MINOR and PATCH (considered and deliberately rejected, 14/11/2026): once a
   release needs a judgment call on "how big" a fix is, the one unambiguous signal this policy
-  gives (MINOR means something new, full stop) erodes. The MINOR counter climbing well past, say,
-  0.15 before Phase 10's gate is expected and fine -- that counter and the "beta 0.9" label above
-  are independent by that gate's own wording (a maturity description, not a literal version target);
-  there is no reason to keep them in sync.
+  gives (MINOR means something new, full stop) erodes.
+- Before 1.0 (`0.MINOR.PATCH`), breaking changes went into a MINOR bump with a `⚠ Breaking` bullet,
+  and `1.0.0` was reserved for the Phase 10 gate in `docs/ROADMAP.md`. The `1.0.0-beta.N` and
+  `1.0.0-rc.N` pre-releases led up to it.
 - Every tag stays available forever (nothing gets deleted); "stable" means it also has a non-prerelease
   GitHub Release. Given this project already verifies live against a real backend before every commit
   (see git log), most tags qualify by default -- a tag only gets marked as a GitHub pre-release when it is
@@ -26,6 +27,37 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versio
   unfinished checkpoint).
 
 ## [Unreleased]
+
+## [1.0.0] - 2026-12-02
+
+The first stable release. It has the same code as `1.0.0-rc.6`, which ran in production for five
+days before becoming 1.0. Everything since `0.10.0` went through 11 betas and 6 release
+candidates; their entries below have the full detail. This is the summary for someone coming from
+`0.10.x`, or new to the project. Nothing in this cycle breaks an existing setup: upgrading from
+`0.10.x` needs no manual step.
+
+### Highlights
+
+- **Instances recover on their own.** When Android crashes inside an instance (seen with video ads),
+  the forge saves the logs and restarts the whole instance, so WiFi and everything set up at start
+  come back. Video no longer brings Android down on AMD. Apps are no longer killed because the
+  *host* is short of memory. Android sees the instance's own CPUs and RAM, even after a live change.
+- **Fixes for redroid bugs are offered back upstream.** Each one is tracked in `docs/UPSTREAM.md`.
+- **Backups are safer.** They run in the background with progress, can stop and restart the
+  instance for a consistent copy, keep a set number per instance, and belong to the instance's
+  owners. A big backup is no longer cut off after 5 minutes.
+- **Security hardening across the board.** Cross-site requests are refused, login attempts are
+  limited, the login page no longer gives away account names, a role change applies at once, and
+  settings and OIDC secrets are admin only.
+- **Easier to use day to day.** The Instances tab gained a filter, search and order in all three
+  views. You can lock an instance, open it in your desktop scrcpy from the browser (📲, with a test
+  first), rotate the device and move the button bar in the expanded viewer, and set the ADB address
+  shown to clients.
+- **One project instead of several.** The redroid code in `jg-dashboard` was removed and tagged as
+  abandoned (`redroid-legacy-final`), after every instance moved to redroid-forge. That closes
+  Phase 10 of `docs/ROADMAP.md`, the gate this version was reserved for.
+- **Documentation for 1.0.** The README and CONTRIBUTING describe the project after 1.0, the
+  versioning policy now covers MAJOR releases, and the screenshot gallery was retaken on rc.6.
 
 ## [1.0.0-rc.6] - 2026-11-27
 

@@ -12,31 +12,29 @@ A standalone app (frontend + backend in a single container) to manage
 [redroid](https://github.com/remote-android/redroid-doc) instances on any PC that only has Docker,
 without depending on any other infrastructure.
 
-> In the 1.0 release-candidate stage (`1.0.0-rc.N`, after the `1.0.0-beta.N` cycle that started
-> 21/11/2026): only fixes until `1.0.0`. It consolidates several separate projects in one
-> place (`redroid-manager`, `redroid-hwenc`, `redroid-nvidia`, and what currently lives spread
-> across `jg-dashboard`/`plenum-redroid`). See [`docs/REQUIREMENTS.md`](docs/REQUIREMENTS.md) (what
-> and why), [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) (how the pieces fit together — base
-> image, modules, and at which point of an instance's lifecycle each one is touched),
-> [`docs/MODULE-AUTHORING.md`](docs/MODULE-AUTHORING.md) (writing a module — native vs. own vs.
-> user module, the manifest schema, the 7-stage hook contract) and
-> [`docs/ROADMAP.md`](docs/ROADMAP.md) (in what order) and [`CHANGELOG.md`](CHANGELOG.md) (tagged
-> releases, SemVer policy) for the full picture. What exists today covers **Phases 0 through 7, 9
-> and 11** of the roadmap — everything in the Features table below. **The final `1.0.0` is tied to Phase
-> 10's own gate** (securing and removing the legacy code this project replaces, plus writing this
-> exact kind of definitive documentation) — in progress, not a feature requirement; Phase 8
-> (federation: `jg-dashboard`/Plenum becoming `oidc` consumers of this app) is independent and can
-> land before or after 1.0. **The project is in a feature freeze since 16/11/2026, and since the
-> first release candidate (23/11/2026) only fixes and documentation land until 1.0 ships** — see
-> [`CONTRIBUTING.md`](CONTRIBUTING.md).
+> **Version 1.0** (02/12/2026). It replaces several separate projects with one: `redroid-manager`,
+> `redroid-hwenc`, `redroid-nvidia`, and the redroid parts of `jg-dashboard` and `plenum-redroid`,
+> which are now retired. For the full picture:
+> - [`docs/REQUIREMENTS.md`](docs/REQUIREMENTS.md): what it does and why.
+> - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md): how the pieces fit together (base image,
+>   modules, and when each one acts in an instance's lifecycle).
+> - [`docs/MODULE-AUTHORING.md`](docs/MODULE-AUTHORING.md): writing a module (native, own or user
+>   module, the manifest schema, the 7-stage hook contract).
+> - [`docs/ROADMAP.md`](docs/ROADMAP.md): how it got here, phase by phase.
+> - [`CHANGELOG.md`](CHANGELOG.md): what changed in each release, and the versioning policy.
+> - [`docs/UPSTREAM.md`](docs/UPSTREAM.md): the fixes offered back to redroid itself.
+>
+> What comes next is in the issues marked [After 1.0](https://github.com/fogelmanjg/redroid-forge/milestone/1),
+> plus Phase 8 of the roadmap (federation: `jg-dashboard`/Plenum logging in through this app via
+> `oidc`). How to propose a change is in [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
 ## Screenshots
 
 <img src="docs/screenshots/complete-view.png" width="270" alt="Instances tab, Completo view"> <img src="docs/screenshots/viewers.png" width="270" alt="Instances tab, Visores view"> <img src="docs/screenshots/new-instance.png" width="270" alt="New instance dialog">
 
-More in [`docs/SCREENSHOTS.md`](docs/SCREENSHOTS.md) — all three Instances-tab view modes, module
-management, and everything under Settings (General, Local scrcpy, Doctor, Identities), plus
-port-knocking.
+More in [`docs/SCREENSHOTS.md`](docs/SCREENSHOTS.md): the three Instances views, the instance
+panels (Configure, Resources, port-knocking), modules, everything under Settings, and what each role
+(admin, operator, viewer) sees.
 
 ## Features
 
@@ -46,12 +44,14 @@ means validated with evidence on real hardware, not a guarantee.
 
 | | Status | |
 |---|---|---|
-| **Instance lifecycle** | ✅ | Create/start/stop/restart/delete from a web UI. Live CPU/RAM resize (no restart). Resolution/DPI/FPS/GPU-mode changes recreate the container but keep its data. |
+| **Instance lifecycle** | ✅ | Create/start/stop/restart/delete from a web UI. Live CPU/RAM resize (no restart), and Android itself sees the new CPU count and RAM limit. Resolution/DPI/FPS/GPU-mode changes recreate the container but keep its data. |
+| **Recovery from Android crashes** | ✅ | When Android restarts on its own inside an instance (a crash of `system_server`, e.g. from a video ad), the forge saves its logs and restarts the whole instance, so WiFi and everything set up at start come back. At most 3 times an hour. |
+| **Fixes for known redroid bugs** | ✅ | Applied to each instance's own copy of the image, never to the image itself: the gralloc crash on 10-bit formats, video (YV12) crashing Android on AMD, Android seeing the host's CPUs, RAM and memory pressure instead of the container's. Each one is offered back to redroid, see [`docs/UPSTREAM.md`](docs/UPSTREAM.md). |
 | **Hardware video encode** | ✅ AMD · Intel | VA-API, validated on real Polaris/Vega/Iris Xe hardware. "Every instance uses in hardware everything the host's GPU offers" — nothing hidden behind one fixed capability tier. |
 | **Hardware video decode** | ✅ AMD · Intel | H.264/HEVC/VP9/VP8 depending on what the host's GPU actually supports (Doctor shows which). **Not recommended on AMD Polaris at the same time as hwenc** — known driver instability when both run concurrently (see `docs/ROADMAP.md` Phase 2); encode alone is unaffected. |
 | | ✅ NVIDIA | Encode (NVENC) + 3D rendering (`venus3d`, required for `gpuMode: host` to boot at all on NVIDIA — see its own module README) validated end to end on real hardware: GTX 1050 Ti clean, RTX 4060 clean with a rare, transient, self-resolving texture/tiling artifact on a few frames of high-contrast screens (see `redroid-nvidia`'s `DEVLOG.md`, 2026-11-09 entry) — not a blocker in real use. Decode (VA-API) confirmed bit-exact on the GTX 1050 Ti; not yet independently re-run on the RTX 4060 (see `redroid-hwenc`'s own hardware-compatibility table). |
 | **Compatibility database** | ✅ | Signed, versioned, anti-rollback database of which image+module combinations are actually validated. Checked automatically, shown per instance, never blocks — an unvalidated combo still runs, just marked "community". |
-| **Optional modules, with consent** | ✅ | Google Apps/Play Store, ARM translation (arm64 apps on x86), fake WiFi, device profile spoofing, GPU mode — each behind an explicit contract dialog the first time it's used, never silently enabled. |
+| **Optional modules, with consent** | ✅ | Google Apps/Play Store, ARM translation (arm64 apps on x86), Aurora Store, fake WiFi, device profile spoofing, GPU mode — each behind an explicit contract dialog the first time it's used, never silently enabled. |
 | | 📝 planned | Magisk (manifest exists, no real integration yet). |
 | **User-defined watchdogs** | ✅ pilot | Periodic per-instance scripts (pause/resume/status from the UI, no cron to hand-edit) — CIFI (a specific game's reconnection logic) ported and running as the first one; the mechanism is generic for more. |
 | **Backup & restore** | ✅ | Whole-instance backup/restore (tar.gz via a throwaway container) in the background with progress, optionally stopping the instance for a consistent copy, per-instance retention, optional Android ID reset, a warning (never a block) when restoring onto an instance with different modules/GApps version. |
@@ -60,7 +60,7 @@ means validated with evidence on real hardware, not a guarantee.
 | **Doctor** | ✅ | Host diagnostics with the exact command to fix what's missing — it only diagnoses, never runs anything on its own. An admin sees every check; any other user sees only the checks about their own instances, plus a plain "ask your administrator" notice when a host check fails. |
 | **Screen viewing** | ✅ | Bundled web viewer right in the Instances tab — own scrcpy-server protocol client, no third-party viewer embedded. A persistent small live preview per instance, and an opt-in full-screen expanded viewer with real video (H.264)/audio (Opus)/input. Also: a 📲 button that opens an instance in the real desktop scrcpy through a small local launcher (Linux, see [`docs/HOWTO.md`](docs/HOWTO.md)), scrcpy connector scripts (`connect.sh`/`connect.ps1`), and a port for viewing from an Android device itself. |
 | **Federation** | 📝 planned | `jg-dashboard` and Plenum becoming consumers of this app via `oidc`, reusing each host's existing identity provider instead of a separate login. |
-| **Port knocking** | ✅ done | Per-instance, per-interface SPA (`fwknop`) gate for the ADB/scrcpy port, on top of the network controls above -- opened from the UI by an already-authenticated session, never by the connecting device. |
+| **Port knocking** | ✅ | Per-instance, per-interface SPA (`fwknop`) gate for the ADB/scrcpy port, on top of the network controls above -- opened from the UI by an already-authenticated session, never by the connecting device. |
 
 ## Use cases
 
@@ -96,7 +96,7 @@ Images with Google Apps (`hasGapps: true` in the catalog) receive an Android ID 
 as soon as they boot. **If that ID is not registered by hand at
 [google.com/android/uncertified](https://www.google.com/android/uncertified) within 48 hours of
 the first boot, Google blocks GApps access on that instance** — it is an uncertified device
-(redroid + Magisk), and that registration is the way to avoid the block. It is not something the
+(redroid), and that registration is the way to avoid the block. It is not something the
 code can do on its own, it is a human step.
 
 The app helps make sure it does not get overlooked:
@@ -218,7 +218,7 @@ send input):
 Both drive the real `scrcpy-server.jar` this project pushes and launches on the instance itself —
 own protocol client (`backend/src/lib/scrcpy/`), not an embedded third-party viewer. See
 [`docs/ROADMAP.md`](docs/ROADMAP.md)'s Phase 11 for the full design and
-[`CHANGELOG.md`](CHANGELOG.md) (`0.9.0`/`0.9.1`/`0.10.0`, then the `1.0.0-beta` releases) for what shipped when.
+[`CHANGELOG.md`](CHANGELOG.md) (`0.9.0` onwards) for what shipped when.
 
 ## Viewing the screen from another PC (scrcpy) — e.g. a TV with an old laptop
 
@@ -324,9 +324,10 @@ scripts/                 connect.sh / connect.ps1 -- scrcpy connector scripts fo
 docs/                     REQUIREMENTS.md (what and why), ARCHITECTURE.md (how the pieces fit
                           together), MODULE-AUTHORING.md (writing a module), KNOWN-COMBINATIONS.md,
                           ROADMAP.md (in what order), SCRCPY-TIPS.md (client-side troubleshooting),
-                          TROUBLESHOOTING.md (app-side problems) and HOWTO.md (common task recipes)
+                          TROUBLESHOOTING.md (app-side problems), HOWTO.md (common task recipes),
+                          SCREENSHOTS.md (the gallery) and UPSTREAM.md (fixes offered to redroid)
 CHANGELOG.md              tagged releases, SemVer policy (English only, same reasoning as ROADMAP.md)
-CONTRIBUTING.md           how to propose a change, current feature-freeze status, bug report/module checklist
+CONTRIBUTING.md           how to propose a change, what is being merged, bug report/module checklist
 .github/ISSUE_TEMPLATE/   bug report / feature request forms
 ```
 
@@ -344,6 +345,8 @@ replacement or a competitor. Explicit acknowledgement:
   release at image build time (see `Dockerfile`, pinned version), not forked or copied.
   `backend/src/lib/scrcpy/protocol.js` is this project's own client of that server's real wire
   protocol, written against its public source.
+- Where this project works around a bug of redroid itself, the fix is offered back upstream with
+  code and tests on real hardware; [`docs/UPSTREAM.md`](docs/UPSTREAM.md) tracks each one.
 - The logic of `binder.js` and `hwsimWifi.js` is ported from `plenum-redroid`
   (`host-resource-allocator.service.ts` and `fake-wifi-networking.service.ts`), simplified:
   without the coexistence assumptions with `jg-dashboard v1` (fixed port offset, hwsim fallback

@@ -13,32 +13,30 @@ App standalone (frontend + backend en un solo contenedor) para manejar instancia
 [redroid](https://github.com/remote-android/redroid-doc) en cualquier PC que solo tenga Docker,
 sin depender de ninguna otra infraestructura.
 
-> En la etapa de release candidates de la 1.0 (`1.0.0-rc.N`, después del ciclo `1.0.0-beta.N` que
-> arrancó el 21/11/2026): solo arreglos hasta la `1.0.0`. Consolida en un solo lugar varios proyectos
-> separados (`redroid-manager`, `redroid-hwenc`, `redroid-nvidia`, y lo que hoy vive repartido en
-> `jg-dashboard`/`plenum-redroid`). Ver [`docs/REQUIREMENTS.es.md`](docs/REQUIREMENTS.es.md) (qué y por
-> qué), [`docs/ARCHITECTURE.es.md`](docs/ARCHITECTURE.es.md) (cómo encajan las piezas — imagen base,
-> módulos, y en qué momento del ciclo de vida de una instancia se toca cada uno),
-> [`docs/MODULE-AUTHORING.es.md`](docs/MODULE-AUTHORING.es.md) (cómo escribir un módulo — nativo vs.
-> módulo propio vs. módulo de usuario, el schema del manifiesto, el contrato de las 7 etapas) y
-> [`docs/ROADMAP.md`](docs/ROADMAP.md) (en qué orden; solo en inglés) y
-> [`CHANGELOG.md`](CHANGELOG.md) (releases etiquetados, política de versionado; solo en inglés) para
-> el panorama completo. Lo que hay hoy corresponde a las **Fases 0 a 7, 9 y 11** del roadmap — todo
-> lo de la tabla de Features más abajo. **La `1.0.0` final está atada al gate de la propia Fase
-> 10** (asegurar y borrar el código legacy que este proyecto reemplaza, más escribir documentación
-> definitiva como esta) — en curso, no una condición de features; la Fase 8 (federación:
-> `jg-dashboard`/Plenum como clientes `oidc` de esta app) es independiente y puede llegar antes o
-> después de la 1.0. **El proyecto está en feature freeze desde el 16/11/2026, y desde el primer
-> release candidate (23/11/2026) solo entran arreglos y documentación hasta que salga la 1.0** — ver
-> [`CONTRIBUTING.md`](CONTRIBUTING.md) (solo en inglés).
+> **Versión 1.0** (02/12/2026). Reemplaza a varios proyectos separados: `redroid-manager`,
+> `redroid-hwenc`, `redroid-nvidia`, y las partes de redroid de `jg-dashboard` y `plenum-redroid`,
+> que quedaron retiradas. Para el panorama completo:
+> - [`docs/REQUIREMENTS.es.md`](docs/REQUIREMENTS.es.md): qué hace y por qué.
+> - [`docs/ARCHITECTURE.es.md`](docs/ARCHITECTURE.es.md): cómo encajan las piezas (imagen base,
+>   módulos, y en qué momento del ciclo de vida de una instancia actúa cada uno).
+> - [`docs/MODULE-AUTHORING.es.md`](docs/MODULE-AUTHORING.es.md): cómo escribir un módulo (nativo,
+>   propio o de usuario, el schema del manifiesto, el contrato de las 7 etapas).
+> - [`docs/ROADMAP.md`](docs/ROADMAP.md): cómo se llegó hasta acá, fase por fase (solo en inglés).
+> - [`CHANGELOG.md`](CHANGELOG.md): qué cambió en cada release, y la política de versionado (solo en
+>   inglés).
+> - [`docs/UPSTREAM.md`](docs/UPSTREAM.md): los arreglos ofrecidos al propio redroid (solo en inglés).
+>
+> Lo que sigue está en los issues marcados [After 1.0](https://github.com/fogelmanjg/redroid-forge/milestone/1),
+> más la Fase 8 del roadmap (federación: `jg-dashboard`/Plenum entrando a través de esta app vía
+> `oidc`). Cómo proponer un cambio está en [`CONTRIBUTING.md`](CONTRIBUTING.md) (solo en inglés).
 
 ## Capturas de pantalla
 
 <img src="docs/screenshots/complete-view.png" width="270" alt="Pestaña Instancias, vista Completo"> <img src="docs/screenshots/viewers.png" width="270" alt="Pestaña Instancias, vista Visores"> <img src="docs/screenshots/new-instance.png" width="270" alt="Diálogo de nueva instancia">
 
-Más en [`docs/SCREENSHOTS.es.md`](docs/SCREENSHOTS.es.md) — los tres modos de vista de Instancias,
-el manejo de módulos, todo lo de Configuración (General, scrcpy local, Doctor, Identidades) y
-port-knocking.
+Más en [`docs/SCREENSHOTS.es.md`](docs/SCREENSHOTS.es.md): las tres vistas de Instancias, los
+paneles de cada instancia (Configurar, Recursos, port-knocking), los módulos, todo lo de
+Configuración, y qué ve cada rol (admin, operador, viewer).
 
 ## Features
 
@@ -48,12 +46,14 @@ oficial significa validado con evidencia en hardware real, no una garantía.
 
 | | Estado | |
 |---|---|---|
-| **Ciclo de vida de instancias** | ✅ | Crear/arrancar/parar/reiniciar/borrar desde una UI web. Resize de CPU/RAM en vivo (sin restart). Cambios de resolución/DPI/FPS/modo GPU recrean el contenedor pero conservan sus datos. |
+| **Ciclo de vida de instancias** | ✅ | Crear/arrancar/parar/reiniciar/borrar desde una UI web. Resize de CPU/RAM en vivo (sin restart), y Android mismo ve la nueva cantidad de CPU y el nuevo límite de RAM. Cambios de resolución/DPI/FPS/modo GPU recrean el contenedor pero conservan sus datos. |
+| **Recuperación de crashes de Android** | ✅ | Cuando Android se reinicia solo dentro de una instancia (un crash de `system_server`, por ejemplo por un anuncio en video), el forge guarda sus logs y reinicia la instancia completa, así vuelven el WiFi y todo lo que se configura al arrancar. Como mucho 3 veces por hora. |
+| **Arreglos de bugs conocidos de redroid** | ✅ | Aplicados a la copia de la imagen de cada instancia, nunca a la imagen en sí: el crash de gralloc con formatos de 10 bits, el video (YV12) que tiraba Android en AMD, y Android viendo las CPU, la RAM y la presión de memoria del host en vez de las del contenedor. Cada uno se ofrece de vuelta a redroid, ver [`docs/UPSTREAM.md`](docs/UPSTREAM.md) (solo en inglés). |
 | **Encode de video por hardware** | ✅ AMD · Intel | VA-API, validado en hardware real Polaris/Vega/Iris Xe. "Cada instancia usa en hardware todo lo que ofrece la GPU del host" — nada escondido detrás de un tier fijo de capacidad. |
 | **Decode de video por hardware** | ✅ AMD · Intel | H.264/HEVC/VP9/VP8 según lo que realmente soporte la GPU del host (Doctor muestra cuáles). **No recomendado en AMD Polaris al mismo tiempo que hwenc** — inestabilidad de driver conocida cuando corren los dos juntos (ver `docs/ROADMAP.md` Fase 2); encode solo no se ve afectado. |
-| | 🧪 NVIDIA | NVENC/NVDEC existen como prueba del mecanismo (un solo frame intra, sin B-frames) — todavía no para uso real. |
+| | ✅ NVIDIA | Encode (NVENC) + renderizado 3D (`venus3d`, necesario para que `gpuMode: host` arranque en NVIDIA — ver el README del módulo) validados de punta a punta en hardware real: GTX 1050 Ti limpia, RTX 4060 limpia salvo un artefacto de textura/tiling raro, pasajero y que se resuelve solo en algunos cuadros de pantallas de alto contraste (ver el `DEVLOG.md` de `redroid-nvidia`, entrada del 2026-11-09) — no bloquea el uso real. Decode (VA-API) confirmado bit a bit en la GTX 1050 Ti; todavía no se volvió a correr por separado en la RTX 4060 (ver la tabla de compatibilidad de hardware de `redroid-hwenc`). |
 | **Base de combinaciones conocidas** | ✅ | Base firmada, versionada, anti-rollback de qué combinaciones imagen+módulo están realmente validadas. Se chequea sola, se muestra por instancia, nunca bloquea — una combinación no validada igual corre, solo queda marcada "comunidad". |
-| **Módulos opcionales, con consentimiento** | ✅ | Google Apps/Play Store, traducción ARM (apps arm64 en x86), WiFi falso, device profile spoofing, modo GPU — cada uno detrás de un diálogo de contrato explícito la primera vez que se usa, nunca habilitado en silencio. |
+| **Módulos opcionales, con consentimiento** | ✅ | Google Apps/Play Store, traducción ARM (apps arm64 en x86), Aurora Store, WiFi falso, device profile spoofing, modo GPU — cada uno detrás de un diálogo de contrato explícito la primera vez que se usa, nunca habilitado en silencio. |
 | | 📝 planeado | Magisk (el manifest existe, falta la integración real). |
 | **Watchdogs definidos por el usuario** | ✅ piloto | Scripts periódicos por instancia (pause/resume/status desde la UI, sin cron para editar a mano) — CIFI (la lógica de reconexión de un juego puntual) ya portado y corriendo como primer caso; el mecanismo es genérico para sumar más. |
 | **Backup y restore** | ✅ | Backup/restore de toda la instancia (tar.gz vía un contenedor descartable) en segundo plano con progreso, opcionalmente deteniendo la instancia para una copia consistente, retención por instancia, reset opcional del Android ID, un aviso (nunca un bloqueo) al restaurar sobre una instancia con módulos/versión de GApps distinta. |
@@ -62,7 +62,7 @@ oficial significa validado con evidencia en hardware real, no una garantía.
 | **Doctor** | ✅ | Diagnóstico del host con el comando exacto para arreglar lo que falta — solo diagnostica, nunca ejecuta nada solo. Un admin ve todos los chequeos; cualquier otro usuario ve solo los de sus propias instancias, más un aviso de "consultá a tu administrador" cuando falla un chequeo del host. |
 | **Visualización de pantalla** | ✅ | Visor web embebido, en la propia pestaña Instancias — cliente propio del protocolo scrcpy-server, sin visor de terceros embebido. Una vista previa chica y persistente por instancia, y una vista expandida opcional a pantalla completa con video (H.264)/audio (Opus)/input reales. Además: un botón 📲 que abre una instancia en el scrcpy real de escritorio a través de un pequeño lanzador local (Linux, ver [`docs/HOWTO.es.md`](docs/HOWTO.es.md)), scripts de conexión scrcpy (`connect.sh`/`connect.ps1`), y un puerto para ver desde un dispositivo Android mismo. |
 | **Federación** | 📝 planeado | `jg-dashboard` y Plenum pasando a consumir esta app vía `oidc`, reusando el identity provider que cada host ya tiene en vez de un login aparte. |
-| **Port knocking** | ✅ hecho | Gate SPA (`fwknop`) por instancia y por interfaz para el puerto ADB/scrcpy, encima de los controles de red de arriba -- se abre desde la UI por una sesión ya autenticada, nunca por el dispositivo que se conecta. |
+| **Port knocking** | ✅ | Gate SPA (`fwknop`) por instancia y por interfaz para el puerto ADB/scrcpy, encima de los controles de red de arriba -- se abre desde la UI por una sesión ya autenticada, nunca por el dispositivo que se conecta. |
 
 ## Casos de uso
 
@@ -100,7 +100,7 @@ Las imágenes con Google Apps (`hasGapps: true` en el catálogo) reciben un Andr
 Google apenas bootean. **Si ese ID no se registra a mano en
 [google.com/android/uncertified](https://www.google.com/android/uncertified) dentro de las 48hs
 del primer boot, Google bloquea el acceso a GApps en esa instancia** — es un dispositivo no
-certificado (redroid + Magisk), y ese registro es la forma de evitar el bloqueo. No es algo que
+certificado (redroid), y ese registro es la forma de evitar el bloqueo. No es algo que
 el código pueda hacer solo, es un paso humano.
 
 La app ayuda a que no se pase por alto:
@@ -204,7 +204,7 @@ mirar, `start-stop` para mandar input):
 Los dos manejan el `scrcpy-server` real que este proyecto empuja y lanza en la propia instancia —
 cliente propio del protocolo (`backend/src/lib/scrcpy/`), no un visor de terceros embebido. Ver
 la Fase 11 de [`docs/ROADMAP.md`](docs/ROADMAP.md) (solo en inglés) para el diseño completo y
-[`CHANGELOG.md`](CHANGELOG.md) (`0.9.0`/`0.9.1`/`0.10.0`, y después las releases `1.0.0-beta`) para qué salió en cada versión.
+[`CHANGELOG.md`](CHANGELOG.md) (de la `0.9.0` en adelante) para qué salió en cada versión.
 
 ## Ver la pantalla desde otra PC (scrcpy) — ej. una TV con una notebook vieja
 
@@ -309,10 +309,12 @@ scripts/                 connect.sh / connect.ps1 -- scripts de conexión scrcpy
                           (no confundir con backend/scripts/, que es tooling dev/admin)
 docs/                     REQUIREMENTS (qué y por qué), ARCHITECTURE (cómo encajan las
                           piezas), MODULE-AUTHORING (cómo escribir un módulo),
-                          KNOWN-COMBINATIONS, ROADMAP (en qué orden) y SCRCPY-TIPS
-                          (troubleshooting del lado cliente)
+                          KNOWN-COMBINATIONS, ROADMAP (en qué orden), SCRCPY-TIPS
+                          (troubleshooting del lado cliente), TROUBLESHOOTING (problemas de la
+                          app), HOWTO (recetas), SCREENSHOTS (la galería) y UPSTREAM (arreglos
+                          ofrecidos a redroid)
 CHANGELOG.md              releases etiquetados, política de versionado (solo en inglés, igual que ROADMAP)
-CONTRIBUTING.md           cómo proponer un cambio, estado del feature freeze, checklist de bugs/módulos (solo en inglés)
+CONTRIBUTING.md           cómo proponer un cambio, qué se está mergeando, checklist de bugs/módulos (solo en inglés)
 .github/ISSUE_TEMPLATE/   formularios de bug report / feature request
 ```
 

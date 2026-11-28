@@ -4,20 +4,16 @@ This project's official language is English (see `README.md`). Keep that in mind
 and commit messages — Spanish is fine for an informal report, but a PR's own description/commit
 message should be in English, same as the rest of the codebase and docs.
 
-## Current status: release candidate, fixes only (since 23/11/2026)
+## Current status: 1.0 released, open again (since 02/12/2026)
 
-**What is being merged right now: bug fixes, performance fixes and documentation.** What waits:
-new features, big or small. The project is at its `1.0.0` release candidates (`1.0.0-rc.N`, after
-a beta cycle that started 21/11/2026; the feature freeze on big features dates from 16/11/2026) —
-see `docs/ROADMAP.md`'s Phase 10 for exactly what that
-means (it is a cleanup/documentation gate, not a feature-completeness one) and `CHANGELOG.md`'s
-versioning policy for how `1.0.0` is decided. A new module, a new subsystem, a whole new
-frontend section — anything that would be a MINOR bump under that policy — will not be merged until
-the freeze lifts, no matter how good the idea is. Feel free to open an issue describing it anyway
-(see "Proposing a feature" below) so it is not lost — it will just wait.
+**Everything is open again: bug fixes, documentation, and new features.** Since `1.0.0` the
+project follows [SemVer](https://semver.org/) in full (see the versioning policy in
+`CHANGELOG.md`): fixes are PATCH releases, a new capability is a MINOR release, and anything that
+breaks an existing setup is a MAJOR release, called out as such.
 
-This also means: if you are looking for a first contribution, a bug fix or a docs fix is the best
-way in right now.
+What is planned next is in the issues of the
+[After 1.0](https://github.com/fogelmanjg/redroid-forge/milestone/1) milestone. Picking one of those
+is a good way in. So is a bug fix or a docs fix, as always.
 
 ## Before opening a PR
 
@@ -51,9 +47,9 @@ way in right now.
 Open an issue (there is a template for it). Explain the use case, not just the mechanism — a lot
 of this project's own design decisions came from a concrete real case (a specific game, a specific
 GPU, a specific failure) rather than a hypothetical one, and that is the kind of detail that
-actually moves a design discussion forward. During the freeze this will not be merged immediately,
-but a well-described feature request is useful groundwork — several phases in `docs/ROADMAP.md`
-started exactly as an issue-shaped idea.
+actually moves a design discussion forward. A well-described feature request is useful groundwork
+even before anyone builds it: several phases in `docs/ROADMAP.md` started exactly as an
+issue-shaped idea.
 
 ## Reporting a bug
 

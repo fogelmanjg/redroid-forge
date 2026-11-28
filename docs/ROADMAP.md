@@ -1117,7 +1117,12 @@ unaffected.
 2. Remove **all** the redroid code from `jg-dashboard` and `plenum-redroid` (only here, never before the
    Phase 7 gate), including the dead code of the `ws-scrcpy`/oauth2-proxy viewer. Decision (05/10/2026):
    that code stays on GitHub as an old project, dead and replaced by `redroid-forge`; nothing is ported as
-   compatibility.
+   compatibility. ✅ Done 28/11/2026, after every instance had run on `redroid-forge-prod` since
+   23/11. In `jg-dashboard`, its last state was committed and tagged `redroid-legacy-final`, with a
+   message explaining how to bring it back. Then `8fcb22c` removed the `remote/redroid` and
+   `remote/catalog` API modules and the Redroid tab; the tab that embeds redroid-forge stays. The 3
+   stopped legacy instances, their data volumes and their custom images were deleted from server01.
+   `plenum-redroid` needed nothing more: it was already archived read-only on GitHub.
 3. Write the definitive README/CONTRIBUTING/attribution, issue templates. ✅ Done 16/11/2026:
    `CONTRIBUTING.md` and `.github/ISSUE_TEMPLATE/` (bug report, feature request) are new; `README.md`
    (and `README.es.md`) no longer claim "no bundled web viewer yet" or cite the stale Phase 0-7/9 +
@@ -1126,6 +1131,10 @@ unaffected.
 
 **Gate:** the project is in a condition to be called **beta 0.9** — from here the donations/support
 mechanism is picked up again (section 8 of `REQUIREMENTS.md`), not before.
+
+✅ **Gate reached 28/11/2026.** All three steps are done, after a beta cycle (21-23/11) and six
+release candidates soaked in production. The release that marks it is `1.0.0`, on 02/12/2026, with
+the code of `1.0.0-rc.6`.
 
 ## Phase 11 — Embedded web viewer, own scrcpy-server protocol client
 
